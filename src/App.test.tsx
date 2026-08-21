@@ -2,20 +2,60 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
 
+const renderSignedIn = async () => {
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: /Continue with OpenKubes Identity/i }))
+  fireEvent.click(screen.getByRole('button', { name: /Simulate identity provider return/i }))
+  expect(await screen.findByRole('heading', { name: 'Identity verified' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /Enter Console/i }))
+  await screen.findByRole('button', { name: /Sign out of OpenKubes Console/i })
+}
+
 describe('OpenKubes Console', () => {
   beforeEach(() => { window.location.hash = '#/overview' })
 
-  it('renders the management plane first with evidence-backed status', async () => {
+  it('keeps protected platform content behind federated-first sign-in', async () => {
     render(<App />)
-    expect(await screen.findByText('Hello Arash')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Continue with OpenKubes Identity/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Use a local account/i })).toHaveTextContent(/Bootstrap \/ break-glass only/i)
+    expect(screen.queryByText('ok-mgmt')).not.toBeInTheDocument()
+  })
+
+  it('reviews a federated identity separately from authority and signs out safely', async () => {
+    await renderSignedIn()
+    expect(screen.getByText('Federated identity')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Sign out of OpenKubes Console/i }))
+    expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+    expect(screen.queryByText('ok-mgmt')).not.toBeInTheDocument()
+  })
+
+  it('guards local bootstrap access with a reason and explicit acknowledgement', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /Use a local account/i }))
+    expect(screen.getByRole('heading', { name: 'Bootstrap / break-glass' })).toBeInTheDocument()
+    const review = screen.getByRole('button', { name: /Review local session/i })
+    expect(review).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Local username'), { target: { value: 'bootstrap-admin' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'prototype-only' } })
+    fireEvent.change(screen.getByLabelText(/Operational reason/i), { target: { value: 'Federation is unavailable during recovery' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /time-bound and audited/i }))
+    expect(review).toBeEnabled()
+    fireEvent.click(review)
+    expect(await screen.findByRole('heading', { name: 'Review break-glass session' })).toBeInTheDocument()
+    expect(screen.getByText('Local bootstrap / break-glass')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('prototype-only')).not.toBeInTheDocument()
+  })
+
+  it('renders the management plane first with evidence-backed status', async () => {
+    await renderSignedIn()
     const managementMarkers = screen.getAllByText('Management plane')
     expect(managementMarkers.length).toBeGreaterThan(0)
     expect(screen.getAllByText('ok-mgmt').length).toBeGreaterThan(0)
   })
 
   it('exposes all curated product areas in navigation', async () => {
-    render(<App />)
-    await screen.findByText('Hello Arash')
+    await renderSignedIn()
     for (const label of ['Platform Overview', 'Clusters', 'Workloads', 'AI Agents', 'Capabilities', 'Evidence & Audit', 'Create Cluster', 'Register Existing Cluster']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
@@ -23,7 +63,7 @@ describe('OpenKubes Console', () => {
 
   it('keeps prototype authorization disabled until review is confirmed', async () => {
     window.location.hash = '#/create'
-    render(<App />)
+    await renderSignedIn()
     await screen.findByText('Declare cluster intent')
     fireEvent.click(screen.getByRole('button', { name: /Generate contract/i }))
     fireEvent.click(screen.getByRole('button', { name: /Continue to authorization/i }))
@@ -35,7 +75,7 @@ describe('OpenKubes Console', () => {
 
   it('opens a cluster-scoped shell and blocks mutating commands', async () => {
     window.location.hash = '#/clusters'
-    render(<App />)
+    await renderSignedIn()
     await screen.findByRole('heading', { name: 'Clusters' })
     fireEvent.click(screen.getByRole('button', { name: 'Open ok-mgmt' }))
     fireEvent.click(await screen.findByRole('button', { name: /Open Shell/i }))
@@ -56,7 +96,7 @@ describe('OpenKubes Console', () => {
 
   it('deploys a verified Agent only through a conformant Worker Cluster review', async () => {
     window.location.hash = '#/agents'
-    render(<App />)
+    await renderSignedIn()
     expect(await screen.findByRole('heading', { name: 'AI Agents' })).toBeInTheDocument()
     expect(screen.getByText('Kagent Platform Operator')).toBeInTheDocument()
 
@@ -81,7 +121,7 @@ describe('OpenKubes Console', () => {
 
   it('registers an existing cluster with external ownership and least authority', async () => {
     window.location.hash = '#/register'
-    render(<App />)
+    await renderSignedIn()
     expect(await screen.findByRole('heading', { name: 'Register Existing Cluster' })).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: /Outbound Connector/i })).toBeChecked()
     expect(screen.getByRole('radio', { name: /Upload kubeconfig/i })).toBeDisabled()

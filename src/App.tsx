@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import { consoleData } from './data/fixtureAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
 
@@ -401,6 +402,7 @@ function EvidenceDrawer({ item, close }: { item: EvidenceRef; close: () => void 
 }
 
 export default function App() {
+  const [session, setSession] = useState<PrototypeSession>()
   const [data, setData] = useState<PlatformSnapshot>()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [selectedCluster, setSelectedCluster] = useState<Cluster>()
@@ -408,7 +410,15 @@ export default function App() {
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRef>()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  useEffect(() => { consoleData.getSnapshot().then(setData) }, [])
+  useEffect(() => {
+    let active = true
+    if (!session) {
+      setData(undefined)
+      return () => { active = false }
+    }
+    consoleData.getSnapshot().then((snapshot) => active && setData(snapshot))
+    return () => { active = false }
+  }, [session])
   useEffect(() => {
     const onHash = () => {
       setPage(pageFromHash())
@@ -426,9 +436,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const title = useMemo(() => selectedCluster?.name ?? (page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster])
+  const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
+  if (!session) return <AuthEntry onAuthenticated={setSession}/>
   if (!data) return <EmptyLoading/>
   const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} close={() => setSelectedCluster(undefined)} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
 
@@ -440,12 +451,12 @@ export default function App() {
       <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}</nav>
       <div className="sidebar-spacer"/>
       <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div>
-      <div className="sidebar-footer"><div className="avatar">AK</div><span><strong>Arash Kaffamanesh</strong><small>Platform authority</small></span><button className="icon-button" aria-label="Account options">•••</button></div>
+      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{session.method === 'oidc' ? 'Federated identity' : 'Break-glass session'}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" onClick={() => { setSelectedCluster(undefined); setSelectedEvidence(undefined); setShellCluster(undefined); setSession(undefined); window.location.hash = '#/overview' }}>Sign out</button></div>
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="live-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
-      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153</span><span>{data.presentationVersion} · deterministic fixtures</span></footer></main>
+      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154</span><span>{data.presentationVersion} · deterministic fixtures</span></footer></main>
     </div>
     {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}
     {shellCluster && <ClusterShell cluster={shellCluster} close={() => setShellCluster(undefined)}/>}

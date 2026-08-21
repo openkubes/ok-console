@@ -14,6 +14,7 @@ import {
   overviewProjection,
   sessionProjection,
 } from './presentation.mjs'
+import { handleSessionHttp } from './security/httpSession.mjs'
 
 const ROUTE_PREFIX = '/api/console/v0'
 const DEFAULT_IDENTITY = {
@@ -146,11 +147,22 @@ export const createConsoleBffHandler = ({
   now = () => new Date(),
   correlationId = () => `corr-${randomUUID()}`,
   requestObserver = () => {},
+  sessionStore = null,
+  expectedOrigin,
 }) => async (request, response) => {
   const requestCorrelationId = correlationId()
   try {
     const url = new URL(request.url ?? '/', 'http://console.local')
     requestObserver({ method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
+    if (handleSessionHttp({
+      request,
+      response,
+      pathname: url.pathname,
+      correlationId: requestCorrelationId,
+      sessionStore,
+      expectedOrigin,
+    })) return
+
     if (request.method !== 'GET') {
       throw new ConsoleBffError(405, 'FORBIDDEN', 'The Console BFF exposes read-only GET resources only.')
     }

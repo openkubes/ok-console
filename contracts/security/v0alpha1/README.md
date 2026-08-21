@@ -34,3 +34,9 @@ session references, hardened cookie serialization, independent idle/absolute
 expiry, rotation, revocation and session-bound CSRF validation. Its in-memory
 store is deterministic implementation evidence only; it is not the selected
 production distributed session store and does not validate OIDC.
+
+The HTTP lifecycle boundary exposes only authenticated session inspection,
+rotation and logout. Rotation and logout require exact Origin plus the
+session-bound CSRF value. There is deliberately no unauthenticated session
+creation endpoint; issuance remains owned by a future reviewed identity
+verifier.

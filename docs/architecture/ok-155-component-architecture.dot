@@ -1,0 +1,150 @@
+digraph OpenKubesConsole {
+  graph [
+    label="OpenKubes Console — Component Architecture & Ownership\nOK-155 · First read-only vertical slice",
+    labelloc=t,
+    labeljust=l,
+    fontname="Helvetica Bold",
+    fontsize=25,
+    fontcolor="#172033",
+    bgcolor="#ffffff",
+    pad=0.35,
+    nodesep=0.42,
+    ranksep=0.68,
+    splines=ortho,
+    compound=true
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Helvetica",
+    fontsize=12,
+    fontcolor="#172033",
+    color="#cbd5e1",
+    fillcolor="#ffffff",
+    penwidth=1.2,
+    margin="0.16,0.10"
+  ];
+
+  edge [
+    fontname="Helvetica",
+    fontsize=10,
+    fontcolor="#526078",
+    color="#8b98aa",
+    penwidth=1.35,
+    arrowsize=0.72
+  ];
+
+  operator [label="Operator / Platform Engineer", fillcolor="#172033", fontcolor="#ffffff", color="#172033", width=3.0];
+
+  subgraph cluster_frontend {
+    label="DEVELOPER B · Console Frontend";
+    labelloc=t;
+    labeljust=l;
+    fontname="Helvetica Bold";
+    fontsize=14;
+    fontcolor="#0758c9";
+    color="#8bb8f3";
+    fillcolor="#eef6ff";
+    style="rounded,filled";
+    penwidth=1.5;
+    margin=20;
+
+    shell [label="App Shell\nNavigation · routing · layout", color="#4b8fe8"];
+    auth_ui [label="Auth & Session UI\nLocal / OIDC-ready states", color="#4b8fe8"];
+    views [label="Read-only Views\nOverview · Clusters · Evidence", color="#4b8fe8"];
+    states [label="UI State Model\nLoading · empty · error · stale", color="#4b8fe8"];
+    data_port [label="ConsoleDataPort\nTyped BFF adapter", fillcolor="#dcecff", color="#0758c9", penwidth=1.6];
+
+    {rank=same; shell; auth_ui}
+    {rank=same; views; states}
+    shell -> views [label="renders"];
+    auth_ui -> shell [label="session context"];
+    views -> data_port [label="typed queries"];
+    states -> views [label="view states"];
+  }
+
+  subgraph cluster_contract {
+    label="SHARED · Developer A + Developer B";
+    labelloc=t;
+    labeljust=l;
+    fontname="Helvetica Bold";
+    fontsize=14;
+    fontcolor="#a75400";
+    color="#f3b36b";
+    fillcolor="#fff6e8";
+    style="rounded,filled";
+    penwidth=1.5;
+    margin=20;
+
+    contract [label="Presentation Contract v0\nVersioned DTOs · stable examples", fillcolor="#ffead0", color="#e67d12", penwidth=1.6];
+    envelope [label="Response Envelope\nFreshness · correlation · compatibility", color="#e69747"];
+    errors [label="Error Taxonomy\nActionable · redaction-safe", color="#e69747"];
+    contract_tests [label="Consumer / Provider Contract Tests", color="#e69747"];
+
+    {rank=same; envelope; errors}
+    contract -> envelope;
+    contract -> errors;
+    envelope -> contract_tests;
+    errors -> contract_tests;
+  }
+
+  subgraph cluster_backend {
+    label="DEVELOPER A · Read-only Console BFF";
+    labelloc=t;
+    labeljust=l;
+    fontname="Helvetica Bold";
+    fontsize=14;
+    fontcolor="#16734a";
+    color="#7fcaa8";
+    fillcolor="#effaf4";
+    style="rounded,filled";
+    penwidth=1.5;
+    margin=20;
+
+    api [label="BFF API\nRead-only console endpoints", fillcolor="#dff6e9", color="#24945f", penwidth=1.6];
+    session [label="Session Context Projection\nIdentity · tenancy · permissions", color="#55ad80"];
+    queries [label="Query Services\nPlatform · clusters · evidence", color="#55ad80"];
+    normalize [label="Normalization & Redaction\nStable presentation model", color="#55ad80"];
+    adapter [label="OpenKubes Backend Adapter\nNo generic Kubernetes proxy", color="#55ad80"];
+
+    {rank=same; session; queries}
+    api -> session;
+    api -> queries;
+    queries -> normalize;
+    session -> normalize;
+    normalize -> adapter;
+  }
+
+  subgraph cluster_sources {
+    label="OBSERVED SOURCES";
+    labelloc=t;
+    labeljust=l;
+    fontname="Helvetica Bold";
+    fontsize=13;
+    fontcolor="#526078";
+    color="#cbd5e1";
+    fillcolor="#f7f9fc";
+    style="rounded,filled";
+    penwidth=1.2;
+    margin=18;
+
+    fixtures [label="Deterministic Fixtures", fillcolor="#ffffff"];
+    observed [label="OpenKubes Observed State", fillcolor="#ffffff"];
+    evidence [label="Redaction-safe Evidence References", fillcolor="#ffffff"];
+    {rank=same; fixtures; observed; evidence}
+  }
+
+  oidc [label="Deferred: real OIDC / BFF session", style="rounded,dashed,filled", fillcolor="#f7f9fc", color="#8b98aa", fontcolor="#526078"];
+  mutations [label="OUT OF SCOPE FOR OK-155\nCreate · Register · Agent deploy · Shell mutations", style="rounded,dashed,filled", fillcolor="#fff1f2", color="#de5b64", fontcolor="#9f2530"];
+
+  operator -> shell [label="uses", color="#0758c9"];
+  data_port -> contract [label="consumes", color="#e67d12", penwidth=1.7];
+  contract_tests -> api [label="verifies", color="#e67d12", penwidth=1.7];
+  api -> adapter [style=invis];
+  adapter -> fixtures;
+  adapter -> observed;
+  adapter -> evidence;
+  oidc -> auth_ui [style=dashed, label="future", color="#8b98aa"];
+  mutations -> api [style=dashed, label="later slices", color="#de5b64", dir=back];
+}

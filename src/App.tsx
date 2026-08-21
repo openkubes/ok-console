@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { consoleData } from './data/fixtureAdapter'
-import type { AgentDefinition, Capability, Cluster, EvidenceRef, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
+import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
 
-type Page = 'overview' | 'clusters' | 'workloads' | 'agents' | 'capabilities' | 'evidence' | 'create'
+type Page = 'overview' | 'clusters' | 'workloads' | 'agents' | 'capabilities' | 'evidence' | 'create' | 'register'
 type IconName = Page | 'search' | 'bell' | 'chevron' | 'shield' | 'cube' | 'arrow' | 'menu' | 'x' | 'check' | 'clock' | 'external' | 'code' | 'terminal' | 'spark'
 
 const NAV: Array<{ id: Page; label: string; caption: string }> = [
@@ -16,7 +16,7 @@ const NAV: Array<{ id: Page; label: string; caption: string }> = [
 
 const pageFromHash = (): Page => {
   const value = window.location.hash.replace('#/', '').split('/')[0] as Page
-  return [...NAV.map((item) => item.id), 'create'].includes(value) ? value : 'overview'
+  return [...NAV.map((item) => item.id), 'create', 'register'].includes(value) ? value : 'overview'
 }
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -28,6 +28,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     capabilities: <><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m13 5h3a2 2 0 0 0 2-2v-3"/><circle cx="12" cy="12" r="4"/></>,
     evidence: <><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13l2 2 4-5"/></>,
     create: <><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></>,
+    register: <><path d="M4 7.5 12 3l8 4.5-8 4.5-8-4.5Z"/><path d="M4 12l8 4.5 8-4.5M4 16.5l8 4.5 8-4.5"/><path d="M19 3v5M16.5 5.5h5"/></>,
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></>,
     chevron: <path d="m9 18 6-6-6-6"/>,
@@ -102,7 +103,7 @@ function Overview({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
 
 function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
   return <>
-    <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button>}/>
+    <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div>}/>
     <div className="filter-bar"><label className="search-field"><Icon name="search"/><span className="sr-only">Search clusters</span><input placeholder="Search clusters"/></label><button className="filter-chip active">All · {data.clusters.length}</button><button className="filter-chip">Ready · 2</button><button className="filter-chip">Attention · 2</button></div>
     <section className="table-panel">
       <div className="table-head cluster-columns"><span>Cluster</span><span>Role & profile</span><span>Provider</span><span>Readiness</span><span>Evidence</span><span/></div>
@@ -223,6 +224,78 @@ function CreateCluster() {
         <footer className="form-actions"><button className="secondary-button" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>{step < 4 ? <button className="primary-button" disabled={step === 2 && !confirmed} onClick={next}>{step === 0 ? 'Generate contract' : step === 1 ? 'Continue to authorization' : step === 2 ? 'Authorize prototype' : 'Simulate evidence'}<Icon name="arrow"/></button> : <button className="primary-button" onClick={() => { setStep(0); setConfirmed(false) }}>Start another draft</button>}</footer>
       </section>
       <aside className="panel guardrail-panel"><span className="eyebrow">Guardrails</span><h2>What this UI guarantees</h2><ul><li><Icon name="check"/>Intent stays distinct from state.</li><li><Icon name="check"/>Review precedes authorization.</li><li><Icon name="check"/>Grant binds to exact payload.</li><li><Icon name="check"/>Evidence does not invent readiness.</li><li><Icon name="check"/>Unknown compatibility fails closed.</li></ul><div className="contract-meta"><span>Presentation mapping</span><strong>console.openkubes.io/v0alpha1</strong><span>Supported domain contract</span><strong>platform.openkubes.io/v1alpha1</strong></div></aside>
+    </div>
+  </>
+}
+
+const registrationSteps = ['Connect', 'Discover', 'Scope', 'Review', 'Authorize', 'Evidence'] as const
+
+function RegisterCluster() {
+  const [step, setStep] = useState(0)
+  const [name, setName] = useState('external-production-eu')
+  const [environment, setEnvironment] = useState<ExternalClusterRegistrationDraft['environment']>('Production')
+  const [connection, setConnection] = useState<ExternalClusterConnection>('Agent')
+  const [managementMode, setManagementMode] = useState<ExternalClusterManagementMode>('ObserveOnly')
+  const [confirmed, setConfirmed] = useState(false)
+  const draft: ExternalClusterRegistrationDraft = {
+    apiVersion: 'clusters.openkubes.io/v1alpha1',
+    kind: 'ExternalClusterRegistration',
+    clusterName: name || 'external-cluster-name',
+    environment,
+    ownership: 'External',
+    connection,
+    managementMode,
+  }
+  const managementModeLabel = managementMode === 'ObserveOnly' ? 'Observe only' : managementMode === 'ManagedOperations' ? 'Managed operations' : 'Full adoption'
+  const contract = `apiVersion: ${draft.apiVersion}\nkind: ${draft.kind}\nmetadata:\n  name: ${draft.clusterName}\nspec:\n  ownership: ${draft.ownership}\n  environment: ${draft.environment}\n  connection:\n    type: ${draft.connection}\n    direction: ${draft.connection === 'Agent' ? 'Outbound' : 'Federated'}\n  managementMode: ${draft.managementMode}\n  identity:\n    joinKey: ${draft.clusterName}`
+  const next = () => setStep((current) => Math.min(current + 1, registrationSteps.length - 1))
+  const reset = () => { setStep(0); setConfirmed(false); setManagementMode('ObserveOnly') }
+  return <>
+    <PageTitle eyebrow="External fleet" title="Register Existing Cluster" description="Discover an existing Kubernetes cluster without silently taking lifecycle ownership." action={<span className="prototype-badge">Prototype · no connection</span>}/>
+    <ol className="stepper registration-stepper">{registrationSteps.map((item, index) => <li className={index === step ? 'active' : index < step ? 'done' : ''} key={item}><span>{index < step ? '✓' : index + 1}</span><strong>{item}</strong></li>)}</ol>
+    <div className="create-layout registration-layout">
+      <section className="panel create-main registration-main">
+        {step === 0 && <>
+          <div className="panel-title"><div><span className="eyebrow">Step 1 · Connection intent</span><h2>Identify the existing cluster</h2></div><span className="ownership-badge">External ownership</span></div>
+          <div className="form-grid"><label><span>Cluster identity</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Stable DNS-compatible join key from ADR-013</small></label><label><span>Environment</span><select value={environment} onChange={(event) => setEnvironment(event.target.value as ExternalClusterRegistrationDraft['environment'])}><option>Development</option><option>Staging</option><option>Production</option></select><small>Used for Policy and Evidence context</small></label></div>
+          <fieldset className="connection-fieldset"><legend>Connection method</legend><div className="connection-options">
+            <label className={connection === 'Agent' ? 'selected' : ''}><input type="radio" name="connection" checked={connection === 'Agent'} onChange={() => setConnection('Agent')}/><span className="connection-icon"><Icon name="register"/></span><span><strong>Outbound Connector</strong><small>Recommended · mTLS · no inbound firewall rule</small></span><em>Recommended</em></label>
+            <label className={connection === 'OIDC' ? 'selected' : ''}><input type="radio" name="connection" checked={connection === 'OIDC'} onChange={() => setConnection('OIDC')}/><span className="connection-icon"><Icon name="shield"/></span><span><strong>OIDC Federation</strong><small>Short-lived identity through an existing trust provider</small></span><em>Advanced</em></label>
+            <label className="disabled"><input type="radio" name="connection" disabled/><span className="connection-icon"><Icon name="code"/></span><span><strong>Upload kubeconfig</strong><small>Long-lived credentials are not accepted in the browser</small></span><em>Unavailable</em></label>
+          </div></fieldset>
+        </>}
+        {step === 1 && <>
+          <div className="panel-title"><div><span className="eyebrow">Step 2 · Read-only discovery</span><h2>Review discovered cluster facts</h2></div><span className="fixture-label"><span className="live-dot"/>Simulated fixture</span></div>
+          <div className="discovery-hero"><span className="cluster-symbol"><Icon name="cube" size={21}/></span><div><strong>{name}</strong><small>Existing upstream Kubernetes cluster</small></div><StatusBadge status="Ready"/></div>
+          <div className="discovery-grid"><div><span>Kubernetes</span><strong>v1.31.8</strong><small>Supported presentation</small></div><div><span>Nodes</span><strong>5</strong><small>3 control plane · 2 worker</small></div><div><span>Distribution</span><strong>Upstream</strong><small>Provider neutral</small></div><div><span>Endpoint</span><strong>Reachable</strong><small>Read-only probe</small></div></div>
+          <div className="capability-assessment"><div className="panel-title"><div><span className="eyebrow">Capability assessment</span><h3>Observed, not installed</h3></div></div><div><span><Icon name="check"/>StorageClass API</span><strong>Observed</strong></div><div><span><Icon name="check"/>Ingress API</span><strong>Observed</strong></div><div><span><Icon name="clock"/>OpenKubes Evidence</span><strong>Not enrolled</strong></div></div>
+          <div className="prototype-warning"><strong>No cluster was contacted.</strong> Discovery values are deterministic prototype fixtures and do not establish readiness.</div>
+        </>}
+        {step === 2 && <>
+          <div className="panel-title"><div><span className="eyebrow">Step 3 · Least authority</span><h2>Choose the management scope</h2></div></div>
+          <p className="section-intro">Registration does not transfer lifecycle ownership. Additional authority must be explicit, reviewable, and revocable.</p>
+          <div className="scope-options">
+            <label className={managementMode === 'ObserveOnly' ? 'selected' : ''}><input type="radio" name="management-mode" checked={managementMode === 'ObserveOnly'} onChange={() => setManagementMode('ObserveOnly')}/><span className="scope-icon read"><Icon name="evidence"/></span><span><strong>Observe only</strong><small>Inventory, Conditions, Capabilities, and redaction-safe Evidence</small></span><em>Recommended</em></label>
+            <label className={managementMode === 'ManagedOperations' ? 'selected' : ''}><input type="radio" name="management-mode" checked={managementMode === 'ManagedOperations'} onChange={() => setManagementMode('ManagedOperations')}/><span className="scope-icon approval"><Icon name="shield"/></span><span><strong>Managed operations</strong><small>Approved Day-2 operations through Review → Authorization → Execution</small></span><em>Explicit grants</em></label>
+            <label className="disabled"><input type="radio" name="management-mode" disabled/><span className="scope-icon blocked"><Icon name="x"/></span><span><strong>Full adoption</strong><small>Requires a separate lifecycle ownership and migration Contract</small></span><em>NO-GO</em></label>
+          </div>
+          <div className="permissions-note"><Icon name="shield"/><div><strong>Credential boundary</strong><p>No raw kubeconfig, cluster-admin role, or secret value enters the browser. Connection identity remains short-lived and independently revocable.</p></div></div>
+        </>}
+        {step === 3 && <>
+          <div className="panel-title"><div><span className="eyebrow">Step 4 · Exact artifact review</span><h2>Review ExternalClusterRegistration</h2></div><span className="digest">sha256:register…31d8</span></div>
+          <div className="review-summary"><div><span>Cluster</span><strong>{name}</strong></div><div><span>Ownership</span><strong>External</strong></div><div><span>Management</span><strong>{managementModeLabel}</strong></div></div>
+          <pre className="contract-preview registration-contract"><code>{contract}</code></pre>
+          <div className="no-go"><Icon name="shield"/><div><strong>NO-GO checks</strong><p>Unknown identity, unsupported Kubernetes version, stale discovery, expanded authority, changed payload digest, or missing server-side Policy prevents registration.</p></div></div>
+        </>}
+        {step === 4 && <>
+          <div className="authority-card"><div className="authority-icon"><Icon name="shield" size={32}/></div><span className="eyebrow">Step 5 · Authority boundary</span><h2>Authorize this exact registration artifact</h2><p>A production Console would bind a single-use grant to the reviewed payload digest. Registration writes only to the OpenKubes management plane and does not mutate the external cluster.</p><dl><div><dt>Operation</dt><dd>RegisterExternalCluster</dd></div><div><dt>Payload digest</dt><dd>sha256:register…31d8</dd></div><div><dt>Initial authority</dt><dd>{managementModeLabel}</dd></div></dl><label className="confirm-box"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/><span>I reviewed this exact ExternalClusterRegistration and its authority scope.</span></label><div className="prototype-warning"><strong>No request will be sent.</strong> This prototype creates no credential, connector, Secret, ProviderConfig, or backend resource.</div></div>
+        </>}
+        {step === 5 && <>
+          <div className="success-state registration-success"><span><Icon name="check" size={32}/></span><div className="eyebrow">Step 6 · Prototype Evidence</div><h2>Registration journey validated</h2><p>The external cluster remains externally owned. A production reconciliation would now expose current Conditions and correlated Evidence without inventing readiness.</p><div className="mock-receipt"><div><span>Cluster</span><strong>{name}</strong></div><div><span>Ownership</span><strong>External · unchanged</strong></div><div><span>Management</span><strong>{managementModeLabel}</strong></div><div><span>Correlation</span><strong>register/{name}/prototype-01</strong></div><div><span>Result</span><strong>Simulated only · no resource created</strong></div></div></div>
+        </>}
+        <footer className="form-actions"><button className="secondary-button" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>{step < 5 ? <button className="primary-button" disabled={(step === 0 && !name.trim()) || (step === 4 && !confirmed)} onClick={next}>{step === 0 ? 'Run safe discovery' : step === 1 ? 'Review management scope' : step === 2 ? 'Generate registration' : step === 3 ? 'Continue to authorization' : 'Authorize prototype'}<Icon name="arrow"/></button> : <button className="primary-button" onClick={reset}>Register another cluster</button>}</footer>
+      </section>
+      <aside className="panel guardrail-panel registration-guardrails"><span className="eyebrow">External cluster contract</span><h2>Ownership stays explicit</h2><ul><li><Icon name="check"/>Registration is not lifecycle adoption.</li><li><Icon name="check"/>Observe-only is the safe default.</li><li><Icon name="check"/>No browser kubeconfig upload.</li><li><Icon name="check"/>Authority remains revocable.</li><li><Icon name="check"/>Discovery never implies readiness.</li></ul><div className="contract-meta"><span>Presentation mapping</span><strong>console.openkubes.io/v0alpha1</strong><span>Candidate registration shape</span><strong>clusters.openkubes.io/v1alpha1</strong><span>Normative registration basis</span><strong>ADR-Platform-013</strong></div></aside>
     </div>
   </>
 }
@@ -353,11 +426,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const title = useMemo(() => selectedCluster?.name ?? (page === 'create' ? 'Create Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster])
+  const title = useMemo(() => selectedCluster?.name ?? (page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster])
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} close={() => setSelectedCluster(undefined)} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : <CreateCluster/>
+  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} close={() => setSelectedCluster(undefined)} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
@@ -366,7 +439,7 @@ export default function App() {
       <div className="context-switcher"><span className="context-mark">OK</span><span><small>Distribution</small><strong>OpenKubes Platform</strong></span><Icon name="chevron" size={15}/></div>
       <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}</nav>
       <div className="sidebar-spacer"/>
-      <a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a>
+      <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div>
       <div className="sidebar-footer"><div className="avatar">AK</div><span><strong>Arash Kaffamanesh</strong><small>Platform authority</small></span><button className="icon-button" aria-label="Account options">•••</button></div>
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}

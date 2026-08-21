@@ -88,6 +88,19 @@ export interface AgentDeployment {
   evidenceId: string
 }
 
+export type ExternalClusterConnection = 'Agent' | 'OIDC'
+export type ExternalClusterManagementMode = 'ObserveOnly' | 'ManagedOperations' | 'FullAdoption'
+
+export interface ExternalClusterRegistrationDraft {
+  apiVersion: 'clusters.openkubes.io/v1alpha1'
+  kind: 'ExternalClusterRegistration'
+  clusterName: string
+  environment: 'Development' | 'Staging' | 'Production'
+  ownership: 'External'
+  connection: ExternalClusterConnection
+  managementMode: ExternalClusterManagementMode
+}
+
 export interface PlatformSnapshot {
   generatedAt: string
   presentationVersion: typeof PRESENTATION_CONTRACT_VERSION

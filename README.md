@@ -53,6 +53,11 @@ pnpm build
   capability fit, tool authority, provenance, and a reviewable
   `AgentDeploymentClaim`; only Worker Clusters are eligible and `ok-mgmt` is never
   offered as a target. The flow creates no workload, API request, or backend state.
+- Register Existing Cluster is a guarded external-fleet prototype. It keeps lifecycle
+  ownership external, defaults to observe-only authority, rejects browser kubeconfig
+  upload, and previews a reviewable `ExternalClusterRegistration`. Discovery and
+  registration are deterministic simulations and create no connector, credential,
+  Secret, ProviderConfig, API request, or backend state.
 - Authentication, RBAC, live Kubernetes access, deployment, generic schema rendering,
   and AI-driven runtime adaptation are deliberately out of scope.
 
@@ -68,6 +73,7 @@ pnpm build
 | Operation invocation | explicitly disabled Create Cluster execution preview |
 | Diagnostic session | simulated Cluster Shell with read-only guardrails |
 | Agent placement | simulated `AgentDeploymentClaim` with capability and authority review |
+| External cluster registration | simulated `ExternalClusterRegistration` with explicit ownership and management scope |
 
 The supported presentation mapping is inspectable as
 `console.openkubes.io/v0alpha1`. Unknown compatibility remains read-only and no UI

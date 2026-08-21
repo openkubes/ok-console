@@ -16,7 +16,7 @@ describe('OpenKubes Console', () => {
   it('exposes all curated product areas in navigation', async () => {
     render(<App />)
     await screen.findByText('Hello Arash')
-    for (const label of ['Platform Overview', 'Clusters', 'Workloads', 'AI Agents', 'Capabilities', 'Evidence & Audit', 'Create Cluster']) {
+    for (const label of ['Platform Overview', 'Clusters', 'Workloads', 'AI Agents', 'Capabilities', 'Evidence & Audit', 'Create Cluster', 'Register Existing Cluster']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
   })
@@ -77,5 +77,30 @@ describe('OpenKubes Console', () => {
     fireEvent.click(simulate)
     expect(await screen.findByText('Deployment journey validated')).toBeInTheDocument()
     expect(screen.getByText(/No Agent, namespace, credential, workload, or backend resource was created/i)).toBeInTheDocument()
+  })
+
+  it('registers an existing cluster with external ownership and least authority', async () => {
+    window.location.hash = '#/register'
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Register Existing Cluster' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Outbound Connector/i })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /Upload kubeconfig/i })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /Run safe discovery/i }))
+    expect(await screen.findByText(/No cluster was contacted/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Review management scope/i }))
+    expect(screen.getByRole('radio', { name: /Observe only/i })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /Full adoption/i })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /Generate registration/i }))
+    expect(await screen.findByRole('heading', { name: /Review ExternalClusterRegistration/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Continue to authorization/i }))
+    const authorize = screen.getByRole('button', { name: /Authorize prototype/i })
+    expect(authorize).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: /I reviewed this exact ExternalClusterRegistration/i }))
+    expect(authorize).toBeEnabled()
+    fireEvent.click(authorize)
+    expect(await screen.findByRole('heading', { name: /Registration journey validated/i })).toBeInTheDocument()
+    expect(screen.getByText(/Simulated only · no resource created/i)).toBeInTheDocument()
   })
 })

@@ -26,3 +26,11 @@ closed. The evaluator never adds permissions and never extends a session.
 This contract does not issue a cookie, validate an OIDC token or select a
 session store. Those forcing implementation choices remain separate reviewed
 steps in OK-163.
+
+## Executable prototype boundary
+
+`bff/security/session.mjs` now implements the contract with hashed opaque
+session references, hardened cookie serialization, independent idle/absolute
+expiry, rotation, revocation and session-bound CSRF validation. Its in-memory
+store is deterministic implementation evidence only; it is not the selected
+production distributed session store and does not validate OIDC.

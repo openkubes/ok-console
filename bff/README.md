@@ -40,9 +40,13 @@ closed; there is no generic Kubernetes proxy and no mutation endpoint.
   observation hook.
 - `presentation.mjs` maps observed state through explicit allowlists. It never
   spreads backend objects into responses.
-- `adapters/fixtureObservedState.mjs` is the first controlled observed-state
-  adapter. A production adapter can replace it without changing HTTP or browser
-  contracts.
+- `adapters/fixtureObservedState.mjs` is the deterministic local/test source.
+- `adapters/openKubesObservedState.mjs` queries a controlled OpenKubes HTTP(S)
+  endpoint and immediately normalizes the response through an explicit
+  allowlist. Unknown backend and Kubernetes fields never enter the canonical
+  BFF snapshot.
+- `source.mjs` selects the source explicitly at process startup. It never falls
+  back silently after a real-source failure.
 - `contract.mjs` provides producer response helpers and a final recursive
   credential-field guard.
 
@@ -70,6 +74,37 @@ Append one of these query values to a resource:
 | `?failure=incompatible` | fail-closed `502 CONTRACT_INCOMPATIBLE` |
 
 Do not enable this switch in a shared or production environment.
+
+## OpenKubes observed-state mode
+
+The real-source path consumes the versioned read-only query envelope
+`observed.openkubes.io/v0alpha1` / `ConsoleObservedState`. Configure the BFF
+process—not the browser—with:
+
+```bash
+OK_CONSOLE_OBSERVED_STATE_MODE=openkubes \
+OK_CONSOLE_OBSERVED_STATE_URL=https://platform.example/api/console-observed-state/v0alpha1 \
+OK_CONSOLE_OBSERVED_STATE_TIMEOUT_MS=5000 \
+OK_CONSOLE_OBSERVED_STATE_STALE_AFTER_MS=300000 \
+pnpm start:bff
+```
+
+Only HTTPS endpoints are accepted outside loopback; embedded URL credentials
+and redirects are rejected. The adapter uses GET with the versioned JSON
+profile, a bounded timeout and a streaming 2 MiB response limit. It
+requires exactly one management plane, validates readiness enums and Evidence
+references, derives freshness locally, and converts upstream partial status to
+a safe `PARTIAL_DATA` warning. Upstream diagnostic text is never forwarded.
+
+Authentication for the upstream query is deliberately not invented here; it is
+part of OK-163. Until that boundary exists, use this mode only in a controlled
+network integration environment.
+
+### Explicit rollback to fixtures
+
+Stop the BFF, set `OK_CONSOLE_OBSERVED_STATE_MODE=fixture`, and restart it. A
+real-source outage produces a retryable, redaction-safe `SOURCE_UNAVAILABLE`
+response and does not silently show fixture data as if it were current reality.
 
 ## Verification
 

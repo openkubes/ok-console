@@ -10,6 +10,11 @@ The canonical source lives at
 
 > **Contracts. Clusters. Evidence.**
 
+[![OpenKubes Console showing the Platform Overview with cluster posture, workload claims, and evidence-backed readiness](docs/images/openkubes-console-overview.jpg)](docs/images/openkubes-console-overview.jpg)
+
+_The curated OpenKubes Platform Overview — contract-centered, evidence-first, and
+designed for sovereign fleets._
+
 ## Run locally
 
 Prerequisites: Node.js 20 or newer and pnpm 9 or newer.

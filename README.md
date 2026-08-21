@@ -3,7 +3,9 @@
 This repository contains the curated, frontend-only OpenKubes Platform Console
 prototype from
 [OK-153](https://kubernauts.atlassian.net/browse/OK-153), following the graphical
-spike in OK-151 and the boundaries proposed in ADR-Platform-036.
+spike in OK-151 and the boundaries proposed in ADR-Platform-036. The guarded
+authentication entry prototype is tracked in
+[OK-154](https://kubernauts.atlassian.net/browse/OK-154) and ADR-Platform-037.
 
 The canonical source lives at
 [`openkubes/ok-console`](https://github.com/openkubes/ok-console).
@@ -63,8 +65,13 @@ pnpm build
   upload, and previews a reviewable `ExternalClusterRegistration`. Discovery and
   registration are deterministic simulations and create no connector, credential,
   Secret, ProviderConfig, API request, or backend state.
-- Authentication, RBAC, live Kubernetes access, deployment, generic schema rendering,
-  and AI-driven runtime adaptation are deliberately out of scope.
+- Authentication entry is an in-memory interaction prototype. OIDC is the preferred
+  route and the local account path is explicitly bootstrap/break-glass only. Neither
+  flow sends a request, creates a token or cookie, validates a credential, or persists
+  session material in browser storage.
+- Production authentication, RBAC, MFA, account recovery, live Kubernetes access,
+  deployment, generic schema rendering, and AI-driven runtime adaptation are
+  deliberately out of scope.
 
 ## Architecture seams
 
@@ -79,6 +86,7 @@ pnpm build
 | Diagnostic session | simulated Cluster Shell with read-only guardrails |
 | Agent placement | simulated `AgentDeploymentClaim` with capability and authority review |
 | External cluster registration | simulated `ExternalClusterRegistration` with explicit ownership and management scope |
+| Authentication entry | federated-first OIDC and guarded local break-glass simulations with in-memory session state |
 
 The supported presentation mapping is inspectable as
 `console.openkubes.io/v0alpha1`. Unknown compatibility remains read-only and no UI

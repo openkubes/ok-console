@@ -39,9 +39,10 @@ Then complete the prototype OIDC journey and verify the pages at desktop and
 compact viewports. Automated coverage is provided by `pnpm lint`, `pnpm test`,
 `pnpm test:contract`, and `pnpm build`.
 
-## Remaining integration boundary
+## Integration boundary — completed by OK-158
 
 This evidence validates the Console-owned adapter, responsive presentation, and
-failure behavior. End-to-end validation against Developer A's real OK-158 Console
-BFF remains an integration activity after its endpoint is available and the
-shared OK-160 Presentation Contract handshake is complete.
+failure behavior. PR #8 subsequently added the executable OK-158 Console BFF and
+a real HTTP vertical-slice test through `BffConsoleAdapter`. The shared OK-160
+Presentation Contract was provisionally accepted under its recorded governance
+exception; the formal spike outcome is recorded in OK-161.

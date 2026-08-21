@@ -1,0 +1,31 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "EvidenceReference",
+  "data": {
+    "id": "ev-ai-ready",
+    "title": "AI cluster capability conformance",
+    "type": "Observation",
+    "outcome": "Ready",
+    "clusterId": "cluster-ok-ai",
+    "contract": "CapabilitySet/v1alpha1",
+    "revision": "sha256:e503…14cf",
+    "observedAt": "2026-08-21T17:59:30Z",
+    "source": "capability observer",
+    "summary": "Storage, ingress and observability contracts are currently conformant.",
+    "classification": "Current",
+    "redacted": true,
+    "drillDownRef": "/api/console/v0/evidence/ev-ai-ready"
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-evidence-0001",
+    "observedAt": "2026-08-21T17:59:30Z",
+    "freshness": "Current",
+    "warnings": [
+      {
+        "code": "REDACTED",
+        "message": "Private evidence payload is not included in the presentation response."
+      }
+    ]
+  }
+}

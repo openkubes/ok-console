@@ -1,0 +1,19 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "Error",
+  "error": {
+    "code": "CONTRACT_INCOMPATIBLE",
+    "message": "The observed platform response is not compatible with this Console contract.",
+    "retryable": false,
+    "details": [
+      {
+        "field": "apiVersion",
+        "reason": "No supported compatibility mapping is available."
+      }
+    ]
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-error-0002"
+  }
+}

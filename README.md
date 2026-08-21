@@ -41,8 +41,21 @@ pnpm preview
 ```bash
 pnpm lint
 pnpm test
+pnpm test:contract
 pnpm build
 ```
+
+## Presentation Contract
+
+The first read-only Console/BFF boundary is tracked by
+[OK-160](https://kubernauts.atlassian.net/browse/OK-160). Its candidate
+`console.openkubes.io/v0alpha1` JSON Schema, TypeScript types, runtime validation,
+stable success/error examples, compatibility behavior, and redaction rules live
+in [`contracts/presentation/v0alpha1`](contracts/presentation/v0alpha1).
+
+This contract is intentionally product-oriented: the browser consumes Session,
+Overview, Cluster, and Evidence-reference projections, never raw Kubernetes
+resources or a generic backend proxy.
 
 ## Prototype boundaries
 
@@ -77,7 +90,7 @@ pnpm build
 
 | ADR-036 concern | Prototype location |
 |---|---|
-| Domain/presentation shapes | `src/domain/contracts.ts` |
+| Domain/presentation shapes | `src/domain/contracts.ts` and `contracts/presentation/v0alpha1` |
 | Observed state | `Cluster.lifecycle` and `Readiness` |
 | Evidence projection | `EvidenceRef` and Evidence drawer |
 | Presentation mapping | curated React views and design tokens |

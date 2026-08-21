@@ -1,0 +1,14 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "Error",
+  "error": {
+    "code": "SOURCE_UNAVAILABLE",
+    "message": "Cluster observations are temporarily unavailable.",
+    "retryable": true,
+    "retryAfterSeconds": 15
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-error-0001"
+  }
+}

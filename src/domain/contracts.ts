@@ -1,7 +1,14 @@
-export const PRESENTATION_CONTRACT_VERSION = 'console.openkubes.io/v0alpha1' as const
+export {
+  PRESENTATION_CONTRACT_VERSION,
+  type Compatibility,
+  type Readiness,
+} from './presentationContract'
 
-export type Readiness = 'Ready' | 'Pending' | 'Failed' | 'Unknown'
-export type Compatibility = 'Supported' | 'Read only' | 'Incompatible'
+import {
+  PRESENTATION_CONTRACT_VERSION,
+  type Compatibility,
+  type Readiness,
+} from './presentationContract'
 
 export interface EvidenceRef {
   id: string

@@ -1,0 +1,23 @@
+{
+  "apiVersion": "auth.console.openkubes.io/v0alpha1",
+  "kind": "ConsoleSession",
+  "data": {
+    "subject": {
+      "id": "subject-01K34",
+      "displayName": "Arash Kaffamanesh",
+      "provider": "OpenKubes Identity",
+      "method": "OIDC",
+      "assurance": ["pwd", "mfa"]
+    },
+    "scope": {
+      "environmentId": "community-preview",
+      "tenantIds": ["tenant-platform"]
+    },
+    "permissions": ["platform.read", "clusters.read", "evidence.read"],
+    "session": {
+      "issuedAt": "2026-08-21T19:00:00Z",
+      "idleExpiresAt": "2026-08-21T19:15:00Z",
+      "absoluteExpiresAt": "2026-08-21T20:00:00Z"
+    }
+  }
+}

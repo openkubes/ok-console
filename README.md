@@ -74,6 +74,11 @@ read-only implementation phase—not production readiness. The decision, risks,
 follow-ups and ADR disposition are recorded in
 [`docs/evidence/ok-161`](docs/evidence/ok-161/README.md).
 
+The OK-163 security work begins with a versioned, fail-closed session and
+authorization contract plus an explicit
+[`threat model`](docs/security/ok-163-threat-model.md). These artifacts do not
+turn the graphical login simulation into production authentication.
+
 ```bash
 pnpm lint
 pnpm test

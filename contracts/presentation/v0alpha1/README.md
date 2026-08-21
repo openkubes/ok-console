@@ -1,6 +1,7 @@
 # OpenKubes Console Presentation Contract v0alpha1
 
-Status: **candidate for the OK-160 Developer A/B handshake**.
+Status: **implemented by both consumer and provider; pending the final OK-160
+Developer A/B handshake**.
 
 This directory is the version-controlled boundary between the Console browser
 and its read-only Backend-for-Frontend (BFF). It models OpenKubes product views;
@@ -13,6 +14,8 @@ it is deliberately not a Kubernetes API, provider API, or generic object proxy.
 - TypeScript model and tolerant runtime validation:
   [`src/domain/presentationContract.ts`](../../../src/domain/presentationContract.ts)
 - Stable payloads: [`examples/`](examples)
+- Read-only BFF provider: [`bff/`](../../../bff)
+- Provider tests: [`bff/app.test.ts`](../../../bff/app.test.ts)
 - Jira handshake: [OK-160](https://kubernauts.atlassian.net/browse/OK-160)
 - Living specification:
   [Presentation Contract v0](https://kubernauts.atlassian.net/wiki/spaces/OpenKubes/pages/3142058015)

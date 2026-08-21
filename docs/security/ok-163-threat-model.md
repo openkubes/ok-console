@@ -45,5 +45,13 @@ login simulation is excluded from the trusted computing base.
 6. Break-glass hashing parameters, MFA, credential custody and offline recovery.
 7. Audit/Evidence retention and privacy access policy.
 
+## Implemented evidence
+
+The first server-side session slice covers opaque cookie references, hashed
+store keys, rotation, shorter exceptional-session expiry, idle and absolute
+expiry, revocation, cookie-smuggling rejection and origin-plus-token CSRF
+checks. The current store is in-memory and therefore deliberately not accepted
+for multi-replica production use or durable revocation.
+
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

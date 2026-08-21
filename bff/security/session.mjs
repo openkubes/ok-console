@@ -4,27 +4,27 @@ import { SECURITY_CONTRACT_VERSION, authorizeSecurityContext } from './authoriza
 export const SESSION_COOKIE = '__Host-ok_console_session'
 export const CSRF_COOKIE = '__Host-ok_console_csrf'
 
-const digest = (value) => createHash('sha256').update(value).digest('base64url')
-const opaqueValue = (bytes = randomBytes) => bytes(32).toString('base64url')
-const iso = (milliseconds) => new Date(milliseconds).toISOString()
+export const digestSessionValue = (value) => createHash('sha256').update(value).digest('base64url')
+export const opaqueSessionValue = (bytes = randomBytes) => bytes(32).toString('base64url')
+export const sessionTimestamp = (milliseconds) => new Date(milliseconds).toISOString()
 
-const lifetimesFor = (method) => method === 'OIDC'
+export const sessionLifetimesFor = (method) => method === 'OIDC'
   ? { idleMs: 15 * 60 * 1_000, absoluteMs: 60 * 60 * 1_000 }
   : { idleMs: 5 * 60 * 1_000, absoluteMs: 15 * 60 * 1_000 }
 
-const validString = (value) => typeof value === 'string' && value.length > 0 && value.length <= 512
-const validStringArray = (value) => Array.isArray(value) && value.every(validString)
+export const validSessionString = (value) => typeof value === 'string' && value.length > 0 && value.length <= 512
+const validStringArray = (value) => Array.isArray(value) && value.length <= 512 && value.every(validSessionString)
 
-const validateCreationInput = ({ subject, scope, permissions }) => {
+export const validateSessionCreationInput = ({ subject, scope, permissions }) => {
   if (!subject
-    || !validString(subject.id)
-    || !validString(subject.providerId)
-    || !validString(subject.subjectId)
-    || !validString(subject.displayName)
+    || !validSessionString(subject.id)
+    || !validSessionString(subject.providerId)
+    || !validSessionString(subject.subjectId)
+    || !validSessionString(subject.displayName)
     || !['OIDC', 'BreakGlass', 'Bootstrap'].includes(subject.method)
     || !validStringArray(subject.assurance)
     || !scope
-    || !validString(scope.environmentId)
+    || !validSessionString(scope.environmentId)
     || !validStringArray(scope.tenantIds)
     || !validStringArray(permissions)) {
     throw new Error('Session creation input is invalid.')
@@ -91,28 +91,28 @@ export class InMemorySessionStore {
   }
 
   create({ subject, scope, permissions }) {
-    validateCreationInput({ subject, scope, permissions })
+    validateSessionCreationInput({ subject, scope, permissions })
     const method = subject?.method
     const currentTime = this.now().getTime()
-    const lifetime = lifetimesFor(method)
-    const sessionId = opaqueValue(this.random)
-    const csrfToken = opaqueValue(this.random)
+    const lifetime = sessionLifetimesFor(method)
+    const sessionId = opaqueSessionValue(this.random)
+    const csrfToken = opaqueSessionValue(this.random)
     const context = {
       apiVersion: SECURITY_CONTRACT_VERSION,
       kind: 'AuthorizationContext',
-      sessionId: `sha256:${digest(sessionId)}`,
+      sessionId: `sha256:${digestSessionValue(sessionId)}`,
       subject: structuredClone(subject),
       scope: structuredClone(scope),
       permissions: [...permissions],
       session: {
-        issuedAt: iso(currentTime),
-        idleExpiresAt: iso(currentTime + lifetime.idleMs),
-        absoluteExpiresAt: iso(currentTime + lifetime.absoluteMs),
+        issuedAt: sessionTimestamp(currentTime),
+        idleExpiresAt: sessionTimestamp(currentTime + lifetime.idleMs),
+        absoluteExpiresAt: sessionTimestamp(currentTime + lifetime.absoluteMs),
       },
-      csrfDigest: digest(csrfToken),
+      csrfDigest: digestSessionValue(csrfToken),
       idleLifetimeMs: lifetime.idleMs,
     }
-    this.sessions.set(digest(sessionId), context)
+    this.sessions.set(digestSessionValue(sessionId), context)
     return {
       cookie: sessionCookie(sessionId, Math.floor(lifetime.absoluteMs / 1_000)),
       csrfCookie: csrfCookie(csrfToken, Math.floor(lifetime.absoluteMs / 1_000)),
@@ -124,7 +124,7 @@ export class InMemorySessionStore {
   resolve(cookieHeader, { touch = true } = {}) {
     const sessionId = readSessionCookie(cookieHeader)
     if (!sessionId) return null
-    const key = digest(sessionId)
+    const key = digestSessionValue(sessionId)
     const context = this.sessions.get(key)
     if (!context) return null
     const currentTime = this.now().getTime()
@@ -133,7 +133,7 @@ export class InMemorySessionStore {
       return null
     }
     if (touch) {
-      context.session.idleExpiresAt = iso(Math.min(currentTime + context.idleLifetimeMs, Date.parse(context.session.absoluteExpiresAt)))
+      context.session.idleExpiresAt = sessionTimestamp(Math.min(currentTime + context.idleLifetimeMs, Date.parse(context.session.absoluteExpiresAt)))
     }
     return structuredClone(context)
   }
@@ -141,16 +141,16 @@ export class InMemorySessionStore {
   rotate(cookieHeader) {
     const sessionId = readSessionCookie(cookieHeader)
     if (!sessionId) return null
-    const oldKey = digest(sessionId)
+    const oldKey = digestSessionValue(sessionId)
     const context = this.sessions.get(oldKey)
     if (!context || !this.resolve(cookieHeader, { touch: false })) return null
-    const newSessionId = opaqueValue(this.random)
-    const csrfToken = opaqueValue(this.random)
+    const newSessionId = opaqueSessionValue(this.random)
+    const csrfToken = opaqueSessionValue(this.random)
     const rotated = structuredClone(context)
-    rotated.sessionId = `sha256:${digest(newSessionId)}`
-    rotated.csrfDigest = digest(csrfToken)
+    rotated.sessionId = `sha256:${digestSessionValue(newSessionId)}`
+    rotated.csrfDigest = digestSessionValue(csrfToken)
     this.sessions.delete(oldKey)
-    this.sessions.set(digest(newSessionId), rotated)
+    this.sessions.set(digestSessionValue(newSessionId), rotated)
     const remainingSeconds = Math.max(0, Math.floor((Date.parse(rotated.session.absoluteExpiresAt) - this.now().getTime()) / 1_000))
     return {
       cookie: sessionCookie(newSessionId, remainingSeconds),
@@ -163,7 +163,7 @@ export class InMemorySessionStore {
   revoke(cookieHeader) {
     const sessionId = readSessionCookie(cookieHeader)
     if (!sessionId) return false
-    const context = this.sessions.get(digest(sessionId))
+    const context = this.sessions.get(digestSessionValue(sessionId))
     if (!context) return false
     context.session.revokedAt = this.now().toISOString()
     return true
@@ -180,11 +180,11 @@ export class InMemorySessionStore {
 export const validateCsrf = ({ method, origin, expectedOrigin, token, context }) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return true
   if (!context
-    || !validString(origin)
-    || !validString(expectedOrigin)
+    || !validSessionString(origin)
+    || !validSessionString(expectedOrigin)
     || origin !== expectedOrigin
     || typeof token !== 'string') return false
-  const actual = Buffer.from(digest(token))
+  const actual = Buffer.from(digestSessionValue(token))
   const expected = Buffer.from(context.csrfDigest ?? '')
   return actual.length === expected.length && timingSafeEqual(actual, expected)
 }

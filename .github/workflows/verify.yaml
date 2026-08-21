@@ -16,6 +16,21 @@ jobs:
   console:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: ok_console_test
+          POSTGRES_PASSWORD: ok_console_test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ok_console_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      OK_CONSOLE_TEST_POSTGRES_URL: postgresql://postgres:ok_console_test_only@127.0.0.1:5432/ok_console_test
     steps:
       - uses: actions/checkout@v4
         with:

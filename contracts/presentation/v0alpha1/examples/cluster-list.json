@@ -1,0 +1,51 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "ClusterList",
+  "data": {
+    "items": [
+      {
+        "id": "cluster-ok-mgmt",
+        "name": "ok-mgmt",
+        "role": "Management plane",
+        "provider": "Bare metal",
+        "profile": "Talos management",
+        "kubernetesVersion": "v1.32.6",
+        "region": "fra-dc1",
+        "readiness": "Ready",
+        "compatibility": "Supported",
+        "contractVersion": "platform.openkubes.io/v1alpha1",
+        "revision": "rev-7d2a9c",
+        "evidenceId": "ev-mgmt-ready",
+        "capabilityCount": 4
+      },
+      {
+        "id": "cluster-edge-07",
+        "name": "edge-07",
+        "role": "Workload cluster",
+        "provider": "Bare metal",
+        "profile": "Constrained edge",
+        "kubernetesVersion": "v1.30.12",
+        "region": "factory-07",
+        "readiness": "Unknown",
+        "compatibility": "Read only",
+        "contractVersion": "platform.openkubes.io/v1alpha0",
+        "revision": "rev-88e913",
+        "evidenceId": "ev-edge-unknown",
+        "capabilityCount": 2
+      }
+    ]
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-clusters-0001",
+    "observedAt": "2026-08-21T18:00:00Z",
+    "freshness": "Stale",
+    "sourceRevision": "clusters:observed:42",
+    "warnings": [
+      {
+        "code": "SOURCE_STALE",
+        "message": "One cluster is outside its observation freshness window."
+      }
+    ]
+  }
+}

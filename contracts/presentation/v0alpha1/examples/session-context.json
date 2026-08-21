@@ -1,0 +1,25 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "SessionContext",
+  "data": {
+    "subject": {
+      "id": "user-arash",
+      "displayName": "Arash Kaffamanesh",
+      "identitySource": "Local",
+      "assurance": "Prototype"
+    },
+    "environment": {
+      "id": "community-preview",
+      "displayName": "Community preview"
+    },
+    "permissions": ["platform.read", "clusters.read", "evidence.read"],
+    "expiresAt": "2026-08-21T20:00:00Z"
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-session-0001",
+    "observedAt": "2026-08-21T18:00:00Z",
+    "freshness": "Current",
+    "sourceRevision": "session:prototype:17"
+  }
+}

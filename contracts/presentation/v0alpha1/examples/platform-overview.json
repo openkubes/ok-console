@@ -1,0 +1,41 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "PlatformOverview",
+  "data": {
+    "clusters": { "total": 4, "ready": 2, "pending": 1, "failed": 0, "unknown": 1 },
+    "capabilities": { "total": 7, "ready": 5, "pending": 2, "failed": 0, "unknown": 0 },
+    "workloadClaims": { "total": 3, "ready": 1, "pending": 2, "failed": 0, "unknown": 0 },
+    "openFindings": { "total": 2, "critical": 0 },
+    "managementPlane": {
+      "id": "cluster-ok-mgmt",
+      "name": "ok-mgmt",
+      "role": "Management plane",
+      "provider": "Bare metal",
+      "profile": "Talos management",
+      "kubernetesVersion": "v1.32.6",
+      "region": "fra-dc1",
+      "readiness": "Ready",
+      "compatibility": "Supported",
+      "contractVersion": "platform.openkubes.io/v1alpha1",
+      "revision": "rev-7d2a9c",
+      "evidenceId": "ev-mgmt-ready",
+      "capabilityCount": 4
+    },
+    "recentPlacements": [
+      {
+        "id": "claim-private-ai",
+        "name": "private-ai-workspace",
+        "targetCluster": "ok-ai",
+        "readiness": "Ready",
+        "evidenceId": "ev-ai-ready"
+      }
+    ]
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-overview-0001",
+    "observedAt": "2026-08-21T18:00:00Z",
+    "freshness": "Current",
+    "sourceRevision": "platform:observed:42"
+  }
+}

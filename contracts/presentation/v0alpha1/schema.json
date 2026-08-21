@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkubes.io/contracts/console/v0alpha1/schema.json",
+  "title": "OpenKubes Console Presentation Contract v0alpha1",
+  "description": "Read-only presentation responses exchanged between the OpenKubes Console BFF and browser.",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionContextResponse" },
+    { "$ref": "#/$defs/platformOverviewResponse" },
+    { "$ref": "#/$defs/clusterListResponse" },
+    { "$ref": "#/$defs/clusterDetailResponse" },
+    { "$ref": "#/$defs/evidenceReferenceResponse" },
+    { "$ref": "#/$defs/errorResponse" }
+  ],
+  "$defs": {
+    "apiVersion": {
+      "const": "console.openkubes.io/v0alpha1"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "readiness": {
+      "enum": ["Ready", "Pending", "Failed", "Unknown"]
+    },
+    "compatibility": {
+      "enum": ["Supported", "Read only", "Incompatible"]
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "enum": ["PARTIAL_DATA", "SOURCE_STALE", "REDACTED"] },
+        "message": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "responseMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "correlationId", "observedAt", "freshness"],
+      "properties": {
+        "contractVersion": { "$ref": "#/$defs/apiVersion" },
+        "correlationId": { "$ref": "#/$defs/nonEmptyString" },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "freshness": { "enum": ["Current", "Stale", "Unknown"] },
+        "sourceRevision": { "$ref": "#/$defs/nonEmptyString" },
+        "warnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/warning" }
+        }
+      }
+    },
+    "errorMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "correlationId"],
+      "properties": {
+        "contractVersion": { "$ref": "#/$defs/apiVersion" },
+        "correlationId": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "statusCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "ready", "pending", "failed", "unknown"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "ready": { "type": "integer", "minimum": 0 },
+        "pending": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "unknown": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "clusterSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "role",
+        "provider",
+        "profile",
+        "kubernetesVersion",
+        "region",
+        "readiness",
+        "compatibility",
+        "contractVersion",
+        "revision",
+        "evidenceId",
+        "capabilityCount"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "name": { "$ref": "#/$defs/nonEmptyString" },
+        "role": { "enum": ["Management plane", "Workload cluster"] },
+        "provider": { "$ref": "#/$defs/nonEmptyString" },
+        "profile": { "$ref": "#/$defs/nonEmptyString" },
+        "kubernetesVersion": { "$ref": "#/$defs/nonEmptyString" },
+        "region": { "$ref": "#/$defs/nonEmptyString" },
+        "readiness": { "$ref": "#/$defs/readiness" },
+        "compatibility": { "$ref": "#/$defs/compatibility" },
+        "contractVersion": { "$ref": "#/$defs/nonEmptyString" },
+        "revision": { "$ref": "#/$defs/nonEmptyString" },
+        "evidenceId": { "$ref": "#/$defs/nonEmptyString" },
+        "capabilityCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "sessionContextData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "environment", "permissions", "expiresAt"],
+      "properties": {
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "displayName", "identitySource", "assurance"],
+          "properties": {
+            "id": { "$ref": "#/$defs/nonEmptyString" },
+            "displayName": { "$ref": "#/$defs/nonEmptyString" },
+            "identitySource": { "enum": ["Local", "OIDC"] },
+            "assurance": { "enum": ["Prototype", "Federated", "Break glass"] }
+          }
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "displayName"],
+          "properties": {
+            "id": { "$ref": "#/$defs/nonEmptyString" },
+            "displayName": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        },
+        "expiresAt": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "platformOverviewData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clusters", "capabilities", "workloadClaims", "openFindings", "managementPlane", "recentPlacements"],
+      "properties": {
+        "clusters": { "$ref": "#/$defs/statusCount" },
+        "capabilities": { "$ref": "#/$defs/statusCount" },
+        "workloadClaims": { "$ref": "#/$defs/statusCount" },
+        "openFindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total", "critical"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "critical": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "managementPlane": { "$ref": "#/$defs/clusterSummary" },
+        "recentPlacements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "targetCluster", "readiness", "evidenceId"],
+            "properties": {
+              "id": { "$ref": "#/$defs/nonEmptyString" },
+              "name": { "$ref": "#/$defs/nonEmptyString" },
+              "targetCluster": { "$ref": "#/$defs/nonEmptyString" },
+              "readiness": { "$ref": "#/$defs/readiness" },
+              "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+            }
+          }
+        }
+      }
+    },
+    "clusterDetailData": {
+      "allOf": [
+        { "$ref": "#/$defs/clusterSummary" },
+        {
+          "type": "object",
+          "required": ["capabilities", "lifecycle"],
+          "properties": {
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "name", "readiness", "evidenceId"],
+                "properties": {
+                  "id": { "$ref": "#/$defs/nonEmptyString" },
+                  "name": { "$ref": "#/$defs/nonEmptyString" },
+                  "readiness": { "$ref": "#/$defs/readiness" },
+                  "evidenceId": { "$ref": "#/$defs/nonEmptyString" }
+                }
+              }
+            },
+            "lifecycle": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["label", "state", "detail"],
+                "properties": {
+                  "label": { "$ref": "#/$defs/nonEmptyString" },
+                  "state": { "$ref": "#/$defs/readiness" },
+                  "detail": { "$ref": "#/$defs/nonEmptyString" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidenceReferenceData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "type", "outcome", "clusterId", "contract", "revision", "observedAt", "source", "summary", "classification", "redacted"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "title": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "enum": ["Observation", "Transition", "Authorization"] },
+        "outcome": { "enum": ["Ready", "Pending", "Failed", "Unknown", "Approved", "Denied"] },
+        "clusterId": { "$ref": "#/$defs/nonEmptyString" },
+        "contract": { "$ref": "#/$defs/nonEmptyString" },
+        "revision": { "$ref": "#/$defs/nonEmptyString" },
+        "observedAt": { "$ref": "#/$defs/timestamp" },
+        "source": { "$ref": "#/$defs/nonEmptyString" },
+        "summary": { "$ref": "#/$defs/nonEmptyString" },
+        "classification": { "enum": ["Immutable", "Current"] },
+        "redacted": { "type": "boolean" },
+        "drillDownRef": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "successResponseBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "data", "meta"],
+      "properties": {
+        "apiVersion": { "$ref": "#/$defs/apiVersion" },
+        "kind": { "type": "string" },
+        "data": { "type": "object" },
+        "meta": { "$ref": "#/$defs/responseMeta" }
+      }
+    },
+    "sessionContextResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/successResponseBase" },
+        { "properties": { "kind": { "const": "SessionContext" }, "data": { "$ref": "#/$defs/sessionContextData" } } }
+      ]
+    },
+    "platformOverviewResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/successResponseBase" },
+        { "properties": { "kind": { "const": "PlatformOverview" }, "data": { "$ref": "#/$defs/platformOverviewData" } } }
+      ]
+    },
+    "clusterListResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/successResponseBase" },
+        {
+          "properties": {
+            "kind": { "const": "ClusterList" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["items"],
+              "properties": {
+                "items": { "type": "array", "items": { "$ref": "#/$defs/clusterSummary" } }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "clusterDetailResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/successResponseBase" },
+        { "properties": { "kind": { "const": "ClusterDetail" }, "data": { "$ref": "#/$defs/clusterDetailData" } } }
+      ]
+    },
+    "evidenceReferenceResponse": {
+      "allOf": [
+        { "$ref": "#/$defs/successResponseBase" },
+        { "properties": { "kind": { "const": "EvidenceReference" }, "data": { "$ref": "#/$defs/evidenceReferenceData" } } }
+      ]
+    },
+    "errorResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiVersion", "kind", "error", "meta"],
+      "properties": {
+        "apiVersion": { "$ref": "#/$defs/apiVersion" },
+        "kind": { "const": "Error" },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "retryable"],
+          "properties": {
+            "code": {
+              "enum": ["UNAUTHENTICATED", "FORBIDDEN", "NOT_FOUND", "VALIDATION_FAILED", "SOURCE_UNAVAILABLE", "SOURCE_STALE", "CONTRACT_INCOMPATIBLE", "INTERNAL_ERROR"]
+            },
+            "message": { "$ref": "#/$defs/nonEmptyString" },
+            "retryable": { "type": "boolean" },
+            "retryAfterSeconds": { "type": "integer", "minimum": 0 },
+            "details": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["reason"],
+                "properties": {
+                  "field": { "$ref": "#/$defs/nonEmptyString" },
+                  "reason": { "$ref": "#/$defs/nonEmptyString" }
+                }
+              }
+            }
+          }
+        },
+        "meta": { "$ref": "#/$defs/errorMeta" }
+      }
+    }
+  }
+}

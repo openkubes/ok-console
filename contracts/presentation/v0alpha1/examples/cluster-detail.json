@@ -1,0 +1,41 @@
+{
+  "apiVersion": "console.openkubes.io/v0alpha1",
+  "kind": "ClusterDetail",
+  "data": {
+    "id": "cluster-ok-ai",
+    "name": "ok-ai",
+    "role": "Workload cluster",
+    "provider": "KubeVirt",
+    "profile": "AI accelerated",
+    "kubernetesVersion": "v1.32.6",
+    "region": "fra-gpu1",
+    "readiness": "Ready",
+    "compatibility": "Supported",
+    "contractVersion": "platform.openkubes.io/v1alpha1",
+    "revision": "rev-a812ef",
+    "evidenceId": "ev-ai-ready",
+    "capabilityCount": 3,
+    "capabilities": [
+      {
+        "id": "cap-observability",
+        "name": "Observability",
+        "readiness": "Ready",
+        "evidenceId": "ev-ai-ready"
+      }
+    ],
+    "lifecycle": [
+      {
+        "label": "Control plane",
+        "state": "Ready",
+        "detail": "Endpoint observed through the management plane"
+      }
+    ]
+  },
+  "meta": {
+    "contractVersion": "console.openkubes.io/v0alpha1",
+    "correlationId": "corr-cluster-detail-0001",
+    "observedAt": "2026-08-21T17:59:30Z",
+    "freshness": "Current",
+    "sourceRevision": "cluster:ok-ai:8"
+  }
+}

@@ -10,6 +10,8 @@ pull requests.
 - [`ok-155-component-architecture.png`](ok-155-component-architecture.png) — rendered diagram for documentation and presentations
 - [`ok-155-component-architecture.dot`](ok-155-component-architecture.dot) — editable Graphviz source
 - [Jira OK-155](https://kubernauts.atlassian.net/browse/OK-155) — spike scope and delivery tracking
+- [`../../bff/README.md`](../../bff/README.md) — executable OK-158 BFF boundary,
+  endpoints, security controls, and local integration
 
 Regenerate the PNG after changing the source:
 

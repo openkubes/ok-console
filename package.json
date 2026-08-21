@@ -6,9 +6,12 @@
   "packageManager": "pnpm@10.17.1",
   "scripts": {
     "dev": "vite",
+    "dev:bff": "node --watch bff/server.mjs",
+    "start:bff": "node bff/server.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:bff": "vitest run bff",
     "test:contract": "vitest run src/domain/presentationContract.test.ts",
     "preview": "vite preview"
   },

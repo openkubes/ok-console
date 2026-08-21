@@ -51,6 +51,18 @@ against the Presentation Contract before mapping into view models. Credentials
 remain same-origin and are never read from environment variables or browser
 storage.
 
+The OK-158 read-only BFF now runs as a separate local process. Start it in one
+terminal and the BFF-backed Console in another:
+
+```bash
+pnpm start:bff
+VITE_CONSOLE_DATA_MODE=bff pnpm dev
+```
+
+Vite proxies `/api/console/v0` to the local BFF. Endpoints, security boundaries,
+failure injection, and production evolution are documented in
+[`bff/README.md`](bff/README.md).
+
 ## Verification
 
 The responsive acceptance record for the OK-159 Developer B slice, including
@@ -60,6 +72,7 @@ lives in [`docs/evidence/ok-159`](docs/evidence/ok-159/README.md).
 ```bash
 pnpm lint
 pnpm test
+pnpm test:bff
 pnpm test:contract
 pnpm build
 ```
@@ -78,7 +91,8 @@ resources or a generic backend proxy.
 
 ## Prototype boundaries
 
-- All platform content comes from deterministic fixtures in `src/data/fixtures.ts`.
+- Fixture-mode browser content comes from `src/data/fixtures.ts`; BFF-mode content
+  comes through the controlled observed-state adapter in `bff/adapters`.
 - `ConsoleDataPort` is the narrow replacement seam for a future backend adapter.
 - Cluster, Capability, Workload Claim, Agent Definition, Agent Deployment, and
   Evidence v0 presentation shapes live in `src/domain/contracts.ts`.

@@ -53,6 +53,25 @@ describe('Presentation Contract v0alpha1', () => {
     expect(result.errors).toContain('kind is not supported')
   })
 
+  it('tolerates additive optional fields within the same contract version', () => {
+    const response = structuredClone(platformOverview) as Record<string, unknown>
+    const data = response.data as Record<string, unknown>
+    const meta = response.meta as Record<string, unknown>
+    data.presentationHint = { density: 'compact' }
+    meta.providerExtension = 'ignored-by-v0alpha1-consumers'
+
+    expect(validateConsoleResponse(response)).toEqual({ valid: true, errors: [] })
+  })
+
+  it('fails closed for an unknown readiness enum value', () => {
+    const response = structuredClone(platformOverview)
+    response.data.managementPlane.readiness = 'Degraded' as typeof response.data.managementPlane.readiness
+
+    const result = validateConsoleResponse(response)
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('data.managementPlane.readiness is not supported')
+  })
+
   it.each(['token', 'accessToken', 'kubeconfig', 'privateKey', 'password'])(
     'rejects the forbidden credential field %s anywhere in a response',
     (field) => {

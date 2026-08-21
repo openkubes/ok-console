@@ -3,6 +3,7 @@
 import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BffConsoleAdapter } from '../src/data/bffAdapter'
+import { FixtureConsoleAdapter } from '../src/data/fixtureAdapter'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
 import { createConsoleBffHandler } from './app.mjs'
 
@@ -27,6 +28,7 @@ afterAll(async () => {
 describe('OK-158/OK-159 read-only vertical slice', () => {
   it('flows observed state through the real BFF and ConsoleDataPort adapter', async () => {
     const snapshot = await adapter.getSnapshot()
+    const fixtureSnapshot = await new FixtureConsoleAdapter().getSnapshot()
     const managementPlane = await adapter.getCluster('cluster-ok-mgmt')
     const evidence = await adapter.getEvidence('ev-mgmt-ready')
 
@@ -41,6 +43,27 @@ describe('OK-158/OK-159 read-only vertical slice', () => {
       'ok-shared',
       'edge-07',
     ])
+    const requiredSnapshotFields = [
+      'agentDeployments',
+      'agents',
+      'capabilities',
+      'claims',
+      'clusters',
+      'evidence',
+      'freshness',
+      'generatedAt',
+      'presentationVersion',
+      'source',
+      'warnings',
+    ]
+    expect(snapshot).toEqual(expect.objectContaining(
+      Object.fromEntries(requiredSnapshotFields.map((field) => [field, expect.anything()])),
+    ))
+    expect(fixtureSnapshot).toEqual(expect.objectContaining(
+      Object.fromEntries(requiredSnapshotFields.map((field) => [field, expect.anything()])),
+    ))
+    expect(snapshot.overview).toBeDefined()
+    expect(Object.keys(snapshot.clusters[0]).sort()).toEqual(Object.keys(fixtureSnapshot.clusters[0]).sort())
     expect(managementPlane).toMatchObject({
       name: 'ok-mgmt',
       role: 'Management plane',

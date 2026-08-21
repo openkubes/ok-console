@@ -69,6 +69,11 @@ The responsive acceptance record for the OK-159 Developer B slice, including
 desktop, compact navigation, cluster detail, and BFF-unavailable screenshots,
 lives in [`docs/evidence/ok-159`](docs/evidence/ok-159/README.md).
 
+The evidence-backed OK-161 spike outcome is **GO** for the next curated,
+read-only implementation phase—not production readiness. The decision, risks,
+follow-ups and ADR disposition are recorded in
+[`docs/evidence/ok-161`](docs/evidence/ok-161/README.md).
+
 ```bash
 pnpm lint
 pnpm test

@@ -36,6 +36,21 @@ pnpm build
 pnpm preview
 ```
 
+### Data adapter modes
+
+The Console defaults to deterministic fixture mode. Copy `.env.example` to
+`.env.local` and select the read-only BFF adapter for OK-159/OK-158 integration:
+
+```bash
+VITE_CONSOLE_DATA_MODE=bff
+VITE_CONSOLE_BFF_URL=/api/console/v0
+```
+
+Both modes implement the same `ConsoleDataPort`. BFF responses are validated
+against the Presentation Contract before mapping into view models. Credentials
+remain same-origin and are never read from environment variables or browser
+storage.
+
 ## Verification
 
 ```bash

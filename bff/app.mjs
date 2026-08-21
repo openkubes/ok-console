@@ -83,8 +83,8 @@ const failureResponse = (failure) => {
 }
 
 const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failure }) => {
-  const warnings = []
-  let freshness = 'Current'
+  const warnings = [...(snapshot.sourceHealth?.warnings ?? [])]
+  let freshness = snapshot.sourceHealth?.freshness ?? 'Current'
 
   if (failure === 'stale') {
     freshness = 'Stale'

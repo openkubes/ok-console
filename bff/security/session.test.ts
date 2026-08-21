@@ -1,7 +1,15 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
-import { clearSessionCookie, InMemorySessionStore, readSessionCookie, SESSION_COOKIE, validateCsrf } from './session.mjs'
+import {
+  clearCsrfCookie,
+  clearSessionCookie,
+  CSRF_COOKIE,
+  InMemorySessionStore,
+  readSessionCookie,
+  SESSION_COOKIE,
+  validateCsrf,
+} from './session.mjs'
 
 const subject = {
   id: 'subject-01K34',
@@ -25,6 +33,8 @@ describe('OK-163 opaque server-side sessions', () => {
 
     expect(issued.cookie).toContain(`${SESSION_COOKIE}=`)
     expect(issued.cookie).toContain('Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600')
+    expect(issued.csrfCookie).toBe(`${CSRF_COOKIE}=${issued.csrfToken}; Path=/; Secure; SameSite=Lax; Max-Age=3600`)
+    expect(issued.csrfCookie).not.toContain('HttpOnly')
     expect(issued.session).toMatchObject({ apiVersion: 'auth.console.openkubes.io/v0alpha1', kind: 'ConsoleSession' })
     const serialized = JSON.stringify(issued.session)
     expect(serialized).not.toContain(subject.subjectId)
@@ -69,6 +79,7 @@ describe('OK-163 opaque server-side sessions', () => {
     expect(store.revoke(issued.cookie)).toBe(true)
     expect(store.resolve(issued.cookie)).toBeNull()
     expect(clearSessionCookie()).toBe(`${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`)
+    expect(clearCsrfCookie()).toBe(`${CSRF_COOKIE}=; Path=/; Secure; SameSite=Lax; Max-Age=0`)
   })
 
   it('rejects missing, malformed and duplicate cookie values', () => {

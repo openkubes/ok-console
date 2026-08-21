@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { SECURITY_CONTRACT_VERSION, authorizeSecurityContext } from './authorization.mjs'
 
 export const SESSION_COOKIE = '__Host-ok_console_session'
+export const CSRF_COOKIE = '__Host-ok_console_csrf'
 
 const digest = (value) => createHash('sha256').update(value).digest('base64url')
 const opaqueValue = (bytes = randomBytes) => bytes(32).toString('base64url')
@@ -39,7 +40,16 @@ export const sessionCookie = (value, maxAgeSeconds) => [
   `Max-Age=${maxAgeSeconds}`,
 ].join('; ')
 
+export const csrfCookie = (value, maxAgeSeconds) => [
+  `${CSRF_COOKIE}=${value}`,
+  'Path=/',
+  'Secure',
+  'SameSite=Lax',
+  `Max-Age=${maxAgeSeconds}`,
+].join('; ')
+
 export const clearSessionCookie = () => sessionCookie('', 0)
+export const clearCsrfCookie = () => csrfCookie('', 0)
 
 export const readSessionCookie = (header) => {
   if (typeof header !== 'string') return null
@@ -49,7 +59,7 @@ export const readSessionCookie = (header) => {
   return /^[A-Za-z0-9_-]{40,128}$/.test(value) ? value : null
 }
 
-const publicProjection = (context) => ({
+export const consoleSessionProjection = (context) => ({
   apiVersion: SECURITY_CONTRACT_VERSION,
   kind: 'ConsoleSession',
   data: {
@@ -105,8 +115,9 @@ export class InMemorySessionStore {
     this.sessions.set(digest(sessionId), context)
     return {
       cookie: sessionCookie(sessionId, Math.floor(lifetime.absoluteMs / 1_000)),
+      csrfCookie: csrfCookie(csrfToken, Math.floor(lifetime.absoluteMs / 1_000)),
       csrfToken,
-      session: publicProjection(context),
+      session: consoleSessionProjection(context),
     }
   }
 
@@ -141,7 +152,12 @@ export class InMemorySessionStore {
     this.sessions.delete(oldKey)
     this.sessions.set(digest(newSessionId), rotated)
     const remainingSeconds = Math.max(0, Math.floor((Date.parse(rotated.session.absoluteExpiresAt) - this.now().getTime()) / 1_000))
-    return { cookie: sessionCookie(newSessionId, remainingSeconds), csrfToken, session: publicProjection(rotated) }
+    return {
+      cookie: sessionCookie(newSessionId, remainingSeconds),
+      csrfCookie: csrfCookie(csrfToken, remainingSeconds),
+      csrfToken,
+      session: consoleSessionProjection(rotated),
+    }
   }
 
   revoke(cookieHeader) {

@@ -28,9 +28,28 @@ using `ConsoleDataPort`; only its adapter changes.
 | `GET /api/console/v0/clusters` | `ClusterList` | `clusters.read` |
 | `GET /api/console/v0/clusters/{id}` | `ClusterDetail` | `clusters.read` |
 | `GET /api/console/v0/evidence/{id}` | `EvidenceReference` | `evidence.read` |
+| `GET /api/console/v0/auth/session` | `ConsoleSession` | valid opaque session |
+| `POST /api/console/v0/auth/session/rotate` | `ConsoleSession` + rotated cookies | valid session + exact Origin + CSRF |
+| `DELETE /api/console/v0/auth/session` | empty `204` + cleared cookies | valid session + exact Origin + CSRF |
 
-All other paths return a bounded `NOT_FOUND` response. Non-`GET` methods fail
-closed; there is no generic Kubernetes proxy and no mutation endpoint.
+All other paths return a bounded `NOT_FOUND` response. Non-`GET` resource
+methods fail closed; there is no generic Kubernetes proxy or platform mutation
+endpoint. The two session mutations only rotate or revoke an already
+authenticated session.
+
+### Session HTTP boundary
+
+Inject `sessionStore` and the Console's exact `expectedOrigin` into
+`createConsoleBffHandler` to enable the session lifecycle routes. The runtime
+does not select the in-memory test store implicitly. Without an injected store,
+these routes return `503 SESSION_UNAVAILABLE`.
+
+The BFF never exposes a `POST` that turns browser-supplied identity data into a
+session. A later reviewed OIDC callback or exceptional-access verifier must
+create the server-side session. The readable `__Host-ok_console_csrf` cookie
+lets browser code copy the session-bound value into `X-CSRF-Token`; the opaque
+`__Host-ok_console_session` cookie remains `HttpOnly`. Rotation and logout also
+require an exact configured Origin and clear or replace both cookies.
 
 ## Runtime boundary
 
@@ -129,4 +148,5 @@ Keep the BFF in `openkubes/ok-console` while the first vertical slice and its
 contract are evolving together. Extract it only when release cadence, runtime
 ownership, or independent scaling creates a real boundary. Replace the fixture
 adapter with an OpenKubes query adapter; keep presentation mapping, redaction,
-authorization, and provider tests at this HTTP boundary.
+authorization, session lifecycle, CSRF, and provider tests at this HTTP
+boundary.

@@ -53,5 +53,12 @@ expiry, revocation, cookie-smuggling rejection and origin-plus-token CSRF
 checks. The current store is in-memory and therefore deliberately not accepted
 for multi-replica production use or durable revocation.
 
+The HTTP boundary now provides authenticated inspection, rotation and logout.
+It keeps the opaque session reference in an HttpOnly cookie, delivers the
+session-bound CSRF value in a separate readable Secure cookie, requires the
+value in a header together with an exact configured Origin for both mutations,
+and clears both cookies after invalid session detection or logout. It does not
+offer a browser-driven session creation endpoint.
+
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

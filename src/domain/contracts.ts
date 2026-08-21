@@ -7,6 +7,8 @@ export {
 import {
   PRESENTATION_CONTRACT_VERSION,
   type Compatibility,
+  type Freshness,
+  type PlatformOverviewData,
   type Readiness,
 } from './presentationContract'
 
@@ -50,6 +52,7 @@ export interface Cluster {
   revision: string
   evidenceId: string
   capabilities: string[]
+  capabilityDetails?: Array<{ id: string; name: string; readiness: Readiness; evidenceId: string }>
   lifecycle: Array<{ label: string; state: Readiness; detail: string }>
 }
 
@@ -111,6 +114,10 @@ export interface ExternalClusterRegistrationDraft {
 export interface PlatformSnapshot {
   generatedAt: string
   presentationVersion: typeof PRESENTATION_CONTRACT_VERSION
+  source?: 'fixture' | 'bff'
+  freshness?: Freshness
+  warnings?: string[]
+  overview?: PlatformOverviewData
   clusters: Cluster[]
   capabilities: Capability[]
   claims: WorkloadClaim[]

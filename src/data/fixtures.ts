@@ -4,6 +4,9 @@ import { PRESENTATION_CONTRACT_VERSION } from '../domain/contracts'
 export const platformFixture: PlatformSnapshot = {
   generatedAt: '2026-08-20T19:42:00Z',
   presentationVersion: PRESENTATION_CONTRACT_VERSION,
+  source: 'fixture',
+  freshness: 'Current',
+  warnings: [],
   clusters: [
     {
       id: 'cluster-ok-mgmt', name: 'ok-mgmt', role: 'Management plane', provider: 'Bare metal',

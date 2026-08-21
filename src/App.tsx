@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
-import { consoleData } from './data/fixtureAdapter'
+import { consoleData, consoleDataMode } from './data/consoleData'
+import { ConsoleDataError } from './data/bffAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
 
 type Page = 'overview' | 'clusters' | 'workloads' | 'agents' | 'capabilities' | 'evidence' | 'create' | 'register'
@@ -71,19 +72,29 @@ function EmptyLoading() {
   return <main className="loading"><img src="./openkubes-icon.png" alt=""/><p>Loading contract-aligned platform view…</p></main>
 }
 
+function LoadFailure({ error, retry }: { error: ConsoleDataError; retry: () => void }) {
+  return <main className="loading load-failure" role="alert"><img src="./openkubes-icon.png" alt=""/><span className="eyebrow">Read-only Console</span><h1>Platform data is unavailable</h1><p>{error.message}</p><small>{error.code}{error.correlationId ? ` · Correlation ID ${error.correlationId}` : ''}</small>{error.retryable && <button className="primary-button" onClick={retry}>Retry safely</button>}</main>
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return <div className="empty-state" role="status"><span className="cluster-symbol"><Icon name="cube"/></span><h2>{title}</h2><p>{description}</p></div>
+}
+
 function Overview({ data, openCluster, openEvidence }: { data: PlatformSnapshot; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
+  const overview = data.overview
   return <>
-    <PageTitle eyebrow="Platform posture" title="Hello Arash" description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>Fixture snapshot · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    <PageTitle eyebrow="Platform posture" title="Hello Arash" description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    {(data.freshness === 'Stale' || (data.warnings?.length ?? 0) > 0) && <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{data.freshness === 'Stale' ? 'Some observations are stale' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>}
     <section className="metrics-grid" aria-label="Platform metrics">
-      <Metric label="Clusters" value={data.clusters.length} note={`${ready} ready · 1 management plane`} tone="blue"/>
-      <Metric label="Capabilities" value={data.capabilities.length} note="5 conformant · 2 converging" tone="green"/>
-      <Metric label="Workload claims" value={data.claims.length} note="1 ready · 2 in progress" tone="orange"/>
-      <Metric label="Open findings" value="2" note="No critical policy violations" tone="red"/>
+      <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · 1 management plane`} tone="blue"/>
+      <Metric label="Capabilities" value={overview?.capabilities.total ?? data.capabilities.length} note={`${overview?.capabilities.ready ?? 5} conformant · ${overview?.capabilities.pending ?? 2} converging`} tone="green"/>
+      <Metric label="Workload claims" value={overview?.workloadClaims.total ?? data.claims.length} note={`${overview?.workloadClaims.ready ?? 1} ready · ${overview?.workloadClaims.pending ?? 2} in progress`} tone="orange"/>
+      <Metric label="Open findings" value={overview?.openFindings.total ?? 2} note={`${overview?.openFindings.critical ?? 0} critical policy violations`} tone="red"/>
     </section>
     <section className="section-block">
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
-      <div className="cluster-grid">
+      {data.clusters.length === 0 ? <EmptyState title="No clusters observed" description="The Console BFF returned a valid empty fleet. No readiness is inferred."/> : <div className="cluster-grid">
         {data.clusters.slice(0, 3).map((cluster, index) => <article key={cluster.id} className={`cluster-card ${index === 0 ? 'management' : ''}`}>
           {index === 0 && <div className="management-ribbon"><Icon name="shield" size={13}/> Management plane</div>}
           <button className="card-main" onClick={() => openCluster(cluster)}>
@@ -93,7 +104,7 @@ function Overview({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
           </button>
           <footer><span>{cluster.capabilities.length} capabilities</span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></footer>
         </article>)}
-      </div>
+      </div>}
     </section>
     <section className="two-column section-block">
       <article className="panel"><div className="panel-title"><div><span className="eyebrow">Claims</span><h2>Recent placements</h2></div><span className="count-badge">{data.claims.length}</span></div>{data.claims.map((claim) => <button className="activity-row" key={claim.id} onClick={() => window.location.hash = '#/workloads'}><span className="activity-icon"><Icon name="workloads" size={17}/></span><span className="activity-copy"><strong>{claim.name}</strong><small>{claim.owner} → {claim.targetCluster}</small></span><StatusBadge status={claim.readiness}/><Icon name="chevron" size={16}/></button>)}</article>
@@ -108,7 +119,7 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
     <div className="filter-bar"><label className="search-field"><Icon name="search"/><span className="sr-only">Search clusters</span><input placeholder="Search clusters"/></label><button className="filter-chip active">All · {data.clusters.length}</button><button className="filter-chip">Ready · 2</button><button className="filter-chip">Attention · 2</button></div>
     <section className="table-panel">
       <div className="table-head cluster-columns"><span>Cluster</span><span>Role & profile</span><span>Provider</span><span>Readiness</span><span>Evidence</span><span/></div>
-      {data.clusters.map((cluster, index) => <div className={`table-row cluster-columns ${index === 0 ? 'management-row' : ''}`} key={cluster.id}>
+      {data.clusters.length === 0 ? <EmptyState title="No clusters found" description="This is a valid empty contract response. Register and Create flows remain separate, guarded prototypes."/> : data.clusters.map((cluster, index) => <div className={`table-row cluster-columns ${index === 0 ? 'management-row' : ''}`} key={cluster.id}>
         <button className="cluster-name-cell" onClick={() => openCluster(cluster)}><span className="cluster-symbol small"><Icon name={index === 0 ? 'shield' : 'cube'} size={18}/></span><span><strong>{cluster.name}</strong><small>{cluster.version} · {cluster.region}</small></span></button>
         <span><strong>{cluster.role}</strong><small>{cluster.profile}</small></span><span>{cluster.provider}</span><span><StatusBadge status={cluster.readiness}/></span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/><button className="icon-button" aria-label={`Open ${cluster.name}`} onClick={() => openCluster(cluster)}><Icon name="chevron"/></button>
       </div>)}
@@ -116,18 +127,20 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
   </>
 }
 
-function ClusterDetail({ cluster, data, close, openEvidence, openShell }: { cluster: Cluster; data: PlatformSnapshot; close: () => void; openEvidence: (e: EvidenceRef) => void; openShell: (cluster: Cluster) => void }) {
+function ClusterDetail({ cluster, data, detailError, close, openEvidence, openShell }: { cluster: Cluster; data: PlatformSnapshot; detailError?: ConsoleDataError; close: () => void; openEvidence: (e: EvidenceRef) => void; openShell: (cluster: Cluster) => void }) {
   const [tab, setTab] = useState('Overview')
   const clusterCapabilities = data.capabilities.filter((capability) => cluster.capabilities.includes(capability.id))
+  const clusterEvidence = data.evidence.filter((item) => item.cluster === cluster.name || item.cluster === cluster.id)
   return <>
     <button className="back-button" onClick={close}>← All clusters</button>
     <PageTitle eyebrow={cluster.role} title={cluster.name} description={`${cluster.profile} · ${cluster.provider} · ${cluster.region}`} action={<div className="title-actions"><StatusBadge status={cluster.readiness}/><button className="shell-button" onClick={() => openShell(cluster)}><Icon name="terminal"/>Open Shell</button><button className="secondary-button">Propose change</button></div>}/>
+    {detailError && <div className="data-warning" role="alert"><Icon name="clock"/><div><strong>Cluster detail is unavailable</strong><span>{detailError.message} · {detailError.code}. The last valid summary remains visible.</span></div></div>}
     <div className="contract-strip"><div><span>Domain contract</span><strong>{cluster.contractVersion}</strong></div><div><span>Observed revision</span><strong>{cluster.revision}</strong></div><div><span>Console compatibility</span><StatusBadge status={cluster.compatibility}/></div></div>
     <div className="tabs" role="tablist">{['Overview', 'Lifecycle', 'Capabilities', 'Evidence', 'Changes'].map((item) => <button key={item} role="tab" aria-selected={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
-    {tab === 'Overview' && <section className="detail-grid"><article className="panel"><div className="panel-title"><div><span className="eyebrow">Current observation</span><h2>Lifecycle posture</h2></div><span className="live-label"><span className="live-dot"/>Observed</span></div><div className="lifecycle">{cluster.lifecycle.map((step, index) => <div className="lifecycle-step" key={step.label}><div className={`step-dot ${step.state.toLowerCase()}`}>{step.state === 'Ready' ? '✓' : index + 1}</div><div><strong>{step.label}</strong><p>{step.detail}</p></div><StatusBadge status={step.state}/></div>)}</div></article><article className="panel"><div className="panel-title"><div><span className="eyebrow">Evidence</span><h2>Readiness basis</h2></div><Icon name="evidence"/></div>{data.evidence.filter((item) => item.cluster === cluster.name).map((item) => <button className="evidence-card" key={item.id} onClick={() => openEvidence(item)}><div><span>{item.type}</span><StatusBadge status={item.outcome}/></div><strong>{item.title}</strong><p>{item.summary}</p><small>{item.revision} · {new Date(item.observedAt).toLocaleString()}</small></button>)}</article></section>}
+    {tab === 'Overview' && <section className="detail-grid"><article className="panel"><div className="panel-title"><div><span className="eyebrow">Current observation</span><h2>Lifecycle posture</h2></div><span className="live-label"><span className="live-dot"/>Observed</span></div>{cluster.lifecycle.length === 0 ? <EmptyState title="Detail is loading" description="The summary remains visible while the read-only detail projection is requested."/> : <div className="lifecycle">{cluster.lifecycle.map((step, index) => <div className="lifecycle-step" key={step.label}><div className={`step-dot ${step.state.toLowerCase()}`}>{step.state === 'Ready' ? '✓' : index + 1}</div><div><strong>{step.label}</strong><p>{step.detail}</p></div><StatusBadge status={step.state}/></div>)}</div>}</article><article className="panel"><div className="panel-title"><div><span className="eyebrow">Evidence</span><h2>Readiness basis</h2></div><Icon name="evidence"/></div>{clusterEvidence.length === 0 ? <EmptyState title="No evidence reference" description="No readiness is inferred without a redaction-safe Evidence projection."/> : clusterEvidence.map((item) => <button className="evidence-card" key={item.id} onClick={() => openEvidence(item)}><div><span>{item.type}</span><StatusBadge status={item.outcome}/></div><strong>{item.title}</strong><p>{item.summary}</p><small>{item.revision} · {new Date(item.observedAt).toLocaleString()}</small></button>)}</article></section>}
     {tab === 'Lifecycle' && <article className="panel wide-panel"><div className="panel-title"><div><span className="eyebrow">Intent → observation</span><h2>Lifecycle contract</h2></div></div><div className="timeline">{cluster.lifecycle.map((step) => <div key={step.label}><span className={`timeline-marker ${step.state.toLowerCase()}`}/><h3>{step.label}</h3><p>{step.detail}</p><StatusBadge status={step.state}/></div>)}</div></article>}
-    {tab === 'Capabilities' && <CapabilityGrid capabilities={clusterCapabilities} data={data} openEvidence={openEvidence}/>}
-    {tab === 'Evidence' && <EvidenceList evidence={data.evidence.filter((item) => item.cluster === cluster.name)} onSelect={openEvidence}/>}
+    {tab === 'Capabilities' && (cluster.capabilityDetails ? <section className="table-panel">{cluster.capabilityDetails.map((capability) => <div className="table-row bff-capability-row" key={capability.id}><span><strong>{capability.name}</strong><small>{capability.id}</small></span><StatusBadge status={capability.readiness}/><EvidenceLink id={capability.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></div>)}</section> : <CapabilityGrid capabilities={clusterCapabilities} data={data} openEvidence={openEvidence}/>)}
+    {tab === 'Evidence' && (clusterEvidence.length === 0 ? <EmptyState title="No evidence references" description="The BFF returned no authorized, redaction-safe Evidence projections for this cluster."/> : <EvidenceList evidence={clusterEvidence} onSelect={openEvidence}/>)}
     {tab === 'Changes' && <article className="empty-state panel"><Icon name="code" size={32}/><h2>No pending changes</h2><p>Changes remain proposals until review, authorization, and execution are independently recorded.</p><button className="secondary-button">Propose change</button></article>}
   </>
 }
@@ -409,16 +422,33 @@ export default function App() {
   const [shellCluster, setShellCluster] = useState<Cluster>()
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRef>()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [loadError, setLoadError] = useState<ConsoleDataError>()
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [clusterDetailError, setClusterDetailError] = useState<ConsoleDataError>()
+
+  const openCluster = (cluster: Cluster) => {
+    setSelectedCluster(cluster)
+    setClusterDetailError(undefined)
+    if (consoleDataMode === 'bff') {
+      consoleData.getCluster(cluster.id)
+        .then((detail) => detail && setSelectedCluster(detail))
+        .catch((error: unknown) => setClusterDetailError(error instanceof ConsoleDataError ? error : new ConsoleDataError('Cluster detail could not be loaded.', 'INTERNAL_ERROR', true)))
+    }
+  }
 
   useEffect(() => {
     let active = true
     if (!session) {
       setData(undefined)
+      setLoadError(undefined)
       return () => { active = false }
     }
-    consoleData.getSnapshot().then((snapshot) => active && setData(snapshot))
+    setLoadError(undefined)
+    consoleData.getSnapshot()
+      .then((snapshot) => active && setData(snapshot))
+      .catch((error: unknown) => active && setLoadError(error instanceof ConsoleDataError ? error : new ConsoleDataError('Platform data could not be loaded.', 'INTERNAL_ERROR', true)))
     return () => { active = false }
-  }, [session])
+  }, [session, loadAttempt])
   useEffect(() => {
     const onHash = () => {
       setPage(pageFromHash())
@@ -440,8 +470,9 @@ export default function App() {
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
   if (!session) return <AuthEntry onAuthenticated={setSession}/>
+  if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} close={() => setSelectedCluster(undefined)} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={setSelectedCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
+  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
@@ -456,7 +487,7 @@ export default function App() {
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="live-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
-      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154</span><span>{data.presentationVersion} · deterministic fixtures</span></footer></main>
+      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</span></footer></main>
     </div>
     {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}
     {shellCluster && <ClusterShell cluster={shellCluster} close={() => setShellCluster(undefined)}/>}

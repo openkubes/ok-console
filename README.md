@@ -53,6 +53,10 @@ storage.
 
 ## Verification
 
+The responsive acceptance record for the OK-159 Developer B slice, including
+desktop, compact navigation, cluster detail, and BFF-unavailable screenshots,
+lives in [`docs/evidence/ok-159`](docs/evidence/ok-159/README.md).
+
 ```bash
 pnpm lint
 pnpm test

@@ -28,7 +28,7 @@ for production.
 | CSRF, cookie, expiry, logout, and audit | Secure opaque cookies, exact Origin + session-bound CSRF, idle/absolute expiry, family revocation, exceptional-access audit; OK-166 same-origin static security headers and empty health probes | Gateway policy inspection, retention, alerting, restore/failover exercise |
 | Break-glass failure modes | Disabled-by-default Bootstrap/BreakGlass modes, same KDF for unknown users, principal/global PostgreSQL throttle, audit-fail-closed behavior | Credential custody, recovery drill, MFA feasibility, operator review cadence |
 | Keep credentials/tokens out of browser storage | Provider tokens remain server-side; local password is submitted once and cleared after every outcome | Browser/gateway/support-bundle operational inspection |
-| Deployment and secret management | [`ok-163-deployment-profile.md`](../../security/ok-163-deployment-profile.md); OK-166 non-root image recipe and fail-closed Kubernetes scaffold | Release provenance, real digest/overlays, workload identity, target-cluster enforcement and exercises |
+| Deployment and secret management | [`ok-163-deployment-profile.md`](../../security/ok-163-deployment-profile.md); OK-166 non-root image recipe and fail-closed Kubernetes scaffold; OK-168 explicit producer CA and Console BFF mTLS workload-identity profile | Release provenance, real digest/overlays, independent OK-168 review, certificate rotation/revocation, target-cluster enforcement and exercises |
 
 ## Reviewer checklist
 

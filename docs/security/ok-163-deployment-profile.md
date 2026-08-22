@@ -115,8 +115,8 @@ The following evidence is required before a production claim:
    implementation, and this deployment profile;
 2. provider-specific OIDC discovery, callback, JWKS rotation, logout, and
    adversarial-token tests pass;
-3. workload identity and TLS to the observed-state producer are implemented and
-   tested;
+3. the OK-168 workload-identity and TLS profile to the observed-state producer
+   is independently reviewed, then certificate rotation/revocation is exercised;
 4. a digest-pinned, non-root image plus SBOM, provenance/signature, vulnerability
    policy, and reproducible release process exist;
 5. deployable manifests pass Restricted Pod Security and effective network-policy

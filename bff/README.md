@@ -291,22 +291,29 @@ process—not the browser—with:
 ```bash
 OK_CONSOLE_OBSERVED_STATE_MODE=openkubes \
 OK_CONSOLE_OBSERVED_STATE_URL=https://platform.example/api/console-observed-state/v0alpha1 \
+OK_CONSOLE_OBSERVED_STATE_CA_FILE=/run/secrets/ok-console/observed-state/ca.crt \
+OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE=/run/secrets/ok-console/observed-state/tls.crt \
+OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE=/run/secrets/ok-console/observed-state/tls.key \
 OK_CONSOLE_OBSERVED_STATE_TIMEOUT_MS=5000 \
 OK_CONSOLE_OBSERVED_STATE_STALE_AFTER_MS=300000 \
 pnpm start:bff
 ```
 
 Only HTTPS endpoints are accepted outside loopback; embedded URL credentials
-and redirects are rejected. The adapter uses GET with the versioned JSON
+and redirects are rejected. HTTPS sources require an explicit CA plus a client
+certificate/private-key pair from bounded mounted files. The client verifies
+the producer DNS identity and presents its certificate without using ambient
+machine trust or bearer credentials. The adapter uses GET with the versioned JSON
 profile, a bounded timeout and a streaming 2 MiB response limit. It
 requires exactly one management plane, validates readiness enums and Evidence
 references, derives freshness locally, and converts upstream partial status to
 a safe `PARTIAL_DATA` warning. Upstream diagnostic text is never forwarded.
 
-Authentication for the upstream query is deliberately not invented here; it is
-part of OK-163. The process now requires the PostgreSQL session runtime before
-this source can be selected, so browser reads are session-authorized even in a
-controlled network integration environment.
+The producer additionally authorizes the exact Console BFF SPIFFE URI SAN. The
+process requires the PostgreSQL session runtime before this source can be
+selected, so browser reads are session-authorized as well as workload-authenticated.
+Certificate issuance, rotation overlap, revocation and recovery remain explicit
+deployment exercises rather than runtime fallbacks.
 
 ### Explicit rollback to fixtures
 

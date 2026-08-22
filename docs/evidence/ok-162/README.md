@@ -32,4 +32,6 @@ through HTTP and validates every resulting Presentation Contract response.
 
 The configuration and explicit fixture rollback procedure are documented in
 `bff/README.md` and `.env.example`. Upstream identity and credential transport
-remain intentionally deferred to OK-163.
+are implemented as the OK-168 review candidate. Production certificate custody,
+rotation/revocation and target-cluster exercises remain intentionally open; the
+controlled integration must not be described as production live evidence.

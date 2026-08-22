@@ -86,20 +86,25 @@
             { "name": "OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE", "value": "/run/secrets/ok-console/local/accounts.json" },
             { "name": "OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE", "value": "/run/secrets/ok-console/local/pepper" },
             { "name": "OK_CONSOLE_OBSERVED_STATE_MODE", "value": "openkubes" },
-            { "name": "OK_CONSOLE_OBSERVED_STATE_URL", "value": "https://observed-state.example.invalid/api/console-observed-state/v0alpha1" }
+            { "name": "OK_CONSOLE_OBSERVED_STATE_URL", "value": "https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha1" },
+            { "name": "OK_CONSOLE_OBSERVED_STATE_CA_FILE", "value": "/run/secrets/ok-console/observed-state/ca.crt" },
+            { "name": "OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE", "value": "/run/secrets/ok-console/observed-state/tls.crt" },
+            { "name": "OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE", "value": "/run/secrets/ok-console/observed-state/tls.key" }
           ],
           "volumeMounts": [
             { "name": "postgres", "mountPath": "/run/secrets/ok-console/postgres", "readOnly": true },
             { "name": "session", "mountPath": "/run/secrets/ok-console/session", "readOnly": true },
             { "name": "oidc", "mountPath": "/run/secrets/ok-console/oidc", "readOnly": true },
-            { "name": "local-access", "mountPath": "/run/secrets/ok-console/local", "readOnly": true }
+            { "name": "local-access", "mountPath": "/run/secrets/ok-console/local", "readOnly": true },
+            { "name": "observed-state", "mountPath": "/run/secrets/ok-console/observed-state", "readOnly": true }
           ]
         }],
         "volumes": [
           { "name": "postgres", "secret": { "secretName": "ok-console-postgres", "defaultMode": 256, "items": [{ "key": "url", "path": "url" }, { "key": "ca.pem", "path": "ca.pem" }] } },
           { "name": "session", "secret": { "secretName": "ok-console-session", "defaultMode": 256, "items": [{ "key": "keys.json", "path": "keys.json" }] } },
           { "name": "oidc", "secret": { "secretName": "ok-console-oidc", "defaultMode": 256, "items": [{ "key": "client-secret", "path": "client-secret" }, { "key": "subjects.json", "path": "subjects.json" }] } },
-          { "name": "local-access", "secret": { "secretName": "ok-console-local-access", "defaultMode": 256, "items": [{ "key": "accounts.json", "path": "accounts.json" }, { "key": "pepper", "path": "pepper" }] } }
+          { "name": "local-access", "secret": { "secretName": "ok-console-local-access", "defaultMode": 256, "items": [{ "key": "accounts.json", "path": "accounts.json" }, { "key": "pepper", "path": "pepper" }] } },
+          { "name": "observed-state", "secret": { "secretName": "ok-console-observed-state-mtls", "defaultMode": 256, "items": [{ "key": "ca.crt", "path": "ca.crt" }, { "key": "tls.crt", "path": "tls.crt" }, { "key": "tls.key", "path": "tls.key" }] } }
         ]
       }
     }

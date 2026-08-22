@@ -54,7 +54,7 @@ describe('OK-166 Kubernetes security invariants', () => {
     expect(container.volumeMounts.every((mount: { readOnly?: boolean }) => mount.readOnly === true)).toBe(true)
     expect(pod.volumes.every((volume: { secret?: { defaultMode?: number } }) => volume.secret?.defaultMode === 256)).toBe(true)
     const env = Object.fromEntries(container.env.map((item: { name: string, value: string }) => [item.name, item.value]))
-    for (const name of ['OK_CONSOLE_POSTGRES_URL_FILE', 'OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE', 'OK_CONSOLE_OIDC_CLIENT_SECRET_FILE', 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE']) {
+    for (const name of ['OK_CONSOLE_POSTGRES_URL_FILE', 'OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE', 'OK_CONSOLE_OIDC_CLIENT_SECRET_FILE', 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', 'OK_CONSOLE_OBSERVED_STATE_CA_FILE', 'OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE', 'OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE']) {
       expect(env[name]).toMatch(/^\/run\/secrets\/ok-console\//)
     }
     expect(JSON.stringify(deployment)).not.toMatch(/postgresql:\/\/|BEGIN PRIVATE KEY|client-secret-value|password=/i)

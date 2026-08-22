@@ -5,6 +5,7 @@ import pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
+import { PostgresLocalAccessThrottle } from './localAccess.mjs'
 import { PostgresSessionStore, SessionStoreError } from './postgresSessionStore.mjs'
 import { readSessionCookie } from './session.mjs'
 
@@ -35,10 +36,12 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     await pool.query(migration)
     const oidcMigration = await readFile(new URL('./postgres/002_oidc_transactions.sql', import.meta.url), 'utf8')
     await pool.query(oidcMigration)
+    const localAccessMigration = await readFile(new URL('./postgres/003_local_access_throttle.sql', import.meta.url), 'utf8')
+    await pool.query(localAccessMigration)
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions')
+    await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions, ok_console.local_access_throttle')
     codec = new SessionEnvelopeCodec({ primaryKeyId: 'key-1', keys: { 'key-1': keyOne } })
     store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
   })
@@ -205,5 +208,16 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
     expect(await transactions.consume(issued.cookie)).toBeNull()
     expect(await transactions.purgeExpired(1)).toBe(1)
+  })
+
+  it('shares exceptional-access throttling across replicas without storing usernames', async () => {
+    const first = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
+    const second = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
+    for (let attempt = 0; attempt < 5; attempt += 1) await first.failure('recovery-admin')
+    expect(await second.blocked('recovery-admin')).toBe(true)
+    const row = await pool.query('SELECT * FROM ok_console.local_access_throttle')
+    expect(JSON.stringify(row.rows)).not.toContain('recovery-admin')
+    await second.success('recovery-admin')
+    expect(await first.blocked('recovery-admin')).toBe(false)
   })
 })

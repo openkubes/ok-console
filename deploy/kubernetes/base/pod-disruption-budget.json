@@ -1,0 +1,13 @@
+{
+  "apiVersion": "policy/v1",
+  "kind": "PodDisruptionBudget",
+  "metadata": {
+    "name": "ok-console",
+    "namespace": "openkubes-console",
+    "labels": { "app.kubernetes.io/name": "ok-console" }
+  },
+  "spec": {
+    "minAvailable": 1,
+    "selector": { "matchLabels": { "app.kubernetes.io/name": "ok-console" } }
+  }
+}

@@ -1,0 +1,9 @@
+.git
+.github
+.codex
+.agents
+coverage
+dist
+node_modules
+*.local
+.DS_Store

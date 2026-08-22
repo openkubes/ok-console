@@ -112,6 +112,22 @@ describe('session runtime configuration', () => {
     expect(poolConfiguration?.ssl).toBe(false)
   })
 
+  it('reports readiness only when PostgreSQL and the required session schema are available', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{ ready: true }] })
+      .mockRejectedValueOnce(new Error('database unavailable'))
+    const runtime = await createSessionRuntime({
+      env: baseEnv,
+      fileReader,
+      poolFactory: () => ({ query, end: async () => {} }),
+      storeFactory: () => ({ authorize: vi.fn() }),
+    })
+
+    await expect(runtime.ready()).resolves.toBe(true)
+    expect(query.mock.calls[0][1]).toEqual([['ok_console.sessions']])
+    await expect(runtime.ready()).resolves.toBe(false)
+  })
+
   it('wires OIDC only from a trusted issuer, confidential client secret, and explicit subject map', async () => {
     const oidcProtocolFactory = vi.fn(async () => ({ marker: 'protocol' }))
     const transactionStoreFactory = vi.fn(() => ({ create: vi.fn(), consume: vi.fn() }))

@@ -1,0 +1,13 @@
+{
+  "apiVersion": "networking.k8s.io/v1",
+  "kind": "NetworkPolicy",
+  "metadata": {
+    "name": "ok-console-default-deny",
+    "namespace": "openkubes-console",
+    "labels": { "app.kubernetes.io/name": "ok-console" }
+  },
+  "spec": {
+    "podSelector": { "matchLabels": { "app.kubernetes.io/name": "ok-console" } },
+    "policyTypes": ["Ingress", "Egress"]
+  }
+}

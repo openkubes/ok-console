@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { createConsoleBffHandler } from './app.mjs'
 import { createObservedStateSource } from './source.mjs'
 import { createSessionRuntime } from './security/runtime.mjs'
+import { createRuntimeHttpHandler } from './runtimeHttp.mjs'
 
 const host = process.env.OK_CONSOLE_BFF_HOST ?? '127.0.0.1'
 const port = Number.parseInt(process.env.OK_CONSOLE_BFF_PORT ?? '8787', 10)
@@ -13,7 +14,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('OK_CONSOLE_BFF_PORT must be an integer between 1 and 65535.')
 }
 
-const server = createServer(createConsoleBffHandler({
+const apiHandler = createConsoleBffHandler({
   source: createObservedStateSource(),
   ...(sessionRuntime.authorizer ? { authorizer: sessionRuntime.authorizer } : {}),
   sessionStore: sessionRuntime.sessionStore,
@@ -24,10 +25,11 @@ const server = createServer(createConsoleBffHandler({
   requestObserver: ({ method, pathname, correlationId }) => {
     console.log(`${method} ${pathname} · ${correlationId}`)
   },
-}))
+})
+const server = createServer(createRuntimeHttpHandler({ apiHandler, readiness: sessionRuntime.ready }))
 
 server.listen(port, host, () => {
-  console.log(`OpenKubes Console BFF listening on http://${host}:${port}/api/console/v0`)
+  console.log(`OpenKubes Console runtime listening on http://${host}:${port}`)
   console.log(`Observed-state source: ${sourceMode}`)
   console.log(`Failure injection: ${enableFailureInjection ? 'enabled' : 'disabled'}`)
   console.log(`Session store: ${sessionRuntime.mode}`)

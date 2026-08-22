@@ -221,7 +221,7 @@ export const createSessionRuntime = async ({
     if ((env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture') !== 'fixture') {
       throw new SessionRuntimeConfigurationError('A non-fixture observed-state source requires the PostgreSQL session runtime.')
     }
-    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, localAccessHandler: null, close: async () => {} }
+    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, localAccessHandler: null, ready: async () => true, close: async () => {} }
   }
   if (mode !== 'postgres') {
     throw new SessionRuntimeConfigurationError('OK_CONSOLE_SESSION_STORE_MODE must be disabled or postgres.')
@@ -348,6 +348,21 @@ export const createSessionRuntime = async ({
     }
   }
   let closed = false
+  const requiredRelations = [
+    'ok_console.sessions',
+    ...(env.OK_CONSOLE_OIDC_ENABLED === 'true' ? ['ok_console.oidc_transactions'] : []),
+    ...(localAccessMode !== 'disabled' ? ['ok_console.local_access_throttle', 'ok_console.local_access_audit'] : []),
+  ]
+  const ready = async () => {
+    try {
+      const result = await pool.query(`
+        SELECT COALESCE(bool_and(to_regclass(name) IS NOT NULL), false) AS ready
+        FROM unnest($1::text[]) AS required(name)`, [requiredRelations])
+      return result.rows[0]?.ready === true
+    } catch {
+      return false
+    }
+  }
 
   return {
     mode,
@@ -356,6 +371,7 @@ export const createSessionRuntime = async ({
     authorizer,
     oidcHandler,
     localAccessHandler,
+    ready,
     close: async () => {
       if (closed) return
       closed = true

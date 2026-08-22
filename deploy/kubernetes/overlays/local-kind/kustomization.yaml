@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - namespace.json
+  - network-policy-local-ingress.json
+images:
+  - name: ghcr.io/openkubes/ok-console
+    newName: ok-console
+    newTag: ok-169-local
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ok-console
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/metadata/labels/app.kubernetes.io~1environment
+        value: local-kind
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: OK_CONSOLE_BFF_HOST
+            value: 0.0.0.0
+          - name: OK_CONSOLE_BFF_PORT
+            value: "8787"
+          - name: OK_CONSOLE_SESSION_STORE_MODE
+            value: disabled
+          - name: OK_CONSOLE_OIDC_ENABLED
+            value: "false"
+          - name: OK_CONSOLE_LOCAL_ACCESS_MODE
+            value: disabled
+          - name: OK_CONSOLE_OBSERVED_STATE_MODE
+            value: fixture
+          - name: OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION
+            value: "false"
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts
+      - op: remove
+        path: /spec/template/spec/volumes
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

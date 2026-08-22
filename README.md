@@ -79,11 +79,19 @@ authorization contract plus an explicit
 [`threat model`](docs/security/ok-163-threat-model.md). These artifacts do not
 turn the graphical login simulation into production authentication.
 
+The production session-store proposal is
+[ADR-Platform-038](https://github.com/openkubes/openkubes/blob/main/architecture/decisions/ADR-Platform-038-console-session-store.md).
+Its PostgreSQL reference adapter, envelope encryption and real-database
+conformance suite live under `bff/security`. The adapter is not selected by the
+runtime implicitly; OIDC issuance and production database/key configuration
+remain later reviewed boundaries.
+
 ```bash
 pnpm lint
 pnpm test
 pnpm test:bff
 pnpm test:contract
+pnpm test:postgres # requires OK_CONSOLE_TEST_POSTGRES_URL
 pnpm build
 ```
 

@@ -48,7 +48,7 @@ const csrfRequest = (request, context, expectedOrigin) => ({
   context,
 })
 
-export const handleSessionHttp = ({
+export const handleSessionHttp = async ({
   request,
   response,
   pathname,
@@ -71,7 +71,7 @@ export const handleSessionHttp = ({
   const cookieHeader = request.headers.cookie
 
   if (pathname === SESSION_PATH && request.method === 'GET') {
-    const context = sessionStore.resolve(cookieHeader)
+    const context = await sessionStore.resolve(cookieHeader)
     if (!context) {
       rejectUnauthenticated(response, correlationId)
       return true
@@ -81,7 +81,7 @@ export const handleSessionHttp = ({
   }
 
   if (pathname === ROTATE_PATH && request.method === 'POST') {
-    const context = sessionStore.resolve(cookieHeader, { touch: false })
+    const context = await sessionStore.resolve(cookieHeader, { touch: false })
     if (!context) {
       rejectUnauthenticated(response, correlationId)
       return true
@@ -90,7 +90,7 @@ export const handleSessionHttp = ({
       sendJson(response, 403, securityError('CSRF_REJECTED', 'The session rotation request was rejected.', correlationId), correlationId)
       return true
     }
-    const rotated = sessionStore.rotate(cookieHeader)
+    const rotated = await sessionStore.rotate(cookieHeader)
     if (!rotated) {
       rejectUnauthenticated(response, correlationId)
       return true
@@ -100,7 +100,7 @@ export const handleSessionHttp = ({
   }
 
   if (pathname === SESSION_PATH && request.method === 'DELETE') {
-    const context = sessionStore.resolve(cookieHeader, { touch: false })
+    const context = await sessionStore.resolve(cookieHeader, { touch: false })
     if (!context) {
       rejectUnauthenticated(response, correlationId)
       return true
@@ -109,7 +109,11 @@ export const handleSessionHttp = ({
       sendJson(response, 403, securityError('CSRF_REJECTED', 'The session logout request was rejected.', correlationId), correlationId)
       return true
     }
-    sessionStore.revoke(cookieHeader)
+    const revoked = await sessionStore.revoke(cookieHeader)
+    if (!revoked) {
+      rejectUnauthenticated(response, correlationId)
+      return true
+    }
     response.writeHead(204, responseHeaders(correlationId, { 'Set-Cookie': clearCookies }))
     response.end()
     return true

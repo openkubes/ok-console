@@ -68,11 +68,51 @@ require an exact configured Origin and clear or replace both cookies.
   back silently after a real-source failure.
 - `contract.mjs` provides producer response helpers and a final recursive
   credential-field guard.
+- `security/postgresSessionStore.mjs` implements the ADR-038 asynchronous store
+  port with database-time expiry, transactional rotation, cross-replica
+  session-family revocation and authorization-revision validation.
+- `security/envelope.mjs` encrypts the minimal authorization context with
+  AES-256-GCM before it crosses the store port. The database holds only opaque
+  reference and CSRF digests plus encrypted context.
 
 The default authorizer is deliberately marked as a prototype. Production OIDC,
 RBAC, tenancy policy, and credential transport remain separate security work.
 The hook is evaluated at the point of use for every resource and is covered by
 provider tests.
+
+## PostgreSQL session-store profile
+
+Apply `security/postgres/001_console_sessions.sql` through the deployment's
+reviewed migration workflow. The BFF does not run schema migrations at request
+startup. Use a separate migration identity; the runtime role needs only bounded
+session-table DML. Construct `PostgresSessionStore` with:
+
+- a `pg.Pool` connected to the read/write primary through verified TLS;
+- a `SessionEnvelopeCodec` whose 32-byte keys come from the accepted Secret
+  Contract;
+- the current deployment session epoch; and
+- an authorization-revision validator backed by the current identity mapping.
+
+The adapter never falls back to memory. Missing envelope keys, stale or
+unverified authorization revisions, database errors, invalid epochs and
+ambiguous rotation outcomes fail closed. PostgreSQL replicas must not serve
+session authorization reads.
+
+Rotation retains an internal digest-only session-family identifier. Logout
+locks the presented reference and revokes that entire family in one transaction,
+so a concurrent rotation cannot leave a newly issued reference active.
+
+The integration suite is skipped unless an explicit disposable database URL is
+provided:
+
+```bash
+OK_CONSOLE_TEST_POSTGRES_URL=postgresql://postgres:test@127.0.0.1:5432/ok_console_test \
+pnpm test:postgres
+```
+
+The GitHub verification job supplies a temporary PostgreSQL 16 service, so all
+store conformance cases run on every pull request. The test schema is truncated;
+never point this variable at a non-disposable database.
 
 ## Local failure injection
 
@@ -130,6 +170,7 @@ response and does not silently show fixture data as if it were current reality.
 ```bash
 pnpm test:bff
 pnpm test:contract
+pnpm test:postgres # requires OK_CONSOLE_TEST_POSTGRES_URL
 pnpm test
 pnpm lint
 pnpm build

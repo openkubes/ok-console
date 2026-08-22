@@ -60,5 +60,14 @@ value in a header together with an exact configured Origin for both mutations,
 and clears both cookies after invalid session detection or logout. It does not
 offer a browser-driven session creation endpoint.
 
+The ADR-038 PostgreSQL reference adapter adds application-layer AES-256-GCM
+encryption for the minimal authorization context, digest-only cookie and CSRF
+lookup material, database-time expiry, transactionally exclusive rotation,
+cross-replica session-family revocation (including rotate/logout races),
+deployment-epoch invalidation and a mandatory current
+authorization-revision check before protected authorization. Its conformance
+suite runs against a real PostgreSQL service in CI. Runtime TLS/key provisioning,
+failover and restore exercises remain required production evidence.
+
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

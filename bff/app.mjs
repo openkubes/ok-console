@@ -154,7 +154,7 @@ export const createConsoleBffHandler = ({
   try {
     const url = new URL(request.url ?? '/', 'http://console.local')
     requestObserver({ method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
-    if (handleSessionHttp({
+    if (await handleSessionHttp({
       request,
       response,
       pathname: url.pathname,

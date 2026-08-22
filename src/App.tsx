@@ -421,7 +421,7 @@ function EvidenceDrawer({ item, close }: { item: EvidenceRef; close: () => void 
 
 export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }) {
   const [session, setSession] = useState<PrototypeSession>()
-  const [authStatus, setAuthStatus] = useState<'checking' | 'ready'>(auth.mode === 'oidc' ? 'checking' : 'ready')
+  const [authStatus, setAuthStatus] = useState<'checking' | 'ready'>(auth.mode === 'prototype' ? 'ready' : 'checking')
   const [authError, setAuthError] = useState<string>()
   const [authAttempt, setAuthAttempt] = useState(0)
   const [signingOut, setSigningOut] = useState(false)
@@ -437,7 +437,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   const [clusterDetailError, setClusterDetailError] = useState<ConsoleDataError>()
 
   useEffect(() => {
-    if (auth.mode !== 'oidc') return
+    if (auth.mode === 'prototype') return
     let active = true
     setAuthStatus('checking')
     setAuthError(undefined)
@@ -512,7 +512,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
   if (authStatus === 'checking') return <AuthLoading/>
-  if (!session) return <AuthEntry onAuthenticated={setSession} liveOidc={auth.mode === 'oidc'} onStartOidc={auth.startOidc} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
+  if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
   const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>

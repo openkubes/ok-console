@@ -10,6 +10,14 @@ const session = {
   },
 }
 
+const localSession = {
+  ...session,
+  data: {
+    subject: { displayName: 'Recovery Admin', provider: 'local', method: 'BreakGlass', assurance: ['Password', 'ExceptionalAccess'] },
+    session: { absoluteExpiresAt: '2026-08-22T10:00:00Z' },
+  },
+}
+
 describe('Console auth client', () => {
   it('restores only a compatible public Console session', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(session), { status: 200 }))
@@ -41,6 +49,37 @@ describe('Console auth client', () => {
     prototype.startOidc()
     expect(navigate).toHaveBeenCalledTimes(1)
     expect(navigate).toHaveBeenCalledWith('/api/console/v0/auth/oidc/start')
+  })
+
+  it('submits exceptional credentials only to the fixed same-origin endpoint and accepts a local session', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(localSession), { status: 200 }))
+    const auth = createConsoleAuthClient({ mode: 'breakglass', fetcher })
+    await expect(auth.authenticateLocal({
+      username: 'recovery-admin', password: 'one-time-secret', reason: 'Federation provider is unavailable',
+    })).resolves.toMatchObject({
+      method: 'local', identity: 'Recovery Admin', source: 'BreakGlass local account',
+    })
+    expect(fetcher).toHaveBeenCalledWith('/api/console/v0/auth/local', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'recovery-admin', password: 'one-time-secret', reason: 'Federation provider is unavailable' }),
+    })
+  })
+
+  it('normalizes rejected and unavailable exceptional-access responses', async () => {
+    const rejected = createConsoleAuthClient({ mode: 'bootstrap', fetcher: async () => new Response(null, { status: 401 }) })
+    const unavailable = createConsoleAuthClient({ mode: 'bootstrap', fetcher: async () => new Response(null, { status: 503 }) })
+    const credentials = { username: 'admin', password: 'secret', reason: 'Initial platform bootstrap' }
+    await expect(rejected.authenticateLocal(credentials)).rejects.toMatchObject({ retryable: false })
+    await expect(unavailable.authenticateLocal(credentials)).rejects.toMatchObject({ retryable: true })
+  })
+
+  it('does not submit local credentials from a mode that does not expose exceptional access', async () => {
+    const fetcher = vi.fn()
+    const auth = createConsoleAuthClient({ mode: 'oidc', fetcher })
+    await expect(auth.authenticateLocal({ username: 'admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject({ retryable: false })
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it('logs out with the readable session-bound CSRF value', async () => {

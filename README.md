@@ -53,20 +53,29 @@ storage.
 
 The browser authentication mode is separately explicit. The default
 `VITE_CONSOLE_AUTH_MODE=prototype` preserves the deterministic graphical spike.
-The reviewed live handoff requires both:
+Every reviewed live handoff requires BFF data mode. Select the matching
+authentication profile:
 
 ```bash
 VITE_CONSOLE_DATA_MODE=bff
-VITE_CONSOLE_AUTH_MODE=oidc
+VITE_CONSOLE_AUTH_MODE=oidc # or bootstrap / breakglass
 ```
 
 In live mode the Console first inspects the same-origin public session
-projection. An unauthenticated user can start only the fixed BFF OIDC endpoint;
-the provider callback restores an opaque server-side session. Logout copies the
-readable session-bound CSRF cookie into the required header and clears local UI
-state only after the BFF confirms revocation. The opaque session cookie remains
-HttpOnly and is never read by React. Live OIDC with fixture data fails at build
-startup rather than presenting deterministic data as a real observation.
+projection. `oidc` exposes only the fixed federated start endpoint. `bootstrap`
+exposes only the exceptional local form before federation exists. `breakglass`
+keeps OIDC as the primary path and adds that local form for recovery. Match the
+browser profile to `OK_CONSOLE_LOCAL_ACCESS_MODE`; the Vite value controls UI
+exposure and is not a security boundary. The BFF independently enforces mode,
+Origin, verifier, throttle, audit, and session policy.
+
+Local credentials are sent once to the fixed same-origin BFF endpoint and are
+cleared from React state after success or failure. The response contains only
+the public session projection; the opaque session cookie remains HttpOnly and
+is never read by React. Logout copies the readable session-bound CSRF cookie
+into the required header and clears local UI state only after the BFF confirms
+revocation. Any live mode with fixture data fails at startup rather than
+presenting deterministic data as a real observation.
 
 The OK-158 read-only BFF now runs as a separate local process. Start it in one
 terminal and the BFF-backed Console in another:
@@ -151,9 +160,9 @@ resources or a generic backend proxy.
   Secret, ProviderConfig, API request, or backend state.
 - Authentication entry remains an in-memory interaction in the default prototype
   mode. In explicit live mode, OIDC redirects through the BFF, restores only the
-  public session projection, and performs CSRF-bound server logout. The local account
-  UI is disabled there pending its separate handoff to the reviewed, independently
-  configured bootstrap/break-glass server boundary.
+  public session projection, and performs CSRF-bound server logout. Explicit
+  Bootstrap/BreakGlass profiles submit the guarded local form only to the reviewed,
+  independently configured server boundary.
 - Provider-specific production acceptance, RBAC lifecycle, account recovery, live Kubernetes access,
   deployment, generic schema rendering, and AI-driven runtime adaptation are
   deliberately out of scope.

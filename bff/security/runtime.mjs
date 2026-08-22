@@ -3,7 +3,10 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import pg from 'pg'
 import { SessionEnvelopeCodec } from './envelope.mjs'
+import { createOidcHttpHandler, createOidcProtocolClient, createStaticOidcIdentityMapper } from './oidc.mjs'
+import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
 import { PostgresSessionStore } from './postgresSessionStore.mjs'
+import { validateSessionCreationInput, validSessionString } from './session.mjs'
 
 const { Pool } = pg
 const MAX_SECRET_FILE_BYTES = 64 * 1_024
@@ -114,18 +117,80 @@ const parseEnvelopeKeys = (content, primaryKeyId) => {
   return keys
 }
 
+const exactHttpsUrl = (value, label) => {
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    throw new SessionRuntimeConfigurationError(`${label} must be an exact HTTPS URL.`)
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.href !== value) {
+    throw new SessionRuntimeConfigurationError(`${label} must be an exact HTTPS URL.`)
+  }
+  return url.href
+}
+
+const localRedirect = (value, expectedOrigin) => {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')
+    || [...value].some((character) => character.charCodeAt(0) < 32)) {
+    throw new SessionRuntimeConfigurationError('OK_CONSOLE_OIDC_SUCCESS_REDIRECT must be a local absolute path.')
+  }
+  const parsed = new URL(value, expectedOrigin)
+  if (parsed.origin !== expectedOrigin) {
+    throw new SessionRuntimeConfigurationError('OK_CONSOLE_OIDC_SUCCESS_REDIRECT must be a local absolute path.')
+  }
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`
+}
+
+const parseIdentityMappings = (content, providerId, environmentId) => {
+  let document
+  try {
+    document = JSON.parse(content)
+  } catch {
+    throw new SessionRuntimeConfigurationError('The OIDC subject mapping file is invalid.')
+  }
+  if (!document || document.version !== 'v1' || !Array.isArray(document.subjects)
+    || document.subjects.length < 1 || document.subjects.length > 10_000) {
+    throw new SessionRuntimeConfigurationError('The OIDC subject mapping file is invalid.')
+  }
+  const seen = new Set()
+  try {
+    for (const mapping of document.subjects) {
+      if (!mapping || !validSessionString(mapping.providerSubject) || seen.has(mapping.providerSubject)) throw new Error()
+      seen.add(mapping.providerSubject)
+      validateSessionCreationInput({
+        subject: {
+          id: mapping.identityId,
+          providerId,
+          subjectId: mapping.providerSubject,
+          displayName: mapping.displayName,
+          method: 'OIDC',
+          assurance: mapping.assurance,
+        },
+        scope: { environmentId, tenantIds: mapping.tenantIds },
+        permissions: mapping.permissions,
+      })
+    }
+  } catch {
+    throw new SessionRuntimeConfigurationError('The OIDC subject mapping file is invalid.')
+  }
+  return document.subjects
+}
+
 export const createSessionRuntime = async ({
   env = process.env,
   fileReader = readFile,
   poolFactory = (configuration) => new Pool(configuration),
   storeFactory = (configuration) => new PostgresSessionStore(configuration),
+  transactionStoreFactory = (configuration) => new PostgresOidcTransactionStore(configuration),
+  oidcProtocolFactory = createOidcProtocolClient,
 } = {}) => {
   const mode = env.OK_CONSOLE_SESSION_STORE_MODE ?? 'disabled'
   if (mode === 'disabled') {
     if ((env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture') !== 'fixture') {
       throw new SessionRuntimeConfigurationError('A non-fixture observed-state source requires the PostgreSQL session runtime.')
     }
-    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, close: async () => {} }
+    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, close: async () => {} }
   }
   if (mode !== 'postgres') {
     throw new SessionRuntimeConfigurationError('OK_CONSOLE_SESSION_STORE_MODE must be disabled or postgres.')
@@ -179,6 +244,46 @@ export const createSessionRuntime = async ({
     permission,
     environmentId,
   })
+  let oidcHandler = null
+  if (env.OK_CONSOLE_OIDC_ENABLED === 'true') {
+    try {
+      const providerId = required(env, 'OK_CONSOLE_OIDC_PROVIDER_ID')
+      const issuer = exactHttpsUrl(required(env, 'OK_CONSOLE_OIDC_ISSUER'), 'OK_CONSOLE_OIDC_ISSUER')
+      const clientId = required(env, 'OK_CONSOLE_OIDC_CLIENT_ID')
+      const clientSecret = await secretFile(required(env, 'OK_CONSOLE_OIDC_CLIENT_SECRET_FILE'), 'OK_CONSOLE_OIDC_CLIENT_SECRET_FILE', fileReader)
+      const subjects = parseIdentityMappings(
+        await secretFile(required(env, 'OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE'), 'OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE', fileReader),
+        providerId,
+        environmentId,
+      )
+      const redirectUri = `${expectedOrigin}/api/console/v0/auth/oidc/callback`
+      const successRedirect = localRedirect(env.OK_CONSOLE_OIDC_SUCCESS_REDIRECT ?? '/', expectedOrigin)
+      const protocol = await oidcProtocolFactory({
+        issuer,
+        clientId,
+        clientSecret,
+        timeoutSeconds: boundedInteger(env, 'OK_CONSOLE_OIDC_TIMEOUT_SECONDS', 5, 1, 30),
+      })
+      const transactionStore = transactionStoreFactory({ pool, codec, deploymentEpoch })
+      const identityMapper = createStaticOidcIdentityMapper({
+        providerId,
+        environmentId,
+        authorizationRevision,
+        subjects,
+      })
+      oidcHandler = createOidcHttpHandler({
+        protocol,
+        transactionStore,
+        sessionStore,
+        identityMapper,
+        redirectUri,
+        successRedirect,
+      })
+    } catch (error) {
+      await pool.end().catch(() => {})
+      throw error
+    }
+  }
   let closed = false
 
   return {
@@ -186,6 +291,7 @@ export const createSessionRuntime = async ({
     sessionStore,
     expectedOrigin,
     authorizer,
+    oidcHandler,
     close: async () => {
       if (closed) return
       closed = true

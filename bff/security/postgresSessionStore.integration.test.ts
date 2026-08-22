@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SessionEnvelopeCodec } from './envelope.mjs'
+import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
 import { PostgresSessionStore, SessionStoreError } from './postgresSessionStore.mjs'
 import { readSessionCookie } from './session.mjs'
 
@@ -32,10 +33,12 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     pool = new pg.Pool({ connectionString, max: 8 })
     const migration = await readFile(new URL('./postgres/001_console_sessions.sql', import.meta.url), 'utf8')
     await pool.query(migration)
+    const oidcMigration = await readFile(new URL('./postgres/002_oidc_transactions.sql', import.meta.url), 'utf8')
+    await pool.query(oidcMigration)
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE ok_console.sessions')
+    await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions')
     codec = new SessionEnvelopeCodec({ primaryKeyId: 'key-1', keys: { 'key-1': keyOne } })
     store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
   })
@@ -176,5 +179,28 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     expect(stale.reason).toBe('AUTHORIZATION_REVISION_STALE')
     expect(allowed.allowed).toBe(true)
     expect(after.rows[0].idle_expires_at.getTime()).toBeGreaterThan(before.rows[0].idle_expires_at.getTime())
+  })
+
+  it('consumes encrypted OIDC transaction state exactly once across replicas', async () => {
+    const firstReplica = new PostgresOidcTransactionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    const secondReplica = new PostgresOidcTransactionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    const transaction = { codeVerifier: 'pkce-verifier', state: 'oauth-state', nonce: 'oidc-nonce' }
+    const issued = await firstReplica.create(transaction)
+    const stored = await pool.query('SELECT * FROM ok_console.oidc_transactions')
+
+    expect(stored.rowCount).toBe(1)
+    expect(JSON.stringify(stored.rows[0])).not.toContain(transaction.codeVerifier)
+    expect(JSON.stringify(stored.rows[0])).not.toContain(transaction.state)
+    expect(await secondReplica.consume(issued.cookie)).toEqual(transaction)
+    expect(await firstReplica.consume(issued.cookie)).toBeNull()
+  })
+
+  it('rejects expired OIDC transactions and purges them with a bound', async () => {
+    const transactions = new PostgresOidcTransactionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    const issued = await transactions.create({ codeVerifier: 'pkce-verifier', state: 'oauth-state', nonce: 'oidc-nonce' })
+    await pool.query("UPDATE ok_console.oidc_transactions SET expires_at = clock_timestamp() - interval '1 second'")
+
+    expect(await transactions.consume(issued.cookie)).toBeNull()
+    expect(await transactions.purgeExpired(1)).toBe(1)
   })
 })

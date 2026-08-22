@@ -82,9 +82,11 @@ turn the graphical login simulation into production authentication.
 The production session-store proposal is
 [ADR-Platform-038](https://github.com/openkubes/openkubes/blob/main/architecture/decisions/ADR-Platform-038-console-session-store.md).
 Its PostgreSQL reference adapter, envelope encryption and real-database
-conformance suite live under `bff/security`. The adapter is not selected by the
-runtime implicitly; OIDC issuance and production database/key configuration
-remain later reviewed boundaries.
+conformance suite live under `bff/security`. The runtime selects it explicitly
+and never falls back to memory. The first server-side OIDC Authorization Code +
+PKCE boundary uses one-time encrypted PostgreSQL flow state and an explicit
+issuer-subject mapping; deployment-provider interoperability and the browser's
+graphical-to-live handoff remain reviewed follow-ups.
 
 ```bash
 pnpm lint

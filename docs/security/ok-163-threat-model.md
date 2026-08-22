@@ -37,7 +37,8 @@ login simulation is excluded from the trusted computing base.
 
 ## Security decisions still requiring implementation evidence
 
-1. OIDC library/provider interoperability, JWKS rotation and negative tokens.
+1. OIDC provider interoperability, JWKS rotation and negative-token evidence
+   against the selected deployment provider.
 2. Session-store durability, encryption, key rotation and revocation propagation.
 3. Cookie issuance/logout and CSRF/origin implementation.
 4. TLS certificate issuance and workload identity for the producer path.
@@ -77,6 +78,15 @@ only from bounded absolute file paths, and fails process startup on incomplete
 configuration. The first revision validator compares against an explicitly
 deployed identity-mapping revision; publishing that revision with every mapping
 change remains an operational requirement until a live policy adapter exists.
+
+The OIDC boundary now uses pinned `openid-client` protocol validation for the
+Authorization Code flow with PKCE S256, State and Nonce. The three one-time
+values are encrypted in PostgreSQL, referenced by a short-lived HttpOnly cookie,
+and atomically consumed before token exchange. A validated issuer-scoped `sub`
+must match a reviewed static mapping; email, display-name, group, and role claims
+cannot create authority. Provider tokens never enter browser storage or the
+session database. Deployment-provider interoperability and adversarial token
+fixtures remain mandatory acceptance evidence before production readiness.
 
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

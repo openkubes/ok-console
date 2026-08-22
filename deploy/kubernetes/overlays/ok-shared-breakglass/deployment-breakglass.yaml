@@ -6,6 +6,10 @@ metadata:
 spec:
   template:
     spec:
+      hostAliases:
+        - ip: 192.168.100.207
+          hostnames:
+            - keycloak.ok-shared.internal
       containers:
         - name: console
           env:

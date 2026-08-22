@@ -23,6 +23,8 @@ spec:
           - name: ok-console-postgres-migrations
             key: 001_console_sessions.sql
           - name: ok-console-postgres-migrations
+            key: 002_oidc_transactions.sql
+          - name: ok-console-postgres-migrations
             key: 003_local_access_throttle.sql
           - name: ok-console-postgres-migrations
             key: 004_local_access_audit.sql

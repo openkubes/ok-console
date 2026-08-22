@@ -43,16 +43,17 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(producer).toContain('defaultMode: 288')
   })
 
-  it('pins PostgreSQL and initializes only the session and bootstrap relations', async () => {
+  it('pins PostgreSQL and initializes the session, OIDC and bootstrap relations', async () => {
     const cluster = await read(`${overlay}/postgres-cluster.yaml`)
     const migrations = await read(`${overlay}/postgres-migrations.yaml`)
     expect(cluster).toContain('ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie@sha256:26e146bc71ebfc2a3937f729a15161a7fb6cd7c8a0b0007ad60cb53d2371b3fc')
     expect(cluster).toContain('storageClass: local-path')
     expect(cluster).toContain('001_console_sessions.sql')
+    expect(cluster).toContain('002_oidc_transactions.sql')
     expect(cluster).toContain('003_local_access_throttle.sql')
     expect(cluster).toContain('004_local_access_audit.sql')
-    expect(cluster).not.toContain('002_oidc_transactions.sql')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.sessions')
+    expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.oidc_transactions')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.local_access_throttle')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.local_access_audit')
     expect(migrations).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.sessions TO ok_console')

@@ -7,7 +7,7 @@ resources:
 images:
   - name: ghcr.io/openkubes/ok-console
     newName: ghcr.io/openkubes/ok-console
-    digest: sha256:20860b2f87ffd9454c5925aba4fac83dc1c6f4787ec89b935fbcb76fc68600f
+    digest: sha256:20860b2f87ffd9454c5925aba4fac83dc1c6f4787ec89b935fbcb76fc68600f3
 
 patches:
   - path: deployment-breakglass.yaml

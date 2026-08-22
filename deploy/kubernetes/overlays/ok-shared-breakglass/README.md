@@ -4,7 +4,7 @@ This overlay is a reviewed candidate profile; it is not the default live
 profile. It inherits the bounded read-only `ok-shared-live` resources and
 changes only the Console authentication boundary:
 
-- immutable Console image `sha256:20860b2f...68600f`;
+- immutable Console image `sha256:20860b2f...68600f3`;
 - OIDC enabled with the `openkubes` Keycloak realm;
 - local access changed from Bootstrap to BreakGlass;
 - internal Keycloak CA mounted through `NODE_EXTRA_CA_CERTS`;

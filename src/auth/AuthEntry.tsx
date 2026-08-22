@@ -47,7 +47,13 @@ function SessionReview({ session, title, onEnter, onBack }: { session: Prototype
   </>
 }
 
-export default function AuthEntry({ onAuthenticated }: { onAuthenticated: (session: PrototypeSession) => void }) {
+export default function AuthEntry({ onAuthenticated, liveOidc = false, onStartOidc, serviceError, onRetry }: {
+  onAuthenticated: (session: PrototypeSession) => void
+  liveOidc?: boolean
+  onStartOidc?: () => void
+  serviceError?: string
+  onRetry?: () => void
+}) {
   const [stage, setStage] = useState<AuthStage>('entry')
   const [provider, setProvider] = useState(providers[0])
   const [username, setUsername] = useState('')
@@ -56,6 +62,7 @@ export default function AuthEntry({ onAuthenticated }: { onAuthenticated: (sessi
   const [acknowledged, setAcknowledged] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const availableProviders = liveOidc ? providers.slice(0, 1) : providers
 
   const oidcSession: PrototypeSession = {
     method: 'oidc',
@@ -99,29 +106,30 @@ export default function AuthEntry({ onAuthenticated }: { onAuthenticated: (sessi
       <div className="auth-brand"><img src="./openkubes-icon.png" alt="OpenKubes"/><span><strong>OpenKubes</strong><small>Platform Console</small></span></div>
       <div className="auth-story-copy"><span className="auth-kicker">Sovereign platform operations</span><h2>Contracts.<br/>Clusters.<br/><em>Evidence.</em></h2><p>One trusted entry point for platform intent, observed state, and reviewable operations — from local laptop to edge, bare metal, and cloud.</p></div>
       <div className="auth-principles"><span><AuthIcon name="shield"/>Federated by default</span><span><AuthIcon name="lock"/>Least authority</span><span><AuthIcon name="check"/>Evidence-backed</span></div>
-      <p className="auth-story-foot">OpenKubes Console Prototype · OK-154</p>
+      <p className="auth-story-foot">{liveOidc ? 'OpenKubes Console · Federated entry' : 'OpenKubes Console Prototype · OK-154'}</p>
     </section>
     <section className="auth-panel" aria-label="Sign in to OpenKubes">
       <div className="auth-card">
-        <div className="auth-environment"><span className="auth-live-dot"/><span><small>Environment</small><strong>Community preview</strong></span><em>Prototype · no live auth</em></div>
+        <div className="auth-environment"><span className="auth-live-dot"/><span><small>Environment</small><strong>Community preview</strong></span><em>{liveOidc ? 'Federated authentication' : 'Prototype · no live auth'}</em></div>
 
         {stage === 'entry' && <>
           <div className="auth-heading"><span className="auth-kicker">Welcome</span><h1>Welcome to OpenKubes</h1><p>Sign in with a configured identity provider. Your provider verifies identity; OpenKubes evaluates authority separately.</p></div>
+          {serviceError && <div className="auth-error" role="alert">{serviceError}{onRetry && <button type="button" className="auth-text-button" onClick={onRetry}>Retry session check</button>}</div>}
           <div className="auth-provider-list" aria-label="Configured identity providers">
-            {providers.map((item, index) => <button type="button" className="auth-provider" key={item.id} onClick={() => { setProvider(item); setStage('oidc-redirect') }}><span className="auth-provider-mark">{index === 0 ? 'OK' : 'ID'}</span><span><strong>Continue with {item.name}</strong><small>{item.detail}</small></span><AuthIcon name="arrow"/></button>)}
+            {availableProviders.map((item, index) => <button type="button" className="auth-provider" key={item.id} onClick={() => { setProvider(item); setStage('oidc-redirect') }}><span className="auth-provider-mark">{index === 0 ? 'OK' : 'ID'}</span><span><strong>Continue with {item.name}</strong><small>{item.detail}</small></span><AuthIcon name="arrow"/></button>)}
           </div>
           <div className="auth-divider"><span>Exceptional access</span></div>
-          <button type="button" className="auth-local-entry" onClick={() => setStage('local')}><AuthIcon name="key"/><span><strong>Use a local account</strong><small>Bootstrap / break-glass only · audited</small></span><AuthIcon name="arrow" size={16}/></button>
+          {liveOidc ? <button type="button" className="auth-local-entry" disabled><AuthIcon name="key"/><span><strong>Local account not enabled</strong><small>Bootstrap / break-glass requires its reviewed server boundary</small></span></button> : <button type="button" className="auth-local-entry" onClick={() => setStage('local')}><AuthIcon name="key"/><span><strong>Use a local account</strong><small>Bootstrap / break-glass only · audited</small></span><AuthIcon name="arrow" size={16}/></button>}
           <p className="auth-privacy"><AuthIcon name="lock" size={14}/>No fleet or infrastructure data is exposed before sign-in.</p>
         </>}
 
         {stage === 'oidc-redirect' && <>
           <button className="auth-back" type="button" onClick={reset}>← All sign-in methods</button>
-          <div className="auth-heading"><span className="auth-kicker">Federated sign-in</span><h1>Continue to {provider.name}</h1><p>The production Console will redirect to the configured provider. OpenKubes never receives your provider password.</p></div>
+          <div className="auth-heading"><span className="auth-kicker">Federated sign-in</span><h1>Continue to {provider.name}</h1><p>{liveOidc ? 'The Console redirects to the configured provider.' : 'The production Console will redirect to the configured provider.'} OpenKubes never receives your provider password.</p></div>
           <div className="auth-flow-card"><span className="auth-provider-mark">OK</span><div><small>Protocol</small><strong>Authorization Code + PKCE</strong></div><div><small>Return</small><strong>Server-side session boundary</strong></div></div>
           <ol className="auth-flow-steps"><li><span>1</span><div><strong>Redirect to identity provider</strong><p>Provider performs authentication and MFA.</p></div></li><li><span>2</span><div><strong>Validate secure return</strong><p>State, nonce, issuer, audience, and PKCE are checked server-side.</p></div></li><li><span>3</span><div><strong>Create bounded Console session</strong><p>No token is stored in browser storage.</p></div></li></ol>
-          <button className="auth-primary" type="button" onClick={() => setStage('oidc-review')}>Simulate identity provider return <AuthIcon name="arrow"/></button>
-          <p className="auth-simulation">Simulation only · no redirect, token, cookie, or network request</p>
+          <button className="auth-primary" type="button" onClick={() => liveOidc ? onStartOidc?.() : setStage('oidc-review')}>{liveOidc ? 'Continue to identity provider' : 'Simulate identity provider return'} <AuthIcon name="arrow"/></button>
+          <p className="auth-simulation">{liveOidc ? 'Secure redirect · server-side PKCE, State, Nonce, and session boundary' : 'Simulation only · no redirect, token, cookie, or network request'}</p>
         </>}
 
         {stage === 'oidc-review' && <SessionReview session={oidcSession} title="Identity verified" onEnter={() => onAuthenticated(oidcSession)} onBack={reset}/>} 

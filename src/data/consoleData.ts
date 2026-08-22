@@ -7,8 +7,8 @@ export type ConsoleDataMode = 'fixture' | 'bff'
 export const consoleDataMode: ConsoleDataMode =
   import.meta.env.VITE_CONSOLE_DATA_MODE === 'bff' ? 'bff' : 'fixture'
 
-if (import.meta.env.VITE_CONSOLE_AUTH_MODE === 'oidc' && consoleDataMode !== 'bff') {
-  throw new Error('VITE_CONSOLE_AUTH_MODE=oidc requires VITE_CONSOLE_DATA_MODE=bff.')
+if (['oidc', 'bootstrap', 'breakglass'].includes(import.meta.env.VITE_CONSOLE_AUTH_MODE) && consoleDataMode !== 'bff') {
+  throw new Error('Live Console authentication requires VITE_CONSOLE_DATA_MODE=bff.')
 }
 
 export const createConsoleData = (mode: ConsoleDataMode): ConsoleDataPort =>

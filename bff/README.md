@@ -168,12 +168,12 @@ duplicate mappings, missing ID Tokens, stale transactions, provider errors,
 and configuration ambiguity fail closed with bounded errors. Register the exact
 callback `${OK_CONSOLE_ORIGIN}/api/console/v0/auth/oidc/callback` at the provider.
 
-Build the browser with `VITE_CONSOLE_AUTH_MODE=oidc` and
-`VITE_CONSOLE_DATA_MODE=bff` to activate the live handoff. React restores only
-`GET /auth/session`, redirects sign-in to `GET /auth/oidc/start`, and invokes
-CSRF-bound `DELETE /auth/session` for logout. The prototype mode remains the
-explicit default. The current React UI does not yet submit exceptional local
-access; that handoff remains a separately reviewed slice.
+Build the browser with `VITE_CONSOLE_DATA_MODE=bff` and select
+`VITE_CONSOLE_AUTH_MODE=oidc|bootstrap|breakglass` to activate the matching live
+handoff. React restores only `GET /auth/session`; OIDC profiles redirect through
+`GET /auth/oidc/start`, and exceptional profiles submit credentials once to
+`POST /auth/local`. Logout invokes CSRF-bound `DELETE /auth/session`. The
+prototype mode remains the explicit default.
 
 ### Exceptional local access
 
@@ -226,7 +226,9 @@ runtime database identity with only `INSERT` on `local_access_audit`; migration
 and retention identities own update/delete policy. Operators must not put
 secrets into the reason, and deployments must define access and retention.
 Credential custody, recovery exercises, MFA feasibility, and production
-acceptance remain open even though the server boundary is now executable.
+acceptance remain open. The browser handoff does not weaken this boundary: its
+mode only controls which entry UI is visible, while the BFF independently
+enforces all activation and credential policy.
 
 Rotation retains an internal digest-only session-family identifier. Logout
 locks the presented reference and revokes that entire family in one transaction,

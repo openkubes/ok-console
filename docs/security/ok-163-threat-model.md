@@ -90,13 +90,15 @@ cannot create authority. Provider tokens never enter browser storage or the
 session database. Deployment-provider interoperability and adversarial token
 fixtures remain mandatory acceptance evidence before production readiness.
 
-The browser now has an explicit live OIDC mode. It restores only the redacted
-`ConsoleSession` projection, navigates to a fixed same-origin OIDC start path,
-and submits logout with the readable session-bound CSRF value. It never reads
-the HttpOnly session reference or provider tokens. Local exceptional access is
-still absent from the live React handoff even though its independently disabled
-server boundary now exists. A configuration guard prevents live authentication
-from being paired with fixture data.
+The browser now has explicit OIDC, Bootstrap, and BreakGlass live profiles. It
+restores only the redacted `ConsoleSession` projection, navigates only to the
+fixed same-origin OIDC start path, and submits exceptional credentials only to
+the fixed same-origin local endpoint. Password state is cleared after either
+outcome. Bootstrap removes the federated entry; BreakGlass retains OIDC as the
+primary path. The profile controls presentation only—the BFF independently
+enforces activation. Logout uses the readable session-bound CSRF value, while
+the browser never reads the HttpOnly session reference or provider tokens. A
+configuration guard prevents any live authentication from using fixture data.
 
 The exceptional-access boundary is disabled by default and activated only by an
 explicit PostgreSQL runtime mode. Bootstrap is mutually exclusive with OIDC;
@@ -114,8 +116,8 @@ a correlation ID and a separately domain-separated principal digest. Audit,
 throttle, KDF, and session dependency failures fail closed; an already issued
 session is revoked if its granted Evidence cannot be persisted. The deployment
 must give the runtime identity INSERT-only audit access and separately control
-retention. The React handoff, credential custody, MFA feasibility, recovery
-exercises and production acceptance remain reviewed follow-ups.
+retention. Credential custody, MFA feasibility, recovery exercises and
+production acceptance remain reviewed follow-ups.
 
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

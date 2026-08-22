@@ -1,6 +1,12 @@
 import type { PrototypeSession } from './AuthEntry'
 
-export type AuthMode = 'prototype' | 'oidc'
+export type AuthMode = 'prototype' | 'oidc' | 'bootstrap' | 'breakglass'
+
+export type LocalAccessCredentials = {
+  username: string
+  password: string
+  reason: string
+}
 
 export class ConsoleAuthError extends Error {
   constructor(message: string, readonly retryable: boolean) {
@@ -13,6 +19,7 @@ export type ConsoleAuthClient = {
   mode: AuthMode
   restoreSession: () => Promise<PrototypeSession | null>
   startOidc: () => void
+  authenticateLocal: (credentials: LocalAccessCredentials) => Promise<PrototypeSession>
   logout: () => Promise<void>
 }
 
@@ -34,7 +41,7 @@ const sessionProjection = (value: unknown): PrototypeSession => {
     || response.kind !== 'ConsoleSession'
     || typeof subject?.displayName !== 'string'
     || typeof subject.provider !== 'string'
-    || subject.method !== 'OIDC'
+    || !['OIDC', 'Bootstrap', 'BreakGlass'].includes(String(subject.method))
     || !Array.isArray(subject.assurance)
     || !subject.assurance.every((item) => typeof item === 'string')
     || typeof absoluteExpiresAt !== 'string'
@@ -42,9 +49,9 @@ const sessionProjection = (value: unknown): PrototypeSession => {
     throw new ConsoleAuthError('The authentication service returned an incompatible session.', false)
   }
   return {
-    method: 'oidc',
+    method: subject.method === 'OIDC' ? 'oidc' : 'local',
     identity: subject.displayName,
-    source: subject.provider,
+    source: subject.method === 'OIDC' ? subject.provider : `${subject.method} local account`,
     assurance: subject.assurance.join(' · '),
     expiresIn: `Until ${new Date(absoluteExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
   }
@@ -89,8 +96,42 @@ export const createConsoleAuthClient = ({
     }
   },
   startOidc: () => {
-    if (mode !== 'oidc') return
+    if (mode !== 'oidc' && mode !== 'breakglass') return
     navigate(`${API_ROOT}/auth/oidc/start`)
+  },
+  authenticateLocal: async (credentials) => {
+    if (mode !== 'bootstrap' && mode !== 'breakglass') {
+      throw new ConsoleAuthError('Exceptional local access is not enabled.', false)
+    }
+    let response: Response
+    try {
+      response = await fetcher(`${API_ROOT}/auth/local`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(credentials),
+      })
+    } catch {
+      throw new ConsoleAuthError('Exceptional local access is temporarily unavailable.', true)
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new ConsoleAuthError('Exceptional local access was rejected.', false)
+    }
+    if (!response.ok) {
+      throw new ConsoleAuthError('Exceptional local access is temporarily unavailable.', response.status >= 500)
+    }
+    try {
+      const value = await response.json()
+      const expectedMethod = mode === 'bootstrap' ? 'Bootstrap' : 'BreakGlass'
+      const returnedMethod = (value as { data?: { subject?: { method?: unknown } } }).data?.subject?.method
+      const projected = sessionProjection(value)
+      if (projected.method !== 'local' || returnedMethod !== expectedMethod) {
+        throw new ConsoleAuthError('The authentication service returned an incompatible session.', false)
+      }
+      return projected
+    } catch (error) {
+      if (error instanceof ConsoleAuthError) throw error
+      throw new ConsoleAuthError('The authentication service returned an incompatible session.', false)
+    }
   },
   logout: async () => {
     if (mode === 'prototype') return
@@ -112,5 +153,10 @@ export const createConsoleAuthClient = ({
   },
 })
 
-export const consoleAuthMode: AuthMode = import.meta.env.VITE_CONSOLE_AUTH_MODE === 'oidc' ? 'oidc' : 'prototype'
+const configuredMode = import.meta.env.VITE_CONSOLE_AUTH_MODE
+const liveModes: AuthMode[] = ['oidc', 'bootstrap', 'breakglass']
+if (configuredMode && configuredMode !== 'prototype' && !liveModes.includes(configuredMode as AuthMode)) {
+  throw new Error('VITE_CONSOLE_AUTH_MODE must be prototype, oidc, bootstrap, or breakglass.')
+}
+export const consoleAuthMode: AuthMode = liveModes.includes(configuredMode as AuthMode) ? configuredMode as AuthMode : 'prototype'
 export const consoleAuth = createConsoleAuthClient({ mode: consoleAuthMode })

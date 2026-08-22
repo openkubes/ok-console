@@ -28,6 +28,7 @@ describe('OpenKubes Console', () => {
       mode: 'oidc',
       restoreSession: vi.fn(async () => ({ method: 'oidc' as const, identity: 'Live User', source: 'provider-1', assurance: 'Federated · MFA', expiresIn: 'Until 10:00' })),
       startOidc: vi.fn(),
+      authenticateLocal: vi.fn(),
       logout: vi.fn(async () => {}),
     }
     render(<App auth={auth}/>)
@@ -42,7 +43,7 @@ describe('OpenKubes Console', () => {
 
   it('hands the live sign-in action to the fixed OIDC client port', async () => {
     const auth: ConsoleAuthClient = {
-      mode: 'oidc', restoreSession: vi.fn(async () => null), startOidc: vi.fn(), logout: vi.fn(async () => {}),
+      mode: 'oidc', restoreSession: vi.fn(async () => null), startOidc: vi.fn(), authenticateLocal: vi.fn(), logout: vi.fn(async () => {}),
     }
     render(<App auth={auth}/>)
     fireEvent.click(await screen.findByRole('button', { name: /Continue with OpenKubes Identity/i }))
@@ -74,6 +75,49 @@ describe('OpenKubes Console', () => {
     expect(await screen.findByRole('heading', { name: 'Review break-glass session' })).toBeInTheDocument()
     expect(screen.getByText('Local bootstrap / break-glass')).toBeInTheDocument()
     expect(screen.queryByDisplayValue('prototype-only')).not.toBeInTheDocument()
+  })
+
+  it('submits live break-glass credentials only through the auth client and enters with its session projection', async () => {
+    const authenticateLocal = vi.fn(async () => ({
+      method: 'local' as const, identity: 'Recovery Admin', source: 'BreakGlass local account',
+      assurance: 'Password · ExceptionalAccess', expiresIn: 'Until 10:00',
+    }))
+    const auth: ConsoleAuthClient = {
+      mode: 'breakglass', restoreSession: vi.fn(async () => null), startOidc: vi.fn(),
+      authenticateLocal, logout: vi.fn(async () => {}),
+    }
+    render(<App auth={auth}/>)
+    fireEvent.click(await screen.findByRole('button', { name: /Use a local account/i }))
+    fireEvent.change(screen.getByLabelText('Local username'), { target: { value: 'recovery-admin' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'one-time-secret' } })
+    fireEvent.change(screen.getByLabelText(/Operational reason/i), { target: { value: 'Federation provider is unavailable' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /time-bound and audited/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Authenticate and enter Console/i }))
+
+    await waitFor(() => expect(authenticateLocal).toHaveBeenCalledWith({
+      username: 'recovery-admin', password: 'one-time-secret', reason: 'Federation provider is unavailable',
+    }))
+    expect(await screen.findByRole('heading', { name: 'Hello Recovery' })).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('one-time-secret')).not.toBeInTheDocument()
+  })
+
+  it('shows bootstrap as the sole live entry method and clears a rejected password', async () => {
+    const auth: ConsoleAuthClient = {
+      mode: 'bootstrap', restoreSession: vi.fn(async () => null), startOidc: vi.fn(),
+      authenticateLocal: vi.fn(async () => { throw new Error('private dependency detail') }), logout: vi.fn(async () => {}),
+    }
+    render(<App auth={auth}/>)
+    expect(await screen.findByRole('button', { name: /Use a local account/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Continue with OpenKubes Identity/i })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Use a local account/i }))
+    fireEvent.change(screen.getByLabelText('Local username'), { target: { value: 'bootstrap-admin' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'bootstrap-secret' } })
+    fireEvent.change(screen.getByLabelText(/Operational reason/i), { target: { value: 'Initial platform bootstrap' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /time-bound and audited/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Authenticate and enter Console/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Exceptional local access could not be completed.')
+    expect(screen.queryByDisplayValue('bootstrap-secret')).not.toBeInTheDocument()
+    expect(screen.queryByText('private dependency detail')).not.toBeInTheDocument()
   })
 
   it('renders the management plane first with evidence-backed status', async () => {

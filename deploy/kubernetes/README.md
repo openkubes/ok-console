@@ -107,6 +107,32 @@ probes, and default-deny policy. Kind's default CNI does not itself prove target
 cluster NetworkPolicy enforcement; that remains an explicit later environment
 gate.
 
+## OK-170 ok-shared preview
+
+The `overlays/ok-shared-preview` path is the first target-specific deployment
+step for the shared OpenKubes development cluster. It pins the accepted rc.3
+image digest and keeps the Console in fixture-backed, read-only preview mode.
+OIDC, PostgreSQL, exceptional local access and the observed-state producer are
+disabled until their real ok-shared dependencies and secret custody are
+reviewed. It does not expose an unauthenticated Ingress.
+
+Render and validate without changing the cluster:
+
+```bash
+./deploy/kubernetes/verify-ok-shared-preview.sh
+```
+
+After review, deployment requires an explicit apply gate:
+
+```bash
+OK_CONSOLE_APPLY=true ./deploy/kubernetes/verify-ok-shared-preview.sh
+```
+
+The verifier requires the exact `ok-shared-admin@ok-shared` context and refuses
+to modify a pre-existing `openkubes-console` namespace unless it carries the
+`openkubes.io/managed-by=ok-170` ownership label. The Phase A inventory and the
+remaining live-integration gates are recorded in `docs/evidence/ok-170`.
+
 ## Development image publication
 
 `.github/workflows/publish-dev-image.yaml` publishes only a `dev-v*` tag whose

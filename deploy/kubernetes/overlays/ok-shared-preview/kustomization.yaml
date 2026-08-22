@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - namespace.json
+  - network-policy-preview-ingress.json
+images:
+  - name: ghcr.io/openkubes/ok-console
+    newName: ghcr.io/openkubes/ok-console
+    digest: sha256:04e5541fe9af040b1ca330ce632a74b20fab58489619c16a41db9f8b2d28441d
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ok-console
+    patch: |-
+      - op: add
+        path: /metadata/labels/openkubes.io~1environment
+        value: ok-shared-preview
+      - op: add
+        path: /spec/template/metadata/labels/openkubes.io~1environment
+        value: ok-shared-preview
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: OK_CONSOLE_BFF_HOST
+            value: 0.0.0.0
+          - name: OK_CONSOLE_BFF_PORT
+            value: "8787"
+          - name: OK_CONSOLE_SESSION_STORE_MODE
+            value: disabled
+          - name: OK_CONSOLE_OIDC_ENABLED
+            value: "false"
+          - name: OK_CONSOLE_LOCAL_ACCESS_MODE
+            value: disabled
+          - name: OK_CONSOLE_OBSERVED_STATE_MODE
+            value: fixture
+          - name: OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION
+            value: "false"
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts
+      - op: remove
+        path: /spec/template/spec/volumes
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

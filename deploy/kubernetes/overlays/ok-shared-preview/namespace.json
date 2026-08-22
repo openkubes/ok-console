@@ -1,0 +1,16 @@
+{
+  "apiVersion": "v1",
+  "kind": "Namespace",
+  "metadata": {
+    "name": "openkubes-console",
+    "labels": {
+      "app.kubernetes.io/part-of": "openkubes",
+      "openkubes.io/environment": "ok-shared-preview",
+      "openkubes.io/managed-by": "ok-170",
+      "pod-security.kubernetes.io/enforce": "restricted",
+      "pod-security.kubernetes.io/enforce-version": "latest",
+      "pod-security.kubernetes.io/audit": "restricted",
+      "pod-security.kubernetes.io/warn": "restricted"
+    }
+  }
+}

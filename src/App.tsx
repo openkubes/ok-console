@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
+import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
 import { consoleData, consoleDataMode } from './data/consoleData'
 import { ConsoleDataError } from './data/bffAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
@@ -72,6 +73,10 @@ function EmptyLoading() {
   return <main className="loading"><img src="./openkubes-icon.png" alt=""/><p>Loading contract-aligned platform view…</p></main>
 }
 
+function AuthLoading() {
+  return <main className="loading"><img src="./openkubes-icon.png" alt=""/><p>Checking secure Console session…</p></main>
+}
+
 function LoadFailure({ error, retry }: { error: ConsoleDataError; retry: () => void }) {
   return <main className="loading load-failure" role="alert"><img src="./openkubes-icon.png" alt=""/><span className="eyebrow">Read-only Console</span><h1>Platform data is unavailable</h1><p>{error.message}</p><small>{error.code}{error.correlationId ? ` · Correlation ID ${error.correlationId}` : ''}</small>{error.retryable && <button className="primary-button" onClick={retry}>Retry safely</button>}</main>
 }
@@ -80,11 +85,11 @@ function EmptyState({ title, description }: { title: string; description: string
   return <div className="empty-state" role="status"><span className="cluster-symbol"><Icon name="cube"/></span><h2>{title}</h2><p>{description}</p></div>
 }
 
-function Overview({ data, openCluster, openEvidence }: { data: PlatformSnapshot; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
+function Overview({ data, identity, openCluster, openEvidence }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   const overview = data.overview
   return <>
-    <PageTitle eyebrow="Platform posture" title="Hello Arash" description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
     {(data.freshness === 'Stale' || (data.warnings?.length ?? 0) > 0) && <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{data.freshness === 'Stale' ? 'Some observations are stale' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>}
     <section className="metrics-grid" aria-label="Platform metrics">
       <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · 1 management plane`} tone="blue"/>
@@ -414,8 +419,13 @@ function EvidenceDrawer({ item, close }: { item: EvidenceRef; close: () => void 
   return <div className="drawer-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><header><div><span className="eyebrow">{item.type}</span><h2 id="evidence-title">{item.title}</h2></div><button className="icon-button" onClick={close} aria-label="Close evidence"><Icon name="x"/></button></header><StatusBadge status={item.outcome}/><p className="drawer-summary">{item.summary}</p><dl className="evidence-details"><div><dt>Cluster</dt><dd>{item.cluster}</dd></div><div><dt>Contract</dt><dd>{item.contract}</dd></div><div><dt>Revision / digest</dt><dd>{item.revision}</dd></div><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Observed at</dt><dd>{new Date(item.observedAt).toLocaleString()}</dd></div><div><dt>Durability</dt><dd>{item.immutable ? 'Immutable receipt' : 'Current, freshness-bound observation'}</dd></div></dl><div className="provenance-box"><Icon name="shield"/><div><strong>Provenance visible</strong><p>This projection is redaction-safe fixture data. It does not expose credentials, kubeconfigs, or raw private evidence.</p></div></div><button className="secondary-button full-button" onClick={close}>Close</button></aside></div>
 }
 
-export default function App() {
+export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }) {
   const [session, setSession] = useState<PrototypeSession>()
+  const [authStatus, setAuthStatus] = useState<'checking' | 'ready'>(auth.mode === 'oidc' ? 'checking' : 'ready')
+  const [authError, setAuthError] = useState<string>()
+  const [authAttempt, setAuthAttempt] = useState(0)
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string>()
   const [data, setData] = useState<PlatformSnapshot>()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [selectedCluster, setSelectedCluster] = useState<Cluster>()
@@ -425,6 +435,38 @@ export default function App() {
   const [loadError, setLoadError] = useState<ConsoleDataError>()
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [clusterDetailError, setClusterDetailError] = useState<ConsoleDataError>()
+
+  useEffect(() => {
+    if (auth.mode !== 'oidc') return
+    let active = true
+    setAuthStatus('checking')
+    setAuthError(undefined)
+    auth.restoreSession()
+      .then((restored) => { if (active) setSession(restored ?? undefined) })
+      .catch((error: unknown) => {
+        if (active) setAuthError(error instanceof ConsoleAuthError ? error.message : 'The authentication service is unavailable.')
+      })
+      .finally(() => { if (active) setAuthStatus('ready') })
+    return () => { active = false }
+  }, [auth, authAttempt])
+
+  const signOut = async () => {
+    setSigningOut(true)
+    setSignOutError(undefined)
+    try {
+      await auth.logout()
+      setSelectedCluster(undefined)
+      setSelectedEvidence(undefined)
+      setShellCluster(undefined)
+      setSession(undefined)
+      setData(undefined)
+      window.location.hash = '#/overview'
+    } catch (error) {
+      setSignOutError(error instanceof ConsoleAuthError ? error.message : 'Sign-out could not be completed safely.')
+    } finally {
+      setSigningOut(false)
+    }
+  }
 
   const openCluster = (cluster: Cluster) => {
     setSelectedCluster(cluster)
@@ -469,10 +511,11 @@ export default function App() {
   const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
-  if (!session) return <AuthEntry onAuthenticated={setSession}/>
+  if (authStatus === 'checking') return <AuthLoading/>
+  if (!session) return <AuthEntry onAuthenticated={setSession} liveOidc={auth.mode === 'oidc'} onStartOidc={auth.startOidc} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
+  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
@@ -482,7 +525,7 @@ export default function App() {
       <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}</nav>
       <div className="sidebar-spacer"/>
       <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div>
-      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{session.method === 'oidc' ? 'Federated identity' : 'Break-glass session'}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" onClick={() => { setSelectedCluster(undefined); setSelectedEvidence(undefined); setShellCluster(undefined); setSession(undefined); window.location.hash = '#/overview' }}>Sign out</button></div>
+      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{signOutError ?? (session.method === 'oidc' ? 'Federated identity' : 'Break-glass session')}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" disabled={signingOut} onClick={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div>
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">

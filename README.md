@@ -51,6 +51,23 @@ against the Presentation Contract before mapping into view models. Credentials
 remain same-origin and are never read from environment variables or browser
 storage.
 
+The browser authentication mode is separately explicit. The default
+`VITE_CONSOLE_AUTH_MODE=prototype` preserves the deterministic graphical spike.
+The reviewed live handoff requires both:
+
+```bash
+VITE_CONSOLE_DATA_MODE=bff
+VITE_CONSOLE_AUTH_MODE=oidc
+```
+
+In live mode the Console first inspects the same-origin public session
+projection. An unauthenticated user can start only the fixed BFF OIDC endpoint;
+the provider callback restores an opaque server-side session. Logout copies the
+readable session-bound CSRF cookie into the required header and clears local UI
+state only after the BFF confirms revocation. The opaque session cookie remains
+HttpOnly and is never read by React. Live OIDC with fixture data fails at build
+startup rather than presenting deterministic data as a real observation.
+
 The OK-158 read-only BFF now runs as a separate local process. Start it in one
 terminal and the BFF-backed Console in another:
 
@@ -131,11 +148,11 @@ resources or a generic backend proxy.
   upload, and previews a reviewable `ExternalClusterRegistration`. Discovery and
   registration are deterministic simulations and create no connector, credential,
   Secret, ProviderConfig, API request, or backend state.
-- Authentication entry is an in-memory interaction prototype. OIDC is the preferred
-  route and the local account path is explicitly bootstrap/break-glass only. Neither
-  flow sends a request, creates a token or cookie, validates a credential, or persists
-  session material in browser storage.
-- Production authentication, RBAC, MFA, account recovery, live Kubernetes access,
+- Authentication entry remains an in-memory interaction in the default prototype
+  mode. In explicit live mode, OIDC redirects through the BFF, restores only the
+  public session projection, and performs CSRF-bound server logout. The local account
+  UI is disabled there until its bootstrap/break-glass server boundary is reviewed.
+- Provider-specific production acceptance, RBAC lifecycle, account recovery, live Kubernetes access,
   deployment, generic schema rendering, and AI-driven runtime adaptation are
   deliberately out of scope.
 

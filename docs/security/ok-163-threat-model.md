@@ -88,5 +88,13 @@ cannot create authority. Provider tokens never enter browser storage or the
 session database. Deployment-provider interoperability and adversarial token
 fixtures remain mandatory acceptance evidence before production readiness.
 
+The browser now has an explicit live OIDC mode. It restores only the redacted
+`ConsoleSession` projection, navigates to a fixed same-origin OIDC start path,
+and submits logout with the readable session-bound CSRF value. It never reads
+the HttpOnly session reference or provider tokens. Local exceptional access is
+disabled in live mode until its separate server verifier is implemented. A
+configuration guard prevents live authentication from being paired with fixture
+data.
+
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

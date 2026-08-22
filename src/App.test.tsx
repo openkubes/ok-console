@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import type { ConsoleAuthClient } from './auth/authClient'
 
 const renderSignedIn = async () => {
   render(<App />)
@@ -20,6 +21,34 @@ describe('OpenKubes Console', () => {
     expect(screen.getByRole('button', { name: /Continue with OpenKubes Identity/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Use a local account/i })).toHaveTextContent(/Bootstrap \/ break-glass only/i)
     expect(screen.queryByText('ok-mgmt')).not.toBeInTheDocument()
+  })
+
+  it('restores a live BFF session before exposing platform data and logs out server-side', async () => {
+    const auth: ConsoleAuthClient = {
+      mode: 'oidc',
+      restoreSession: vi.fn(async () => ({ method: 'oidc' as const, identity: 'Live User', source: 'provider-1', assurance: 'Federated · MFA', expiresIn: 'Until 10:00' })),
+      startOidc: vi.fn(),
+      logout: vi.fn(async () => {}),
+    }
+    render(<App auth={auth}/>)
+
+    expect(screen.getByText('Checking secure Console session…')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Hello Live' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Sign out of OpenKubes Console/i }))
+    await waitFor(() => expect(auth.logout).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Local account not enabled/i })).toBeDisabled()
+  })
+
+  it('hands the live sign-in action to the fixed OIDC client port', async () => {
+    const auth: ConsoleAuthClient = {
+      mode: 'oidc', restoreSession: vi.fn(async () => null), startOidc: vi.fn(), logout: vi.fn(async () => {}),
+    }
+    render(<App auth={auth}/>)
+    fireEvent.click(await screen.findByRole('button', { name: /Continue with OpenKubes Identity/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue to identity provider/i }))
+    expect(auth.startOidc).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/Simulation only/i)).not.toBeInTheDocument()
   })
 
   it('reviews a federated identity separately from authority and signs out safely', async () => {

@@ -167,6 +167,13 @@ duplicate mappings, missing ID Tokens, stale transactions, provider errors,
 and configuration ambiguity fail closed with bounded errors. Register the exact
 callback `${OK_CONSOLE_ORIGIN}/api/console/v0/auth/oidc/callback` at the provider.
 
+Build the browser with `VITE_CONSOLE_AUTH_MODE=oidc` and
+`VITE_CONSOLE_DATA_MODE=bff` to activate the live handoff. React restores only
+`GET /auth/session`, redirects sign-in to `GET /auth/oidc/start`, and invokes
+CSRF-bound `DELETE /auth/session` for logout. The prototype mode remains the
+explicit default. Local/bootstrap authentication is disabled in live mode until
+its independent verifier, rate limit, audit, and recovery boundary is accepted.
+
 Rotation retains an internal digest-only session-family identifier. Logout
 locks the presented reference and revokes that entire family in one transaction,
 so a concurrent rotation cannot leave a newly issued reference active.

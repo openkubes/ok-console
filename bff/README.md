@@ -33,6 +33,7 @@ using `ConsoleDataPort`; only its adapter changes.
 | `DELETE /api/console/v0/auth/session` | empty `204` + cleared cookies | valid session + exact Origin + CSRF |
 | `GET /api/console/v0/auth/oidc/start` | `302` to the configured issuer | OIDC enabled |
 | `GET /api/console/v0/auth/oidc/callback` | `303` + opaque Console cookies | valid one-time flow + mapped subject |
+| `POST /api/console/v0/auth/local` | `ConsoleSession` + opaque Console cookies | explicitly enabled Bootstrap/BreakGlass mode + exact Origin |
 
 All other paths return a bounded `NOT_FOUND` response. Non-`GET` resource
 methods fail closed; there is no generic Kubernetes proxy or platform mutation
@@ -46,9 +47,9 @@ Inject `sessionStore` and the Console's exact `expectedOrigin` into
 does not select the in-memory test store implicitly. Without an injected store,
 these routes return `503 SESSION_UNAVAILABLE`.
 
-The BFF never exposes a `POST` that turns browser-supplied identity data into a
-session. A later reviewed OIDC callback or exceptional-access verifier must
-create the server-side session. The readable `__Host-ok_console_csrf` cookie
+Only the fixed exceptional-access route can turn submitted local credentials
+into a session, and it is absent unless its server-side mode and mounted secret
+contracts pass startup validation. The readable `__Host-ok_console_csrf` cookie
 lets browser code copy the session-bound value into `X-CSRF-Token`; the opaque
 `__Host-ok_console_session` cookie remains `HttpOnly`. Rotation and logout also
 require an exact configured Origin and clear or replace both cookies.
@@ -171,24 +172,61 @@ Build the browser with `VITE_CONSOLE_AUTH_MODE=oidc` and
 `VITE_CONSOLE_DATA_MODE=bff` to activate the live handoff. React restores only
 `GET /auth/session`, redirects sign-in to `GET /auth/oidc/start`, and invokes
 CSRF-bound `DELETE /auth/session` for logout. The prototype mode remains the
-explicit default. Local/bootstrap authentication is disabled in live mode until
-its independent verifier, rate limit, audit, and recovery boundary is accepted.
+explicit default. The current React UI does not yet submit exceptional local
+access; that handoff remains a separately reviewed slice.
 
-### Exceptional local-access verifier core
+### Exceptional local access
 
-`security/localAccess.mjs` provides the reviewed core for a later Bootstrap or
-Break-glass HTTP endpoint. It is not wired into the runtime and therefore
-cannot be invoked remotely in this slice. Accounts are explicit mappings with
-salted scrypt verifiers; unknown usernames execute the same asynchronous KDF
-path. Parameters are fixed to `N=32768`, `r=8`, `p=1` with a 64 MiB ceiling.
+Exceptional access is disabled by default. The explicit PostgreSQL runtime can
+enable `OK_CONSOLE_LOCAL_ACCESS_MODE=bootstrap|breakglass`; Bootstrap is
+accepted only while OIDC is disabled, and BreakGlass only while OIDC is enabled.
+Both modes require migrations `003_local_access_throttle.sql` and
+`004_local_access_audit.sql`, plus bounded mounted account and pepper files.
+No environment variable or browser bundle contains the credential material.
+
+`POST /api/console/v0/auth/local` accepts only same-origin JSON after validating
+the exact configured Origin and content type before reading its 16 KiB-bounded
+body. Credential and input failures share one redaction-safe `401`; unavailable
+throttle, audit, KDF, or session dependencies fail closed with a bounded `503`.
+Success returns only the public `ConsoleSession` projection and the same opaque
+session/CSRF cookies used by OIDC.
+
+Accounts are explicit authority mappings with salted scrypt verifiers; unknown
+usernames execute the same asynchronous KDF path. Parameters are fixed to
+`N=32768`, `r=8`, `p=1` with a 64 MiB ceiling. The mounted JSON shape is:
+
+```json
+{
+  "version": "v1",
+  "accounts": [{
+    "username": "recovery-admin",
+    "enabled": true,
+    "salt": "base64-encoded-16-byte-salt",
+    "verifier": "base64-encoded-32-byte-scrypt-output",
+    "identityId": "reviewed-stable-identity",
+    "displayName": "Recovery Administrator",
+    "environmentId": "production",
+    "tenantIds": ["platform"],
+    "permissions": ["platform.read", "clusters.read"]
+  }]
+}
+```
 
 Migration `003_local_access_throttle.sql` adds digest-only, database-time
 throttling shared by all BFF replicas. Five failed attempts in a 15-minute
-window block the principal for 15 minutes. The digest is HMAC-peppered so the
-table does not disclose configured usernames. Every attempt requires a bounded
-operational reason and emits a credential-free event through an injected audit
-port. The future HTTP/runtime slice must supply durable Evidence; until then,
-local access remains disabled in the live UI.
+window block that principal for 15 minutes; 50 failures across rotating
+principals also activate a shared global bucket. The digest is HMAC-peppered so
+the table does not disclose configured usernames. Edge/IP rate limiting remains
+a deployment control because the BFF does not invent trust in proxy headers.
+
+Every attempt requires a 12–512 character operational reason and writes
+credential-free, correlation-ID-bearing Evidence through migration `004`.
+Granted access is revoked if its Evidence cannot be stored. Configure the BFF
+runtime database identity with only `INSERT` on `local_access_audit`; migration
+and retention identities own update/delete policy. Operators must not put
+secrets into the reason, and deployments must define access and retention.
+Credential custody, recovery exercises, MFA feasibility, and production
+acceptance remain open even though the server boundary is now executable.
 
 Rotation retains an internal digest-only session-family identifier. Logout
 locks the presented reference and revokes that entire family in one transaction,

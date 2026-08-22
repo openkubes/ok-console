@@ -5,7 +5,7 @@ import pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
-import { PostgresLocalAccessThrottle } from './localAccess.mjs'
+import { PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
 import { PostgresSessionStore, SessionStoreError } from './postgresSessionStore.mjs'
 import { readSessionCookie } from './session.mjs'
 
@@ -38,10 +38,12 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     await pool.query(oidcMigration)
     const localAccessMigration = await readFile(new URL('./postgres/003_local_access_throttle.sql', import.meta.url), 'utf8')
     await pool.query(localAccessMigration)
+    const localAuditMigration = await readFile(new URL('./postgres/004_local_access_audit.sql', import.meta.url), 'utf8')
+    await pool.query(localAuditMigration)
   })
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions, ok_console.local_access_throttle')
+    await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions, ok_console.local_access_throttle, ok_console.local_access_audit')
     codec = new SessionEnvelopeCodec({ primaryKeyId: 'key-1', keys: { 'key-1': keyOne } })
     store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
   })
@@ -219,5 +221,17 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     expect(JSON.stringify(row.rows)).not.toContain('recovery-admin')
     await second.success('recovery-admin')
     expect(await first.blocked('recovery-admin')).toBe(false)
+    for (let attempt = 5; attempt < 50; attempt += 1) await first.failure(`rotating-principal-${attempt}`)
+    expect(await second.blocked('previously-unseen-principal')).toBe(true)
+  })
+
+  it('persists credential-free exceptional-access audit Evidence using database time', async () => {
+    const audit = new PostgresLocalAccessAudit({ pool, pepper: Buffer.alloc(32, 5) })
+    await audit.record({ principal: 'recovery-admin', method: 'BreakGlass', outcome: 'Denied',
+      cause: 'INVALID_CREDENTIAL', reason: 'Emergency provider recovery', correlationId: 'corr-pg-1' })
+    const result = await pool.query('SELECT * FROM ok_console.local_access_audit')
+    expect(result.rowCount).toBe(1)
+    expect(result.rows[0]).toMatchObject({ authentication_method: 'BreakGlass', outcome: 'Denied', correlation_id: 'corr-pg-1' })
+    expect(JSON.stringify(result.rows[0])).not.toContain('recovery-admin')
   })
 })

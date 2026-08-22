@@ -6,6 +6,11 @@ This threat model applies ADR-Platform-037 to the Console BFF, browser session,
 OIDC provider, observed-state producer and exceptional local access. The React
 login simulation is excluded from the trusted computing base.
 
+Deployment and secret-management assumptions are specified separately in the
+[`OK-163 security deployment profile`](ok-163-deployment-profile.md). The
+assembled reviewer evidence is in
+[`docs/evidence/ok-163`](../evidence/ok-163/README.md).
+
 ## Assets and trust boundaries
 
 | Asset | Trust boundary | Required property |

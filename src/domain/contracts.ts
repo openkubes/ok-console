@@ -52,6 +52,7 @@ export interface Cluster {
   revision: string
   evidenceId: string
   capabilities: string[]
+  capabilityCount?: number
   capabilityDetails?: Array<{ id: string; name: string; readiness: Readiness; evidenceId: string }>
   lifecycle: Array<{ label: string; state: Readiness; detail: string }>
 }

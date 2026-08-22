@@ -147,9 +147,14 @@ pnpm test
 pnpm test:bff
 pnpm test:contract
 pnpm test:deployment
+pnpm test:e2e # requires the Playwright Chromium install
 pnpm test:postgres # requires OK_CONSOLE_TEST_POSTGRES_URL
 pnpm build
 ```
+
+The production-shaped Chromium journeys, strict automated WCAG A/AA baseline,
+keyboard checks, failure matrix, and screenshot artifact policy are documented
+in the [`OK-164 acceptance record`](docs/evidence/ok-164/README.md).
 
 ## Presentation Contract
 

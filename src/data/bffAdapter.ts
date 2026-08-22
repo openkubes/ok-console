@@ -40,6 +40,7 @@ const clusterFromSummary = (cluster: ClusterListResponse['data']['items'][number
   revision: cluster.revision,
   evidenceId: cluster.evidenceId,
   capabilities: [],
+  capabilityCount: cluster.capabilityCount,
   lifecycle: [],
 })
 
@@ -73,7 +74,7 @@ const isRecordWithKind = (value: unknown): value is { kind: string } =>
 export class BffConsoleAdapter implements ConsoleDataPort {
   constructor(
     private readonly baseUrl = '/api/console/v0',
-    private readonly fetcher: FetchLike = fetch,
+    private readonly fetcher: FetchLike = (...args) => fetch(...args),
   ) {}
 
   private async request<T>(path: string, expectedKind: string): Promise<T> {

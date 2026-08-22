@@ -3,6 +3,9 @@
 .codex
 .agents
 coverage
+playwright-report
+test-results
+blob-report
 dist
 node_modules
 *.local

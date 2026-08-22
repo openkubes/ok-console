@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ok-console
+  namespace: openkubes-console
+spec:
+  template:
+    spec:
+      containers:
+        - name: console
+          env:
+            - name: NODE_EXTRA_CA_CERTS
+              value: /run/secrets/ok-console/oidc-ca/ca.crt
+            - name: OK_CONSOLE_SESSION_EPOCH
+              value: ok-shared-phase-b2-oidc-1
+            - name: OK_CONSOLE_AUTHORIZATION_REVISION
+              value: ok-shared-breakglass-v1
+            - name: OK_CONSOLE_OIDC_ENABLED
+              value: "true"
+            - name: OK_CONSOLE_OIDC_PROVIDER_ID
+              value: keycloak-openkubes
+            - name: OK_CONSOLE_OIDC_ISSUER
+              value: https://keycloak.ok-shared.internal/realms/openkubes
+            - name: OK_CONSOLE_OIDC_CLIENT_ID
+              value: ok-console
+            - name: OK_CONSOLE_OIDC_CLIENT_SECRET_FILE
+              value: /run/secrets/ok-console/oidc/client-secret
+            - name: OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE
+              value: /run/secrets/ok-console/oidc/subjects.json
+            - name: OK_CONSOLE_LOCAL_ACCESS_MODE
+              value: breakglass
+          volumeMounts:
+            - name: oidc
+              mountPath: /run/secrets/ok-console/oidc
+              readOnly: true
+            - name: oidc-ca
+              mountPath: /run/secrets/ok-console/oidc-ca
+              readOnly: true
+      volumes:
+        - name: oidc
+          secret:
+            secretName: ok-console-oidc
+            defaultMode: 288
+            items:
+              - key: client-secret
+                path: client-secret
+              - key: subjects.json
+                path: subjects.json
+        - name: oidc-ca
+          secret:
+            secretName: ok-console-oidc-ca
+            defaultMode: 288
+            items:
+              - key: ca.crt
+                path: ca.crt

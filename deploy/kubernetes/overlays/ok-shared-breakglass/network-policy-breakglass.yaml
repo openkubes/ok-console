@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ok-console-live-egress
+  namespace: openkubes-console
+spec:
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: traefik-ingress
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 443

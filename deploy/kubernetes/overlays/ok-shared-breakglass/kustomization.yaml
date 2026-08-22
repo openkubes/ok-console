@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../ok-shared-live
+
+images:
+  - name: ghcr.io/openkubes/ok-console
+    newName: ghcr.io/openkubes/ok-console
+    digest: sha256:20860b2f87ffd9454c5925aba4fac83dc1c6f4787ec89b935fbcb76fc68600f
+
+patches:
+  - path: deployment-breakglass.yaml
+  - path: network-policy-breakglass.yaml

@@ -1,0 +1,38 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ok-console-db
+  namespace: openkubes-console
+  labels:
+    app.kubernetes.io/name: ok-console-db
+    app.kubernetes.io/part-of: openkubes
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie@sha256:26e146bc71ebfc2a3937f729a15161a7fb6cd7c8a0b0007ad60cb53d2371b3fc
+  enableSuperuserAccess: false
+  bootstrap:
+    initdb:
+      database: ok_console
+      owner: ok_console
+      dataChecksums: true
+      encoding: UTF8
+      localeCType: C
+      localeCollate: C
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: ok-console-postgres-migrations
+            key: 001_console_sessions.sql
+          - name: ok-console-postgres-migrations
+            key: 003_local_access_throttle.sql
+          - name: ok-console-postgres-migrations
+            key: 004_local_access_audit.sql
+  storage:
+    storageClass: local-path
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

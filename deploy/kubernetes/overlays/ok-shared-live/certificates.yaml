@@ -1,0 +1,62 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: observed-state-producer-server
+  namespace: openkubes-console
+spec:
+  secretName: observed-state-producer-server-tls
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: ok-shared-internal-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  dnsNames:
+    - observed-state-producer
+    - observed-state-producer.openkubes-console
+    - observed-state-producer.openkubes-console.svc
+    - observed-state-producer.openkubes-console.svc.cluster.local
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ok-console-observed-state-client
+  namespace: openkubes-console
+spec:
+  secretName: ok-console-observed-state-client-tls
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: ok-shared-internal-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - client auth
+  uris:
+    - spiffe://openkubes.io/ns/openkubes-console/sa/ok-console
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ok-console-ingress
+  namespace: openkubes-console
+spec:
+  secretName: ok-console-ingress-tls
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: ok-shared-internal-ca
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+  dnsNames:
+    - console.ok-shared.internal

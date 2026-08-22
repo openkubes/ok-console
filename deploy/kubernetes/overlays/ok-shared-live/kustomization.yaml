@@ -1,0 +1,133 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - namespace.yaml
+  - certificates.yaml
+  - postgres-migrations.yaml
+  - postgres-cluster.yaml
+  - producer-rbac.yaml
+  - producer-deployment.yaml
+  - network-policies.yaml
+  - ingress.yaml
+images:
+  - name: ghcr.io/openkubes/ok-console
+    newName: ghcr.io/openkubes/ok-console
+    digest: sha256:10cfb281bc5d0d14aaea34ca072ea4b92d69183df617c1a2d19c1d3a5d6aac6b
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ok-console
+    patch: |-
+      - op: add
+        path: /metadata/labels/openkubes.io~1environment
+        value: ok-shared-live
+      - op: add
+        path: /spec/template/metadata/labels/openkubes.io~1environment
+        value: ok-shared-live
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: OK_CONSOLE_BFF_HOST
+            value: 0.0.0.0
+          - name: OK_CONSOLE_BFF_PORT
+            value: "8787"
+          - name: OK_CONSOLE_SESSION_STORE_MODE
+            value: postgres
+          - name: OK_CONSOLE_ORIGIN
+            value: https://console.ok-shared.internal:30443
+          - name: OK_CONSOLE_ENVIRONMENT_ID
+            value: ok-shared
+          - name: OK_CONSOLE_SESSION_EPOCH
+            value: ok-shared-phase-b1-1
+          - name: OK_CONSOLE_AUTHORIZATION_REVISION
+            value: ok-shared-bootstrap-v1
+          - name: OK_CONSOLE_POSTGRES_URL_FILE
+            value: /run/secrets/ok-console/postgres/url
+          - name: OK_CONSOLE_POSTGRES_CA_FILE
+            value: /run/secrets/ok-console/postgres/ca.pem
+          - name: OK_CONSOLE_SESSION_ENVELOPE_PRIMARY_KEY_ID
+            value: session-key-v1
+          - name: OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE
+            value: /run/secrets/ok-console/session/keys.json
+          - name: OK_CONSOLE_OIDC_ENABLED
+            value: "false"
+          - name: OK_CONSOLE_LOCAL_ACCESS_MODE
+            value: bootstrap
+          - name: OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE
+            value: /run/secrets/ok-console/local/accounts.json
+          - name: OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE
+            value: /run/secrets/ok-console/local/pepper
+          - name: OK_CONSOLE_OBSERVED_STATE_MODE
+            value: openkubes
+          - name: OK_CONSOLE_OBSERVED_STATE_URL
+            value: https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha1
+          - name: OK_CONSOLE_OBSERVED_STATE_CA_FILE
+            value: /run/secrets/ok-console/observed-state/ca.crt
+          - name: OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE
+            value: /run/secrets/ok-console/observed-state/tls.crt
+          - name: OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE
+            value: /run/secrets/ok-console/observed-state/tls.key
+          - name: OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION
+            value: "false"
+      - op: replace
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - name: postgres
+            mountPath: /run/secrets/ok-console/postgres
+            readOnly: true
+          - name: session
+            mountPath: /run/secrets/ok-console/session
+            readOnly: true
+          - name: local-access
+            mountPath: /run/secrets/ok-console/local
+            readOnly: true
+          - name: observed-state
+            mountPath: /run/secrets/ok-console/observed-state
+            readOnly: true
+      - op: replace
+        path: /spec/template/spec/volumes
+        value:
+          - name: postgres
+            projected:
+              defaultMode: 288
+              sources:
+                - secret:
+                    name: ok-console-db-app
+                    items:
+                      - key: uri
+                        path: url
+                - secret:
+                    name: ok-console-db-ca
+                    items:
+                      - key: ca.crt
+                        path: ca.pem
+          - name: session
+            secret:
+              secretName: ok-console-session
+              defaultMode: 288
+              items:
+                - key: keys.json
+                  path: keys.json
+          - name: local-access
+            secret:
+              secretName: ok-console-local-access
+              defaultMode: 288
+              items:
+                - key: accounts.json
+                  path: accounts.json
+                - key: pepper
+                  path: pepper
+          - name: observed-state
+            secret:
+              secretName: ok-console-observed-state-client-tls
+              defaultMode: 288
+              items:
+                - key: ca.crt
+                  path: ca.crt
+                - key: tls.crt
+                  path: tls.crt
+                - key: tls.key
+                  path: tls.key

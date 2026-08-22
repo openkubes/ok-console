@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ok-console-postgres-migrations
+  namespace: openkubes-console
+data:
+  001_console_sessions.sql: |
+    CREATE SCHEMA IF NOT EXISTS ok_console;
+    REVOKE ALL ON SCHEMA ok_console FROM PUBLIC;
+    GRANT USAGE ON SCHEMA ok_console TO ok_console;
+
+    CREATE TABLE IF NOT EXISTS ok_console.sessions (
+      session_digest text PRIMARY KEY CHECK (session_digest ~ '^[A-Za-z0-9_-]{43}$'),
+      session_family_digest text NOT NULL CHECK (session_family_digest ~ '^[A-Za-z0-9_-]{43}$'),
+      context_envelope text NOT NULL CHECK (octet_length(context_envelope) BETWEEN 1 AND 524288),
+      key_id text NOT NULL CHECK (length(key_id) BETWEEN 1 AND 512),
+      csrf_digest text NOT NULL CHECK (csrf_digest ~ '^[A-Za-z0-9_-]{43}$'),
+      authentication_method text NOT NULL CHECK (authentication_method IN ('OIDC', 'BreakGlass', 'Bootstrap')),
+      authorization_revision text NOT NULL CHECK (length(authorization_revision) BETWEEN 1 AND 512),
+      deployment_epoch text NOT NULL CHECK (length(deployment_epoch) BETWEEN 1 AND 512),
+      schema_version smallint NOT NULL DEFAULT 1 CHECK (schema_version = 1),
+      idle_lifetime_ms bigint NOT NULL CHECK (idle_lifetime_ms > 0),
+      issued_at timestamptz NOT NULL,
+      idle_expires_at timestamptz NOT NULL,
+      absolute_expires_at timestamptz NOT NULL,
+      revoked_at timestamptz,
+      revoke_reason text CHECK (revoke_reason IS NULL OR length(revoke_reason) BETWEEN 1 AND 512),
+      CHECK (idle_expires_at <= absolute_expires_at),
+      CHECK (issued_at < absolute_expires_at),
+      CHECK ((revoked_at IS NULL AND revoke_reason IS NULL) OR revoked_at IS NOT NULL)
+    );
+
+    CREATE INDEX IF NOT EXISTS sessions_idle_expiry_idx ON ok_console.sessions (idle_expires_at);
+    CREATE INDEX IF NOT EXISTS sessions_absolute_expiry_idx ON ok_console.sessions (absolute_expires_at);
+    CREATE INDEX IF NOT EXISTS sessions_revoked_at_idx ON ok_console.sessions (revoked_at) WHERE revoked_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS sessions_family_idx ON ok_console.sessions (session_family_digest);
+
+    COMMENT ON TABLE ok_console.sessions IS
+      'Opaque OpenKubes Console sessions. Raw cookies, raw CSRF values and provider tokens are prohibited.';
+
+    REVOKE ALL ON TABLE ok_console.sessions FROM PUBLIC;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.sessions TO ok_console;
+  003_local_access_throttle.sql: |
+    CREATE TABLE IF NOT EXISTS ok_console.local_access_throttle (
+      principal_digest text PRIMARY KEY CHECK (principal_digest ~ '^[A-Za-z0-9_-]{43}$'),
+      failures integer NOT NULL CHECK (failures BETWEEN 0 AND 100000),
+      window_started_at timestamptz NOT NULL,
+      blocked_until timestamptz,
+      updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+    );
+
+    CREATE INDEX IF NOT EXISTS local_access_throttle_updated_idx
+      ON ok_console.local_access_throttle (updated_at);
+
+    COMMENT ON TABLE ok_console.local_access_throttle IS
+      'Digest-only cross-replica throttle state for exceptional local Console access.';
+
+    REVOKE ALL ON TABLE ok_console.local_access_throttle FROM PUBLIC;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.local_access_throttle TO ok_console;
+  004_local_access_audit.sql: |
+    CREATE TABLE IF NOT EXISTS ok_console.local_access_audit (
+      event_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      principal_digest text NOT NULL CHECK (principal_digest ~ '^[A-Za-z0-9_-]{43}$'),
+      authentication_method text NOT NULL CHECK (authentication_method IN ('Bootstrap', 'BreakGlass')),
+      outcome text NOT NULL CHECK (outcome IN ('Granted', 'Denied')),
+      cause text NOT NULL CHECK (length(cause) BETWEEN 1 AND 64),
+      operational_reason text NOT NULL CHECK (length(operational_reason) BETWEEN 12 AND 512),
+      correlation_id text NOT NULL CHECK (length(correlation_id) BETWEEN 1 AND 512),
+      occurred_at timestamptz NOT NULL DEFAULT clock_timestamp()
+    );
+
+    CREATE INDEX IF NOT EXISTS local_access_audit_occurred_idx
+      ON ok_console.local_access_audit (occurred_at);
+
+    COMMENT ON TABLE ok_console.local_access_audit IS
+      'Append-only exceptional-access authentication Evidence without credentials or raw usernames.';
+
+    REVOKE ALL ON TABLE ok_console.local_access_audit FROM PUBLIC;
+    GRANT INSERT ON TABLE ok_console.local_access_audit TO ok_console;
+    GRANT USAGE ON SEQUENCE ok_console.local_access_audit_event_id_seq TO ok_console;

@@ -1,0 +1,120 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ok-console-preview-ingress
+  namespace: openkubes-console
+  labels:
+    app.kubernetes.io/name: ok-console
+    openkubes.io/environment: ok-shared-live
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ok-console
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: traefik-ingress
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8787
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ok-console-live-egress
+  namespace: openkubes-console
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ok-console
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: ok-console-db
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: observed-state-producer
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: observed-state-producer
+  namespace: openkubes-console
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: observed-state-producer
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ok-console
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: observed-state-producer-api-egress
+  namespace: openkubes-console
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: observed-state-producer
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ok-console-postgres
+  namespace: openkubes-console
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: ok-console-db
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ok-console
+      ports:
+        - protocol: TCP
+          port: 5432

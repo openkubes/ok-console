@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: observed-state-producer
+  namespace: openkubes-console
+  labels:
+    app.kubernetes.io/name: observed-state-producer
+    app.kubernetes.io/part-of: openkubes
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: observed-state-producer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: observed-state-producer
+        app.kubernetes.io/part-of: openkubes
+    spec:
+      serviceAccountName: observed-state-producer
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: producer
+          image: ghcr.io/openkubes/observed-state-producer@sha256:2af5f7fe9612a4fe006fbb931f47356d0e797339542d9012752a9208e8cd359c
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          env:
+            - name: OK_OBSERVER_SOURCE_MODE
+              value: hosting-cluster
+            - name: OK_OBSERVER_MANAGEMENT_NAME
+              value: ok-mgmt
+            - name: OK_OBSERVER_ENVIRONMENT_ID
+              value: ok-shared
+            - name: OK_OBSERVER_ENVIRONMENT_NAME
+              value: OpenKubes shared services
+            - name: OK_OBSERVER_HOSTING_NAME
+              value: ok-shared
+            - name: OK_OBSERVER_HOSTING_NAMESPACE
+              value: openkubes-console
+            - name: OK_OBSERVER_HOSTING_DEPLOYMENT
+              value: ok-console
+            - name: OK_OBSERVER_HOSTING_REGION
+              value: shared
+            - name: OK_OBSERVER_PORT
+              value: "8443"
+            - name: OK_OBSERVER_TLS_CERT_FILE
+              value: /var/run/secrets/openkubes/producer/tls.crt
+            - name: OK_OBSERVER_TLS_KEY_FILE
+              value: /var/run/secrets/openkubes/producer/tls.key
+            - name: OK_OBSERVER_TLS_CLIENT_CA_FILE
+              value: /var/run/secrets/openkubes/producer/client-ca.crt
+            - name: OK_OBSERVER_TLS_CLIENT_IDENTITY
+              value: spiffe://openkubes.io/ns/openkubes-console/sa/ok-console
+          volumeMounts:
+            - name: producer-tls
+              mountPath: /var/run/secrets/openkubes/producer
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 2
+            failureThreshold: 30
+            timeoutSeconds: 1
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: producer-tls
+          projected:
+            defaultMode: 288
+            sources:
+              - secret:
+                  name: observed-state-producer-server-tls
+                  items:
+                    - key: tls.crt
+                      path: tls.crt
+                    - key: tls.key
+                      path: tls.key
+              - secret:
+                  name: ok-console-observed-state-client-tls
+                  items:
+                    - key: ca.crt
+                      path: client-ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: observed-state-producer
+  namespace: openkubes-console
+  labels:
+    app.kubernetes.io/name: observed-state-producer
+spec:
+  selector:
+    app.kubernetes.io/name: observed-state-producer
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+      protocol: TCP
+      appProtocol: https

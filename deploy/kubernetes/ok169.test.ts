@@ -8,7 +8,7 @@ const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 describe('OK-169 development candidate invariants', () => {
   it('publishes only trusted dev tags with bounded authority and pinned actions', async () => {
     const workflow = await read('../../.github/workflows/publish-dev-image.yaml')
-    expect(workflow).toContain("tags:\n      - 'dev-v*'")
+    expect(workflow).toContain("tags:\n      - 'dev-v*'\n      - 'dev-breakglass-v*'")
     expect(workflow).not.toMatch(/pull_request:|workflow_dispatch:/)
     expect(workflow).toContain('packages: write')
     expect(workflow).toContain('id-token: write')
@@ -17,9 +17,10 @@ describe('OK-169 development candidate invariants', () => {
     expect(workflow).toContain('git merge-base --is-ancestor "${GITHUB_SHA}" origin/main')
     expect(workflow).toContain('${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}')
     expect(workflow).toContain('VITE_CONSOLE_DATA_MODE=bff')
-    expect(workflow).toContain('VITE_CONSOLE_AUTH_MODE=bootstrap')
+    expect(workflow).toContain("AUTH_MODE: ${{ startsWith(github.ref_name, 'dev-breakglass-v') && 'breakglass' || 'bootstrap' }}")
+    expect(workflow).toContain('VITE_CONSOLE_AUTH_MODE=${{ env.AUTH_MODE }}')
     expect(workflow).toContain('Browser data profile: bff')
-    expect(workflow).toContain('Browser authentication profile: bootstrap')
+    expect(workflow).toContain('Browser authentication profile: ${AUTH_MODE}')
     expect(workflow).toContain('severity: CRITICAL,HIGH')
     expect(workflow).toContain('cosign verify')
     for (const action of workflow.matchAll(/uses: ([^\s#]+)/g)) {

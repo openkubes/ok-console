@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9 AS build
+FROM --platform=${BUILDPLATFORM} node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9 AS build
 
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml ./
@@ -11,9 +11,11 @@ COPY public ./public
 COPY src ./src
 COPY bff ./bff
 COPY contracts ./contracts
-RUN pnpm build && pnpm prune --prod
+RUN pnpm build \
+    && pnpm prune --prod \
+    && test -z "$(find node_modules -type f -name '*.node' -print -quit)"
 
-FROM node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9 AS runtime
+FROM --platform=${TARGETPLATFORM} node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9 AS runtime
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/openkubes/ok-console" \

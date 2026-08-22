@@ -51,6 +51,35 @@ Independent reviewer: pending
 
 ## Publication evidence
 
+### `dev-v0.1.0-rc.1` — retained failed audit candidate
+
+* Signed tag revision: `ddf12bf387812e384ec65bb44deaeb8e40ef96b6`
+* Workflow run: <https://github.com/openkubes/ok-console/actions/runs/32569742985>
+* Outcome: canceled after the arm64 build stopped making progress.
+* Root cause evidence: foreign-architecture `pnpm install` under QEMU terminated
+  with `uncaught target signal 4 (Illegal instruction)` while amd64 completed.
+* Registry outcome: no candidate digest was produced and no image was accepted.
+* Disposition: the signed tag remains immutable for audit; it is not reused or
+  described as a deployment candidate.
+
+The corrective build uses the native build platform for architecture-neutral
+TypeScript/Vite output and production JavaScript dependencies, rejects native
+Node add-ons, and copies those artifacts into each digest-pinned target runtime
+base without executing the foreign runtime during the build.
+
+Local corrective-build evidence (2026-08-22):
+
+* `docker buildx build --platform linux/amd64,linux/arm64` completed successfully.
+* OCI index digest: `sha256:4212503d654940c5d27effea9541e43bb2e0b30fbd6b33921afc34031e0c2ee8`.
+* Platform manifests: `linux/amd64` and `linux/arm64`.
+* The build log contains one native `linux/amd64 build` stage and no foreign
+  `linux/arm64 build` execution; both target-specific runtime stages completed.
+* Full test suite: 146 passed, 12 explicitly skipped integration tests.
+* ESLint, TypeScript, Vite production build, and whitespace validation passed
+  after the correction.
+
+### Next candidate
+
 Complete after the implementation PR is merged and the protected candidate tag
 has executed successfully:
 

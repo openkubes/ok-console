@@ -62,8 +62,10 @@ describe('OK-166 Kubernetes security invariants', () => {
 
   it('pins the build base and leaves the runtime as a non-root process', async () => {
     const dockerfile = await readFile(new URL('../../Dockerfile', import.meta.url), 'utf8')
-    expect(dockerfile.match(/FROM node:22\.19\.0-alpine3\.22@sha256:[a-f0-9]{64}/g)).toHaveLength(2)
+    expect(dockerfile).toMatch(/FROM --platform=\$\{BUILDPLATFORM\} node:22\.19\.0-alpine3\.22@sha256:[a-f0-9]{64} AS build/)
+    expect(dockerfile).toMatch(/FROM --platform=\$\{TARGETPLATFORM\} node:22\.19\.0-alpine3\.22@sha256:[a-f0-9]{64} AS runtime/)
     expect(dockerfile).toContain('pnpm prune --prod')
+    expect(dockerfile).toContain("find node_modules -type f -name '*.node'")
     expect(dockerfile).toContain('USER node')
     expect(dockerfile).not.toMatch(/FROM .*:latest|USER root/)
   })

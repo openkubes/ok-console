@@ -108,6 +108,20 @@ docker build --build-arg VCS_REF="$(git rev-parse HEAD)" --tag ok-console:local 
 docker run --read-only --publish 127.0.0.1:8787:8787 ok-console:local
 ```
 
+OK-169 adds the first development-image publication contract and an isolated
+local Kind deployment proof. It preserves the secure base while running the
+Console in explicit fixture/read-only mode without production credentials:
+
+```bash
+pnpm verify:kind
+```
+
+The complete candidate lifecycle, digest-verification commands, retained-cluster
+option, and production boundary are documented in the
+[`Kubernetes deployment runbook`](deploy/kubernetes/README.md). The evolving
+source, publication, and review record lives in
+[`docs/evidence/ok-169`](docs/evidence/ok-169/README.md).
+
 ## Verification
 
 The responsive acceptance record for the OK-159 Developer B slice, including
@@ -155,6 +169,11 @@ pnpm build
 The production-shaped Chromium journeys, strict automated WCAG A/AA baseline,
 keyboard checks, failure matrix, and screenshot artifact policy are documented
 in the [`OK-164 acceptance record`](docs/evidence/ok-164/README.md).
+
+The OK-169 evidence record distinguishes a workstation build from an immutable
+GHCR development candidate and from a future production release. Publication is
+not complete until the protected tag workflow records the digest, attestations,
+signature, vulnerability result, and a Kind deployment of that exact digest.
 
 ## Presentation Contract
 

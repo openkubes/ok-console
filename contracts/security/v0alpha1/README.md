@@ -23,20 +23,22 @@ assurance requirement. Unknown versions, malformed context, revocation, either
 expiry, scope mismatch, missing permission or insufficient assurance fail
 closed. The evaluator never adds permissions and never extends a session.
 
-This contract does not issue a cookie, validate an OIDC token or select a
-session store. Those forcing implementation choices remain separate reviewed
-steps in OK-163.
+This contract does not itself issue a cookie, validate an OIDC token, or select
+a session store. Those forcing choices are implemented behind the same contract
+by the reviewed OK-163 BFF security adapters.
 
-## Executable prototype boundary
+## Executable security boundary
 
-`bff/security/session.mjs` now implements the contract with hashed opaque
+`bff/security/session.mjs` implements the contract with hashed opaque
 session references, hardened cookie serialization, independent idle/absolute
-expiry, rotation, revocation and session-bound CSRF validation. Its in-memory
-store is deterministic implementation evidence only; it is not the selected
-production distributed session store and does not validate OIDC.
+expiry, rotation, revocation and session-bound CSRF validation. The in-memory
+store is deterministic test evidence only. The selected runtime adapter uses
+PostgreSQL, encrypts minimal authorization context, and validates a current
+authorization revision before protected reads.
 
-The HTTP lifecycle boundary exposes only authenticated session inspection,
-rotation and logout. Rotation and logout require exact Origin plus the
-session-bound CSRF value. There is deliberately no unauthenticated session
-creation endpoint; issuance remains owned by a future reviewed identity
-verifier.
+The HTTP lifecycle boundary exposes authenticated session inspection, rotation,
+and logout. Rotation and logout require exact Origin plus the session-bound CSRF
+value. Session creation is limited to the OIDC callback and an independently
+disabled Bootstrap/BreakGlass verifier with durable throttle and audit Evidence.
+The browser receives only `ConsoleSession`; the internal authorization context,
+provider tokens, credentials, and opaque references never enter browser storage.

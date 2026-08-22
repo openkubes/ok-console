@@ -105,6 +105,13 @@ authorization contract plus an explicit
 [`threat model`](docs/security/ok-163-threat-model.md). These artifacts do not
 turn the graphical login simulation into production authentication.
 
+The candidate
+[`security deployment profile`](docs/security/ok-163-deployment-profile.md)
+defines the same-origin topology, workload restrictions, secret rotation,
+database roles, Evidence operations, and remaining production gates. The
+independent-review surface and Jira acceptance mapping are assembled in the
+[`OK-163 security acceptance record`](docs/evidence/ok-163/README.md).
+
 The production session-store proposal is
 [ADR-Platform-038](https://github.com/openkubes/openkubes/blob/main/architecture/decisions/ADR-Platform-038-console-session-store.md).
 Its PostgreSQL reference adapter, envelope encryption and real-database
@@ -113,7 +120,7 @@ and never falls back to memory. The first server-side OIDC Authorization Code +
 PKCE boundary uses one-time encrypted PostgreSQL flow state and an explicit
 issuer-subject mapping. An independently disabled Bootstrap/BreakGlass endpoint
 adds memory-hard verification, shared rate limits and durable audit Evidence;
-its React handoff remains a reviewed follow-up.
+explicit browser profiles connect to both reviewed server boundaries.
 
 ```bash
 pnpm lint

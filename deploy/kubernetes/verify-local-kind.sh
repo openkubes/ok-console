@@ -116,7 +116,7 @@ curl --fail --silent --show-error "http://127.0.0.1:${local_port}/" >/dev/null
 
 pod_name="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console get pod -l app.kubernetes.io/name=ok-console -o jsonpath='{.items[0].metadata.name}')"
 runtime_image_id="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console get pod "${pod_name}" -o jsonpath='{.status.containerStatuses[0].imageID}')"
-runtime_node_env="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console exec "${pod_name}" -- node -e "process.stdout.write(process.env.NODE_ENV)")"
+runtime_node_env="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console exec "${pod_name}" -- /nodejs/bin/node -e "process.stdout.write(process.env.NODE_ENV)")"
 
 cat <<EOF
 OK-169 local Kubernetes deployment proof passed.

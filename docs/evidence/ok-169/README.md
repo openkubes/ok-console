@@ -78,6 +78,37 @@ Local corrective-build evidence (2026-08-22):
 * ESLint, TypeScript, Vite production build, and whitespace validation passed
   after the correction.
 
+### `dev-v0.1.0-rc.2` — published digest rejected by the security gate
+
+* Signed tag revision: `05980af93b6160bd6eaa676da1be18fb49a84b30`.
+* Workflow run: <https://github.com/openkubes/ok-console/actions/runs/32572286489>.
+* Published digest: `sha256:5e9cb465670e0d51e892ac4e1592e37de6085929630dc89608bc174a25e1ecf1`.
+* Multi-platform build and SPDX SBOM generation completed successfully.
+* The mandatory Trivy gate rejected the image with 56 fixed findings: 51 HIGH
+  and 5 CRITICAL. Nineteen OS findings came from outdated OpenSSL, musl, and
+  zlib packages in the pinned Alpine runtime. Thirty-seven Node findings came
+  from npm's bundled dependencies, including 27 in `node-tar`.
+* Provenance, SBOM attestation, Cosign signing, and candidate identity recording
+  were intentionally skipped after the gate failed.
+* Disposition: the tag and digest remain immutable audit evidence and are not a
+  deployment candidate.
+
+The next correction replaces the general-purpose Alpine runtime with a pinned,
+shell-less Distroless Node 22 Debian 13 runtime. It contains neither npm nor
+Corepack, runs as numeric UID/GID 1000 to match the Kubernetes security context,
+supports both target architectures, and independently passed the same Trivy
+HIGH/CRITICAL gate with zero findings on 2026-08-22.
+
+Local corrective-build evidence (2026-08-22):
+
+* Multi-platform OCI index: `sha256:5015d7701c9a661847a190239ff10f00c6322c027b20a6964708b0b0257a8b17`.
+* Platform manifests: `linux/amd64` and `linux/arm64`.
+* Trivy v0.74.0 reported zero fixed HIGH/CRITICAL findings for the Debian 13.6
+  runtime and every copied production Node package.
+* A loaded amd64 image passed live, ready, and UI probes with a read-only root
+  filesystem, all capabilities dropped, no privilege escalation, UID/GID 1000,
+  and `NODE_ENV=production`.
+
 ### Next candidate
 
 Complete after the implementation PR is merged and the protected candidate tag

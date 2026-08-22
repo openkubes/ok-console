@@ -62,11 +62,18 @@ describe('OK-166 Kubernetes security invariants', () => {
 
   it('pins the build base and leaves the runtime as a non-root process', async () => {
     const dockerfile = await readFile(new URL('../../Dockerfile', import.meta.url), 'utf8')
-    expect(dockerfile).toMatch(/FROM --platform=\$\{BUILDPLATFORM\} node:22\.19\.0-alpine3\.22@sha256:[a-f0-9]{64} AS build/)
-    expect(dockerfile).toMatch(/FROM --platform=\$\{TARGETPLATFORM\} node:22\.19\.0-alpine3\.22@sha256:[a-f0-9]{64} AS runtime/)
+    expect(dockerfile).toMatch(/FROM --platform=\$\{BUILDPLATFORM\} node:22\.22\.0-alpine3\.22@sha256:[a-f0-9]{64} AS build/)
+    expect(dockerfile).toMatch(/FROM --platform=\$\{TARGETPLATFORM\} gcr\.io\/distroless\/nodejs22-debian13:nonroot@sha256:[a-f0-9]{64} AS runtime/)
     expect(dockerfile).toContain('pnpm prune --prod')
     expect(dockerfile).toContain("find node_modules -type f -name '*.node'")
-    expect(dockerfile).toContain('USER node')
+    expect(dockerfile).toContain('USER 1000:1000')
+    expect(dockerfile).toContain('CMD ["bff/server.mjs"]')
+    expect(dockerfile).not.toMatch(/COPY --chown=node:node|CMD \["node"/)
     expect(dockerfile).not.toMatch(/FROM .*:latest|USER root/)
+
+    const workflow = await readFile(new URL('../../.github/workflows/verify.yaml', import.meta.url), 'utf8')
+    const kindVerifier = await readFile(new URL('./verify-local-kind.sh', import.meta.url), 'utf8')
+    expect(workflow).toContain(`= "1000:1000"`)
+    expect(kindVerifier).toContain('/nodejs/bin/node -e')
   })
 })

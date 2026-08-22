@@ -2,6 +2,9 @@
 
 FROM --platform=${BUILDPLATFORM} node:22.22.0-alpine3.22@sha256:7aa86fa052f6e4b101557ccb56717cb4311be1334381f526fe013418fe157384 AS build
 
+ARG VITE_CONSOLE_DATA_MODE=fixture
+ARG VITE_CONSOLE_AUTH_MODE=prototype
+
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
@@ -18,9 +21,13 @@ RUN pnpm build \
 FROM --platform=${TARGETPLATFORM} gcr.io/distroless/nodejs22-debian13:nonroot@sha256:22d2f0480e59548ad14cf10d8921b24ef809780e7a61b162838f3d15a4a92e3d AS runtime
 
 ARG VCS_REF=unknown
+ARG VITE_CONSOLE_DATA_MODE=fixture
+ARG VITE_CONSOLE_AUTH_MODE=prototype
 LABEL org.opencontainers.image.source="https://github.com/openkubes/ok-console" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.title="OpenKubes Console"
+      org.opencontainers.image.title="OpenKubes Console" \
+      io.openkubes.console.data-mode="${VITE_CONSOLE_DATA_MODE}" \
+      io.openkubes.console.auth-mode="${VITE_CONSOLE_AUTH_MODE}"
 
 ENV NODE_ENV=production \
     OK_CONSOLE_BFF_HOST=0.0.0.0 \

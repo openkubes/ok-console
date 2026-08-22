@@ -108,6 +108,13 @@ docker build --build-arg VCS_REF="$(git rev-parse HEAD)" --tag ok-console:local 
 docker run --read-only --publish 127.0.0.1:8787:8787 ok-console:local
 ```
 
+Local container builds retain the explicit `fixture` + `prototype` defaults.
+The trusted development-tag workflow builds a separate `bff` + `bootstrap`
+candidate and records those profiles in immutable OCI labels. That live browser
+profile still fails closed unless PostgreSQL, mounted session/bootstrap files,
+and the configured observed-state mTLS source are present; build-time mode
+selection grants no runtime authority.
+
 OK-169 adds the first development-image publication contract and an isolated
 local Kind deployment proof. It preserves the secure base while running the
 Console in explicit fixture/read-only mode without production credentials:

@@ -150,6 +150,8 @@ Traefik `IngressClass/ok-ingress`, CoreDNS, and Cilium's explicit
 use separate server and client identities; the producer requires the exact
 Console SPIFFE URI. NetworkPolicies permit only Traefik ingress, DNS,
 PostgreSQL, producer mTLS, and the producer's Kubernetes API read path.
+The CNPG operator may reach only the database instance-manager status port
+`8000`; application traffic remains restricted to Console pods on `5432`.
 
 Render, perform server-side admission dry-run, and change no cluster state:
 
@@ -185,6 +187,9 @@ The verifier waits for all certificates, the CNPG database, the producer and
 the Console; checks both immutable images and producer allow/deny RBAC; and
 proves health, readiness, static delivery, and unauthenticated API denial. It
 does not print Secret data and contains no delete or rollback mutation.
+The protected projection denial is the BFF contract's bounded `403 FORBIDDEN`;
+credential rejection on the dedicated bootstrap authentication route remains
+the separate `401` boundary.
 
 The lab route is `https://console.ok-shared.internal:30443`. Resolve that name
 to an `ok-shared` node and trust only the public CA certificate carried in

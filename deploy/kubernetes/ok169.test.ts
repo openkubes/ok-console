@@ -44,6 +44,7 @@ describe('OK-169 development candidate invariants', () => {
     expect(verifier).toContain('org.opencontainers.image.revision')
     expect(verifier).toContain('does not match expected revision')
     expect(verifier).toContain('dirty worktree')
+    expect(verifier).toContain('if [[ "${candidate_image}" != ghcr.io/* ]]')
     expect(verifier).toContain('refusing to modify an unowned cluster')
     expect(verifier).toContain("[[ \"${deployed_image}\" == \"${candidate_image}\" ]]")
     expect(verifier).toContain("[[ \"${runtime_security}\" == 'false true true false ALL' ]]")

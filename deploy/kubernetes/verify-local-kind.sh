@@ -79,7 +79,9 @@ image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.op
   echo "Image revision ${image_revision} does not match expected revision ${expected_revision}." >&2
   exit 1
 }
-kind load docker-image --name "${cluster_name}" "${candidate_image}"
+if [[ "${candidate_image}" != ghcr.io/* ]]; then
+  kind load docker-image --name "${cluster_name}" "${candidate_image}"
+fi
 
 kubectl kustomize "${script_dir}/overlays/local-kind" \
   | sed "s|ok-console:ok-169-local|${candidate_image}|g" \

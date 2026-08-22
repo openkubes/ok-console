@@ -109,24 +109,26 @@ Local corrective-build evidence (2026-08-22):
   filesystem, all capabilities dropped, no privilege escalation, UID/GID 1000,
   and `NODE_ENV=production`.
 
-### Next candidate
+### `dev-v0.1.0-rc.3` — accepted development candidate
 
-Complete after the implementation PR is merged and the protected candidate tag
-has executed successfully:
+The protected candidate publication completed successfully:
 
 ```text
-Candidate tag: pending
-Source revision: pending
-Workflow run: pending
-Immutable GHCR digest: pending
-SBOM attestation: pending
-Build provenance: pending
-Cosign verification: pending
-Vulnerability gate: pending
-Local Kind deployment of published digest: pending
+Candidate tag: dev-v0.1.0-rc.3
+Source revision: f3a7517c3497c57b81bc17189e30d0973ebbe0a0
+Workflow run: https://github.com/openkubes/ok-console/actions/runs/32575046222
+Immutable GHCR digest: sha256:04e5541fe9af040b1ca330ce632a74b20fab58489619c16a41db9f8b2d28441d
+SBOM attestation: verified for the exact workflow, tag, source commit, and SPDX predicate
+Build provenance: verified for the exact workflow, tag, and source commit
+Cosign verification: passed against the immutable digest in the publication workflow
+Vulnerability gate: passed with zero fixed HIGH/CRITICAL findings
+Local Kind deployment of published digest: passed
 ```
 
-Do not mark OK-169 complete while these values are pending.
+The Kind node resolved the published multi-platform index directly from GHCR,
+selected its `linux/amd64` manifest, preserved the top-level runtime image ID,
+and passed rollout, restart, live, ready, UI, revision-label, `NODE_ENV`, and
+pod/container security-context checks. The temporary cluster was deleted.
 
 ## Honest remaining boundary
 

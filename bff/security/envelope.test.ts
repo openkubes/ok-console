@@ -20,7 +20,8 @@ describe('ADR-038 session envelope', () => {
   it('fails closed for tampering, unknown keys and invalid key material', () => {
     const codec = new SessionEnvelopeCodec({ primaryKeyId: 'key-1', keys: { 'key-1': keyOne } })
     const encrypted = codec.encrypt({ value: 'protected' })
-    const tampered = `${encrypted.ciphertext.slice(0, -1)}A`
+    const replacement = encrypted.ciphertext[0] === 'A' ? 'B' : 'A'
+    const tampered = `${replacement}${encrypted.ciphertext.slice(1)}`
 
     expect(() => codec.decrypt({ ...encrypted, ciphertext: tampered })).toThrow(SessionEnvelopeError)
     expect(() => codec.decrypt({ ...encrypted, keyId: 'missing' })).toThrow(SessionEnvelopeError)

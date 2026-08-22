@@ -16,11 +16,23 @@ describe('OK-169 development candidate invariants', () => {
     expect(workflow).not.toContain('contents: write')
     expect(workflow).toContain('git merge-base --is-ancestor "${GITHUB_SHA}" origin/main')
     expect(workflow).toContain('${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}')
+    expect(workflow).toContain('VITE_CONSOLE_DATA_MODE=bff')
+    expect(workflow).toContain('VITE_CONSOLE_AUTH_MODE=bootstrap')
+    expect(workflow).toContain('Browser data profile: bff')
+    expect(workflow).toContain('Browser authentication profile: bootstrap')
     expect(workflow).toContain('severity: CRITICAL,HIGH')
     expect(workflow).toContain('cosign verify')
     for (const action of workflow.matchAll(/uses: ([^\s#]+)/g)) {
       expect(action[1]).toMatch(/@[a-f0-9]{40}$/)
     }
+  })
+
+  it('keeps local image builds explicit while labelling the published live profile', async () => {
+    const dockerfile = await read('../../Dockerfile')
+    expect(dockerfile).toContain('ARG VITE_CONSOLE_DATA_MODE=fixture')
+    expect(dockerfile).toContain('ARG VITE_CONSOLE_AUTH_MODE=prototype')
+    expect(dockerfile).toContain('io.openkubes.console.data-mode="${VITE_CONSOLE_DATA_MODE}"')
+    expect(dockerfile).toContain('io.openkubes.console.auth-mode="${VITE_CONSOLE_AUTH_MODE}"')
   })
 
   it('keeps the local overlay isolated, read-only and credential-free', async () => {

@@ -29,14 +29,24 @@ Only the digest is a deployment identity. Tags are discovery aids.
 
 ## Local implementation evidence
 
-Record the final pre-PR execution here after the complete local check:
+Final clean-tree implementation check on 2026-08-22:
 
 ```text
-Source revision: pending
-Requested image: pending
-Runtime image ID: pending
-Tests: pending
-Reviewer: pending
+Source revision: 4683519668e517247818064fc534d846cf69c008
+Verified OCI revision: 4683519668e517247818064fc534d846cf69c008
+Requested image: ok-console:ok-169-4683519668e5
+Runtime image ID: docker.io/library/import-2026-08-22@sha256:c9187b0a1f67a93101b0210a216198d87fc0317ac63fcae6b4156c2195d5e258
+Runtime NODE_ENV: production
+Runtime security projection: automount=false, runAsNonRoot=true,
+  readOnlyRootFilesystem=true, allowPrivilegeEscalation=false, drop=ALL
+Rollout restart: passed
+Liveness, readiness, and Console root: passed
+Cluster cleanup: passed
+Vitest: 146 passed, 12 PostgreSQL integration tests skipped without the opt-in database URL
+Deployment invariant tests: 8 passed
+ESLint, TypeScript, Vite production build: passed
+Actionlint 1.7.12 (checksum verified): passed
+Independent reviewer: pending
 ```
 
 ## Publication evidence

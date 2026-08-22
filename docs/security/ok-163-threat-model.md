@@ -32,7 +32,8 @@ login simulation is excluded from the trusted computing base.
 | Expired, revoked or stale membership continues | Idle and absolute expiry plus server revocation; no outage-based extension |
 | Authentication becomes operation authority | Evaluator checks exact permission/scope/assurance; later mutation still traverses Policy, Authority and execution |
 | Producer impersonation or observation interception | HTTPS with explicit CA and workload identity; no plaintext shared-service exception |
-| Break-glass becomes everyday fallback | Independently disableable, reason-bound, shorter expiry, rate limiting, high-signal Evidence and periodic review |
+| Break-glass becomes everyday fallback | Disabled by default; mutually constrained Bootstrap/OIDC modes; reason-bound shorter session, principal/global rate limiting, high-signal Evidence and periodic review |
+| Login CSRF or oversized credential submission | Exact Origin and JSON checks occur before the bounded body is read; generic credential errors reveal no account state |
 | Error/log/support-bundle credential leak | Normalized unauthenticated errors and recursive forbidden-field tests; never log headers or secret material |
 
 ## Security decisions still requiring implementation evidence
@@ -51,15 +52,16 @@ login simulation is excluded from the trusted computing base.
 The first server-side session slice covers opaque cookie references, hashed
 store keys, rotation, shorter exceptional-session expiry, idle and absolute
 expiry, revocation, cookie-smuggling rejection and origin-plus-token CSRF
-checks. The current store is in-memory and therefore deliberately not accepted
-for multi-replica production use or durable revocation.
+checks. That original in-memory reference remains test-only and is deliberately
+not accepted for multi-replica production use or durable revocation.
 
 The HTTP boundary now provides authenticated inspection, rotation and logout.
 It keeps the opaque session reference in an HttpOnly cookie, delivers the
 session-bound CSRF value in a separate readable Secure cookie, requires the
 value in a header together with an exact configured Origin for both mutations,
-and clears both cookies after invalid session detection or logout. It does not
-offer a browser-driven session creation endpoint.
+and clears both cookies after invalid session detection or logout. Session
+creation is limited to the reviewed OIDC callback and the independently
+disabled exceptional-access endpoint described below.
 
 The ADR-038 PostgreSQL reference adapter adds application-layer AES-256-GCM
 encryption for the minimal authorization context, digest-only cookie and CSRF
@@ -92,17 +94,28 @@ The browser now has an explicit live OIDC mode. It restores only the redacted
 `ConsoleSession` projection, navigates to a fixed same-origin OIDC start path,
 and submits logout with the readable session-bound CSRF value. It never reads
 the HttpOnly session reference or provider tokens. Local exceptional access is
-disabled in live mode until its separate server verifier is implemented. A
-configuration guard prevents live authentication from being paired with fixture
-data.
+still absent from the live React handoff even though its independently disabled
+server boundary now exists. A configuration guard prevents live authentication
+from being paired with fixture data.
 
-The exceptional-access verifier core now performs asynchronous memory-hard
-scrypt verification, follows the same KDF path for unknown principals, requires
-a bounded operational reason, and uses HMAC-digest-only PostgreSQL throttle
-state across replicas. It issues the shorter Bootstrap/BreakGlass session shape
-only after a reviewed account mapping verifies. No HTTP or runtime route is
-enabled yet; durable audit Evidence, credential custody, recovery exercises and
-the endpoint threat review remain required before live activation.
+The exceptional-access boundary is disabled by default and activated only by an
+explicit PostgreSQL runtime mode. Bootstrap is mutually exclusive with OIDC;
+BreakGlass requires OIDC. A fixed same-origin JSON endpoint checks Origin and
+content type before reading a 16 KiB-bounded body, normalizes account/input
+failures, and returns only opaque Console cookies plus the public session
+projection.
+
+The verifier performs asynchronous memory-hard scrypt, follows the same KDF
+path for unknown principals, requires a bounded operational reason, and uses
+HMAC-digest-only PostgreSQL throttle state across replicas. It blocks both five
+failures for one principal and 50 failures across rotating principals in the
+15-minute window. Durable, credential-free audit Evidence uses database time,
+a correlation ID and a separately domain-separated principal digest. Audit,
+throttle, KDF, and session dependency failures fail closed; an already issued
+session is revoked if its granted Evidence cannot be persisted. The deployment
+must give the runtime identity INSERT-only audit access and separately control
+retention. The React handoff, credential custody, MFA feasibility, recovery
+exercises and production acceptance remain reviewed follow-ups.
 
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

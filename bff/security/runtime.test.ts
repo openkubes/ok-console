@@ -13,6 +13,13 @@ const files: Record<string, string> = {
     version: 'v1',
     subjects: [{ providerSubject: 'subject-1', identityId: 'user-1', displayName: 'Mapped User', assurance: ['Federated'], tenantIds: ['platform'], permissions: ['platform.read'] }],
   }),
+  '/run/secrets/local-pepper': Buffer.alloc(32, 9).toString('base64'),
+  '/run/secrets/local-accounts': JSON.stringify({
+    version: 'v1', accounts: [{ username: 'recovery-admin', enabled: true,
+      salt: Buffer.alloc(16, 3).toString('base64'), verifier: Buffer.alloc(32, 4).toString('base64'),
+      identityId: 'local-1', displayName: 'Recovery Admin', environmentId: 'community-preview',
+      tenantIds: ['platform'], permissions: ['platform.read'] }],
+  }),
 }
 
 const baseEnv = {
@@ -131,6 +138,29 @@ describe('session runtime configuration', () => {
     })
     expect(transactionStoreFactory).toHaveBeenCalled()
     expect(runtime.oidcHandler).toEqual(expect.any(Function))
+  })
+
+  it('wires bootstrap only from mounted verifier mappings with durable throttle and audit ports', async () => {
+    const throttleFactory = vi.fn(() => ({ blocked: vi.fn(), failure: vi.fn(), success: vi.fn() }))
+    const auditFactory = vi.fn(() => ({ record: vi.fn() }))
+    const runtime = await createSessionRuntime({
+      env: { ...baseEnv, OK_CONSOLE_LOCAL_ACCESS_MODE: 'bootstrap',
+        OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE: '/run/secrets/local-accounts',
+        OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper' },
+      fileReader, poolFactory: () => ({ end: async () => {} }),
+      storeFactory: () => ({ authorize: vi.fn(), create: vi.fn(), revoke: vi.fn() }),
+      throttleFactory, auditFactory,
+    })
+    expect(throttleFactory).toHaveBeenCalled()
+    expect(auditFactory).toHaveBeenCalled()
+    expect(runtime.localAccessHandler).toEqual(expect.any(Function))
+  })
+
+  it('keeps bootstrap and breakglass mutually exclusive with OIDC', async () => {
+    await expect(createSessionRuntime({
+      env: { ...baseEnv, OK_CONSOLE_LOCAL_ACCESS_MODE: 'breakglass' }, fileReader,
+      poolFactory: () => ({ end: async () => {} }), storeFactory: () => ({ authorize: vi.fn() }),
+    })).rejects.toThrow('Bootstrap requires OIDC disabled; breakglass requires OIDC enabled.')
   })
 
   it.each([

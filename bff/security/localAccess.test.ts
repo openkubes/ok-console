@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi } from 'vitest'
-import { createLocalAccessVerifier, LocalAccessError, PostgresLocalAccessThrottle } from './localAccess.mjs'
+import { createLocalAccessVerifier, LocalAccessError, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
 
 const account = {
   username: 'recovery-admin', enabled: true, salt: Buffer.alloc(16, 1).toString('base64'),
@@ -49,6 +49,27 @@ describe('exceptional local access verifier', () => {
     await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'short' })).rejects.toBeInstanceOf(LocalAccessError)
     expect(derive).not.toHaveBeenCalled()
   })
+
+  it('fails unavailable when shared throttle or denied-attempt audit Evidence cannot be persisted', async () => {
+    const blockedFailure = setup({ throttle: { blocked: vi.fn(async () => { throw new Error('database unavailable') }) } })
+    await expect(blockedFailure.verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject<Partial<LocalAccessError>>({ code: 'LOCAL_ACCESS_UNAVAILABLE' })
+
+    const auditFailure = setup({ audit: vi.fn(async () => { throw new Error('audit unavailable') }) })
+    await expect(auditFailure.verify({ username: 'unknown', password: 'guess', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject<Partial<LocalAccessError>>({ code: 'LOCAL_ACCESS_UNAVAILABLE' })
+  })
+
+  it('revokes an issued session when granted-attempt audit Evidence fails', async () => {
+    const sessionStore = {
+      create: vi.fn(async () => ({ cookie: 'session-reference' })),
+      revoke: vi.fn(async () => true),
+    }
+    const { verify } = setup({ sessionStore, audit: vi.fn(async () => { throw new Error('audit unavailable') }) })
+    await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject<Partial<LocalAccessError>>({ code: 'LOCAL_ACCESS_UNAVAILABLE' })
+    expect(sessionStore.revoke).toHaveBeenCalledWith('session-reference', 'AUDIT_FAILED')
+  })
 })
 
 describe('PostgreSQL exceptional-access throttle', () => {
@@ -60,5 +81,15 @@ describe('PostgreSQL exceptional-access throttle', () => {
     await throttle.success('recovery-admin')
     expect(JSON.stringify(query.mock.calls)).not.toContain('recovery-admin')
     expect(query.mock.calls[1][0]).toContain("interval '15 minutes'")
+    expect(query.mock.calls[1][1][0]).toHaveLength(2)
+  })
+
+  it('writes credential-free append-only audit Evidence', async () => {
+    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }))
+    const audit = new PostgresLocalAccessAudit({ pool: { query }, pepper: Buffer.alloc(32, 6) })
+    await audit.record({ principal: 'recovery-admin', method: 'BreakGlass', outcome: 'Denied', cause: 'INVALID_CREDENTIAL', reason: 'Emergency recovery attempt', correlationId: 'corr-1' })
+    expect(query.mock.calls[0][0]).toContain('INSERT INTO ok_console.local_access_audit')
+    expect(JSON.stringify(query.mock.calls)).not.toContain('recovery-admin')
+    expect(JSON.stringify(query.mock.calls)).not.toContain('password')
   })
 })

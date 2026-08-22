@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import pg from 'pg'
 import { SessionEnvelopeCodec } from './envelope.mjs'
+import { createLocalAccessVerifier, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
+import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
 import { createOidcHttpHandler, createOidcProtocolClient, createStaticOidcIdentityMapper } from './oidc.mjs'
 import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
 import { PostgresSessionStore } from './postgresSessionStore.mjs'
@@ -177,6 +179,30 @@ const parseIdentityMappings = (content, providerId, environmentId) => {
   return document.subjects
 }
 
+const parseLocalAccounts = (content, mode, environmentId) => {
+  let document
+  try { document = JSON.parse(content) } catch { throw new SessionRuntimeConfigurationError('The local-access account file is invalid.') }
+  if (!document || document.version !== 'v1' || !Array.isArray(document.accounts)
+    || document.accounts.length < 1 || document.accounts.length > 32) {
+    throw new SessionRuntimeConfigurationError('The local-access account file is invalid.')
+  }
+  const seen = new Set()
+  try {
+    for (const account of document.accounts) {
+      const normalized = account.username.normalize('NFKC').trim().toLowerCase()
+      if (!validSessionString(normalized) || seen.has(normalized) || account.environmentId !== environmentId
+        || typeof account.enabled !== 'boolean' || !/^[A-Za-z0-9+/]{22}==$/.test(account.salt)
+        || !BASE64_32_BYTE_KEY_PATTERN.test(account.verifier)) throw new Error()
+      seen.add(normalized)
+      validateSessionCreationInput({
+        subject: { id: account.identityId, providerId: 'local', subjectId: account.username, displayName: account.displayName, method: mode, assurance: ['Password', 'ExceptionalAccess'] },
+        scope: { environmentId, tenantIds: account.tenantIds }, permissions: account.permissions,
+      })
+    }
+  } catch { throw new SessionRuntimeConfigurationError('The local-access account file is invalid.') }
+  return document.accounts
+}
+
 export const createSessionRuntime = async ({
   env = process.env,
   fileReader = readFile,
@@ -184,13 +210,18 @@ export const createSessionRuntime = async ({
   storeFactory = (configuration) => new PostgresSessionStore(configuration),
   transactionStoreFactory = (configuration) => new PostgresOidcTransactionStore(configuration),
   oidcProtocolFactory = createOidcProtocolClient,
+  throttleFactory = (configuration) => new PostgresLocalAccessThrottle(configuration),
+  auditFactory = (configuration) => new PostgresLocalAccessAudit(configuration),
 } = {}) => {
   const mode = env.OK_CONSOLE_SESSION_STORE_MODE ?? 'disabled'
   if (mode === 'disabled') {
+    if ((env.OK_CONSOLE_LOCAL_ACCESS_MODE ?? 'disabled') !== 'disabled') {
+      throw new SessionRuntimeConfigurationError('Exceptional local access requires the PostgreSQL session runtime.')
+    }
     if ((env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture') !== 'fixture') {
       throw new SessionRuntimeConfigurationError('A non-fixture observed-state source requires the PostgreSQL session runtime.')
     }
-    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, close: async () => {} }
+    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, localAccessHandler: null, close: async () => {} }
   }
   if (mode !== 'postgres') {
     throw new SessionRuntimeConfigurationError('OK_CONSOLE_SESSION_STORE_MODE must be disabled or postgres.')
@@ -284,6 +315,38 @@ export const createSessionRuntime = async ({
       throw error
     }
   }
+  let localAccessHandler = null
+  const localAccessMode = env.OK_CONSOLE_LOCAL_ACCESS_MODE ?? 'disabled'
+  if (!['disabled', 'bootstrap', 'breakglass'].includes(localAccessMode)) {
+    await pool.end().catch(() => {})
+    throw new SessionRuntimeConfigurationError('OK_CONSOLE_LOCAL_ACCESS_MODE must be disabled, bootstrap, or breakglass.')
+  }
+  if (localAccessMode !== 'disabled') {
+    try {
+      const oidcEnabled = env.OK_CONSOLE_OIDC_ENABLED === 'true'
+      if ((localAccessMode === 'bootstrap' && oidcEnabled) || (localAccessMode === 'breakglass' && !oidcEnabled)) {
+        throw new SessionRuntimeConfigurationError('Bootstrap requires OIDC disabled; breakglass requires OIDC enabled.')
+      }
+      const method = localAccessMode === 'bootstrap' ? 'Bootstrap' : 'BreakGlass'
+      const accounts = parseLocalAccounts(
+        await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE', fileReader),
+        method, environmentId,
+      )
+      const pepperValue = await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', fileReader)
+      if (!BASE64_32_BYTE_KEY_PATTERN.test(pepperValue)) throw new SessionRuntimeConfigurationError('The local-access pepper file is invalid.')
+      const pepper = Buffer.from(pepperValue, 'base64')
+      const throttle = throttleFactory({ pool, pepper })
+      const auditStore = auditFactory({ pool, pepper })
+      const verifier = createLocalAccessVerifier({
+        mode: method, accounts, throttle, sessionStore, authorizationRevision,
+        audit: (event) => auditStore.record(event),
+      })
+      localAccessHandler = createLocalAccessHttpHandler({ verifier, expectedOrigin })
+    } catch (error) {
+      await pool.end().catch(() => {})
+      throw error
+    }
+  }
   let closed = false
 
   return {
@@ -292,6 +355,7 @@ export const createSessionRuntime = async ({
     expectedOrigin,
     authorizer,
     oidcHandler,
+    localAccessHandler,
     close: async () => {
       if (closed) return
       closed = true

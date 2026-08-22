@@ -91,7 +91,7 @@ read-only implementation phase—not production readiness. The decision, risks,
 follow-ups and ADR disposition are recorded in
 [`docs/evidence/ok-161`](docs/evidence/ok-161/README.md).
 
-The OK-163 security work begins with a versioned, fail-closed session and
+The OK-163 security work includes a versioned, fail-closed session and
 authorization contract plus an explicit
 [`threat model`](docs/security/ok-163-threat-model.md). These artifacts do not
 turn the graphical login simulation into production authentication.
@@ -102,8 +102,9 @@ Its PostgreSQL reference adapter, envelope encryption and real-database
 conformance suite live under `bff/security`. The runtime selects it explicitly
 and never falls back to memory. The first server-side OIDC Authorization Code +
 PKCE boundary uses one-time encrypted PostgreSQL flow state and an explicit
-issuer-subject mapping; deployment-provider interoperability and the browser's
-graphical-to-live handoff remain reviewed follow-ups.
+issuer-subject mapping. An independently disabled Bootstrap/BreakGlass endpoint
+adds memory-hard verification, shared rate limits and durable audit Evidence;
+its React handoff remains a reviewed follow-up.
 
 ```bash
 pnpm lint
@@ -151,7 +152,8 @@ resources or a generic backend proxy.
 - Authentication entry remains an in-memory interaction in the default prototype
   mode. In explicit live mode, OIDC redirects through the BFF, restores only the
   public session projection, and performs CSRF-bound server logout. The local account
-  UI is disabled there until its bootstrap/break-glass server boundary is reviewed.
+  UI is disabled there pending its separate handoff to the reviewed, independently
+  configured bootstrap/break-glass server boundary.
 - Provider-specific production acceptance, RBAC lifecycle, account recovery, live Kubernetes access,
   deployment, generic schema rendering, and AI-driven runtime adaptation are
   deliberately out of scope.

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM --platform=${BUILDPLATFORM} node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9 AS build
+FROM --platform=${BUILDPLATFORM} node:22.22.0-alpine3.22@sha256:7aa86fa052f6e4b101557ccb56717cb4311be1334381f526fe013418fe157384 AS build
 
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml ./
@@ -15,7 +15,7 @@ RUN pnpm build \
     && pnpm prune --prod \
     && test -z "$(find node_modules -type f -name '*.node' -print -quit)"
 
-FROM --platform=${TARGETPLATFORM} node:22.19.0-alpine3.22@sha256:d2166de198f26e17e5a442f537754dd616ab069c47cc57b889310a717e0abbf9 AS runtime
+FROM --platform=${TARGETPLATFORM} gcr.io/distroless/nodejs22-debian13:nonroot@sha256:22d2f0480e59548ad14cf10d8921b24ef809780e7a61b162838f3d15a4a92e3d AS runtime
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.source="https://github.com/openkubes/ok-console" \
@@ -27,12 +27,12 @@ ENV NODE_ENV=production \
     OK_CONSOLE_BFF_PORT=8787
 
 WORKDIR /app
-COPY --chown=node:node --from=build /workspace/package.json ./package.json
-COPY --chown=node:node --from=build /workspace/node_modules ./node_modules
-COPY --chown=node:node --from=build /workspace/bff ./bff
-COPY --chown=node:node --from=build /workspace/dist ./dist
+COPY --chown=1000:1000 --from=build /workspace/package.json ./package.json
+COPY --chown=1000:1000 --from=build /workspace/node_modules ./node_modules
+COPY --chown=1000:1000 --from=build /workspace/bff ./bff
+COPY --chown=1000:1000 --from=build /workspace/dist ./dist
 
-USER node
+USER 1000:1000
 EXPOSE 8787
 STOPSIGNAL SIGTERM
-CMD ["node", "bff/server.mjs"]
+CMD ["bff/server.mjs"]

@@ -1,6 +1,6 @@
 # OK-170 ok-shared development integration evidence
 
-Status: **Phase A preview candidate — live integration not yet claimed**
+Status: **Phase A preview deployed and verified — live integration not yet claimed**
 
 ## Identified target
 
@@ -73,3 +73,46 @@ Before Phase B:
 Phase A is not acceptance evidence for OK-162, OK-163 or OK-168. It proves only
 that the accepted GUI candidate can run safely on the identified target while
 the live dependency gates remain explicit.
+
+## Phase A deployment result
+
+Deployment was performed on 2026-08-22 after PR #29 merged into `main` as
+revision `358945a641ce77b039b2dfd8e210c99c0c1b893b`.
+
+The guarded verifier completed successfully with:
+
+```text
+Context: ok-shared-admin@ok-shared
+Namespace: openkubes-console
+Deployment: ok-console
+Desired / updated / available replicas: 2 / 2 / 2
+Image: ghcr.io/openkubes/ok-console@sha256:04e5541fe9af040b1ca330ce632a74b20fab58489619c16a41db9f8b2d28441d
+Runtime security: automount token=false, read-only root=true,
+privilege escalation=false, capabilities dropped=ALL
+Mode: fixture/read-only
+```
+
+Both Pods were Ready with zero restarts and scheduled on separate worker nodes.
+The running container image IDs matched the accepted immutable candidate. The
+namespace enforced Restricted Pod Security and carried the expected
+`openkubes.io/managed-by=ok-170` ownership label. The Service remained
+ClusterIP-only, the PodDisruptionBudget allowed one disruption, and both the
+default-deny and same-namespace-only preview policies were present.
+
+The verifier exercised `/health/live`, `/health/ready`, and the React root page
+through a temporary local port-forward. No Ingress, Secret, OIDC client,
+PostgreSQL database, certificate, producer, OpenKubes CRD, or mutation workflow
+was created. The preview remains deployed for bounded inspection; its existence
+must not be described as live observed-state or production authentication
+evidence.
+
+For another bounded visual session:
+
+```bash
+kubectl --context ok-shared-admin@ok-shared \
+  --namespace openkubes-console \
+  port-forward service/ok-console 8787:8787
+```
+
+Then open <http://127.0.0.1:8787>. Stopping the port-forward removes external
+access but leaves the verified preview workload running.

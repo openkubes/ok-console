@@ -198,7 +198,10 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
   it('rejects expired OIDC transactions and purges them with a bound', async () => {
     const transactions = new PostgresOidcTransactionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
     const issued = await transactions.create({ codeVerifier: 'pkce-verifier', state: 'oauth-state', nonce: 'oidc-nonce' })
-    await pool.query("UPDATE ok_console.oidc_transactions SET expires_at = clock_timestamp() - interval '1 second'")
+    await pool.query(`
+      UPDATE ok_console.oidc_transactions
+      SET created_at = clock_timestamp() - interval '2 seconds',
+          expires_at = clock_timestamp() - interval '1 second'`)
 
     expect(await transactions.consume(issued.cookie)).toBeNull()
     expect(await transactions.purgeExpired(1)).toBe(1)

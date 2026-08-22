@@ -50,8 +50,11 @@ These requirements follow the upstream
 [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)
 and the documented distinction between
 [startup, readiness, and liveness probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/).
-Health endpoints and a release image are not implemented in this repository yet,
-so deployable manifests remain a production gate rather than being invented here.
+OK-166 now provides empty health endpoints, a digest-pinned non-root image recipe,
+and an intentionally non-deployable, default-deny Kubernetes base. This is
+executable scaffolding for review and target validation; release provenance,
+real image digest, target overlays, policy enforcement, and operational exercises
+remain production gates.
 
 ## Secret contract
 

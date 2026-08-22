@@ -57,6 +57,8 @@ require an exact configured Origin and clear or replace both cookies.
 ## Runtime boundary
 
 - `server.mjs` owns process startup and graceful shutdown.
+- `runtimeHttp.mjs` serves the allowlisted production build under the same origin,
+  delegates only the fixed API prefix, and owns empty liveness/readiness probes.
 - `app.mjs` owns routing, contract envelopes, correlation IDs, authorization
   hooks, security headers, bounded errors, and a credential-free request
   observation hook.
@@ -129,6 +131,20 @@ protected read.
 The static revision comparison is the bounded first runtime implementation. A
 later identity-policy adapter can replace it with live revision validation
 without changing the session-store port.
+
+### Health semantics
+
+`GET` or `HEAD /health/live` returns an empty `204` while the process can answer
+HTTP; it intentionally does not probe PostgreSQL or external providers.
+`GET` or `HEAD /health/ready` returns an empty `204` only when the selected
+runtime can safely serve sessions. PostgreSQL mode verifies connectivity and all
+schema relations required by the enabled session, OIDC, and exceptional-access
+features; failures return an empty `503` without exposing dependency details.
+
+Both endpoints are unauthenticated for kubelet probing, accept no mutation
+methods, and return `Cache-Control: no-store`. Identity-provider and
+observed-state availability do not drive liveness, avoiding dependency-induced
+restart storms.
 
 ### OIDC Authorization Code flow
 
@@ -303,6 +319,7 @@ response and does not silently show fixture data as if it were current reality.
 ```bash
 pnpm test:bff
 pnpm test:contract
+pnpm test:deployment
 pnpm test:postgres # requires OK_CONSOLE_TEST_POSTGRES_URL
 pnpm test
 pnpm lint

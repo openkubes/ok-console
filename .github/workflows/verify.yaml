@@ -51,3 +51,13 @@ jobs:
         run: pnpm test
       - name: Build
         run: pnpm build
+      - name: Build secure runtime image
+        run: docker build --build-arg VCS_REF="${{ github.sha }}" --tag ok-console:verify .
+      - name: Smoke-test read-only non-root runtime
+        run: |
+          runtime_id="$(docker run --detach --read-only --cap-drop ALL --security-opt no-new-privileges=true --publish 127.0.0.1:8787:8787 ok-console:verify)"
+          trap 'docker rm --force "${runtime_id}"' EXIT
+          test "$(docker inspect --format '{{.Config.User}}' ok-console:verify)" = "node"
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:8787/health/live
+          curl --fail --silent --show-error http://127.0.0.1:8787/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:8787/

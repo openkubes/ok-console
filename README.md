@@ -89,6 +89,25 @@ Vite proxies `/api/console/v0` to the local BFF. Endpoints, security boundaries,
 failure injection, and production evolution are documented in
 [`bff/README.md`](bff/README.md).
 
+### Secure runtime scaffold
+
+OK-166 adds a same-origin runtime that serves the built Console and the fixed
+`/api/console/v0` boundary from one non-root Node.js process. It exposes empty,
+unauthenticated `/health/live` and dependency-aware `/health/ready` probes and
+serves only allowlisted build assets with restrictive browser headers.
+
+The digest-pinned multi-stage [`Dockerfile`](Dockerfile) and fail-closed
+[`Kubernetes base`](deploy/kubernetes/README.md) are deployment scaffolding, not
+a production approval. The base deliberately contains an unusable image digest,
+`.invalid` endpoints, unresolved authority values, no Secret objects, and only a
+default-deny NetworkPolicy. A reviewed target overlay must supply those values
+and narrowly permit its real dependencies.
+
+```bash
+docker build --build-arg VCS_REF="$(git rev-parse HEAD)" --tag ok-console:local .
+docker run --read-only --publish 127.0.0.1:8787:8787 ok-console:local
+```
+
 ## Verification
 
 The responsive acceptance record for the OK-159 Developer B slice, including
@@ -127,6 +146,7 @@ pnpm lint
 pnpm test
 pnpm test:bff
 pnpm test:contract
+pnpm test:deployment
 pnpm test:postgres # requires OK_CONSOLE_TEST_POSTGRES_URL
 pnpm build
 ```
@@ -170,9 +190,9 @@ resources or a generic backend proxy.
   public session projection, and performs CSRF-bound server logout. Explicit
   Bootstrap/BreakGlass profiles submit the guarded local form only to the reviewed,
   independently configured server boundary.
-- Provider-specific production acceptance, RBAC lifecycle, account recovery, live Kubernetes access,
-  deployment, generic schema rendering, and AI-driven runtime adaptation are
-  deliberately out of scope.
+- Provider-specific production acceptance, RBAC lifecycle, account recovery,
+  live Kubernetes access, deployable target overlays, generic schema rendering,
+  and AI-driven runtime adaptation are deliberately out of scope.
 
 ## Architecture seams
 

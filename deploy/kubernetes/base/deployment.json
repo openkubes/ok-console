@@ -1,0 +1,107 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "ok-console",
+    "namespace": "openkubes-console",
+    "labels": { "app.kubernetes.io/name": "ok-console" }
+  },
+  "spec": {
+    "replicas": 2,
+    "revisionHistoryLimit": 2,
+    "strategy": { "type": "RollingUpdate", "rollingUpdate": { "maxUnavailable": 0, "maxSurge": 1 } },
+    "selector": { "matchLabels": { "app.kubernetes.io/name": "ok-console" } },
+    "template": {
+      "metadata": { "labels": { "app.kubernetes.io/name": "ok-console" } },
+      "spec": {
+        "serviceAccountName": "ok-console",
+        "automountServiceAccountToken": false,
+        "enableServiceLinks": false,
+        "terminationGracePeriodSeconds": 30,
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "runAsGroup": 1000,
+          "fsGroup": 1000,
+          "fsGroupChangePolicy": "OnRootMismatch",
+          "seccompProfile": { "type": "RuntimeDefault" }
+        },
+        "topologySpreadConstraints": [{
+          "maxSkew": 1,
+          "topologyKey": "kubernetes.io/hostname",
+          "whenUnsatisfiable": "ScheduleAnyway",
+          "labelSelector": { "matchLabels": { "app.kubernetes.io/name": "ok-console" } }
+        }],
+        "containers": [{
+          "name": "console",
+          "image": "ghcr.io/openkubes/ok-console@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "imagePullPolicy": "IfNotPresent",
+          "ports": [{ "name": "http", "containerPort": 8787, "protocol": "TCP" }],
+          "securityContext": {
+            "allowPrivilegeEscalation": false,
+            "readOnlyRootFilesystem": true,
+            "capabilities": { "drop": ["ALL"] }
+          },
+          "resources": {
+            "requests": { "cpu": "250m", "memory": "256Mi" },
+            "limits": { "cpu": "2", "memory": "768Mi" }
+          },
+          "startupProbe": {
+            "httpGet": { "path": "/health/live", "port": "http", "scheme": "HTTP" },
+            "periodSeconds": 2,
+            "failureThreshold": 30,
+            "timeoutSeconds": 1
+          },
+          "readinessProbe": {
+            "httpGet": { "path": "/health/ready", "port": "http", "scheme": "HTTP" },
+            "periodSeconds": 5,
+            "failureThreshold": 2,
+            "timeoutSeconds": 2
+          },
+          "livenessProbe": {
+            "httpGet": { "path": "/health/live", "port": "http", "scheme": "HTTP" },
+            "periodSeconds": 10,
+            "failureThreshold": 3,
+            "timeoutSeconds": 1
+          },
+          "env": [
+            { "name": "OK_CONSOLE_BFF_HOST", "value": "0.0.0.0" },
+            { "name": "OK_CONSOLE_BFF_PORT", "value": "8787" },
+            { "name": "OK_CONSOLE_SESSION_STORE_MODE", "value": "postgres" },
+            { "name": "OK_CONSOLE_ORIGIN", "value": "https://console.example.invalid" },
+            { "name": "OK_CONSOLE_ENVIRONMENT_ID", "value": "REPLACE_ENVIRONMENT_ID" },
+            { "name": "OK_CONSOLE_SESSION_EPOCH", "value": "REPLACE_DEPLOYMENT_EPOCH" },
+            { "name": "OK_CONSOLE_AUTHORIZATION_REVISION", "value": "REPLACE_AUTHORIZATION_REVISION" },
+            { "name": "OK_CONSOLE_POSTGRES_URL_FILE", "value": "/run/secrets/ok-console/postgres/url" },
+            { "name": "OK_CONSOLE_POSTGRES_CA_FILE", "value": "/run/secrets/ok-console/postgres/ca.pem" },
+            { "name": "OK_CONSOLE_SESSION_ENVELOPE_PRIMARY_KEY_ID", "value": "REPLACE_PRIMARY_KEY_ID" },
+            { "name": "OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE", "value": "/run/secrets/ok-console/session/keys.json" },
+            { "name": "OK_CONSOLE_OIDC_ENABLED", "value": "true" },
+            { "name": "OK_CONSOLE_OIDC_PROVIDER_ID", "value": "REPLACE_PROVIDER_ID" },
+            { "name": "OK_CONSOLE_OIDC_ISSUER", "value": "https://identity.example.invalid/" },
+            { "name": "OK_CONSOLE_OIDC_CLIENT_ID", "value": "ok-console" },
+            { "name": "OK_CONSOLE_OIDC_CLIENT_SECRET_FILE", "value": "/run/secrets/ok-console/oidc/client-secret" },
+            { "name": "OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE", "value": "/run/secrets/ok-console/oidc/subjects.json" },
+            { "name": "OK_CONSOLE_LOCAL_ACCESS_MODE", "value": "breakglass" },
+            { "name": "OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE", "value": "/run/secrets/ok-console/local/accounts.json" },
+            { "name": "OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE", "value": "/run/secrets/ok-console/local/pepper" },
+            { "name": "OK_CONSOLE_OBSERVED_STATE_MODE", "value": "openkubes" },
+            { "name": "OK_CONSOLE_OBSERVED_STATE_URL", "value": "https://observed-state.example.invalid/api/console-observed-state/v0alpha1" }
+          ],
+          "volumeMounts": [
+            { "name": "postgres", "mountPath": "/run/secrets/ok-console/postgres", "readOnly": true },
+            { "name": "session", "mountPath": "/run/secrets/ok-console/session", "readOnly": true },
+            { "name": "oidc", "mountPath": "/run/secrets/ok-console/oidc", "readOnly": true },
+            { "name": "local-access", "mountPath": "/run/secrets/ok-console/local", "readOnly": true }
+          ]
+        }],
+        "volumes": [
+          { "name": "postgres", "secret": { "secretName": "ok-console-postgres", "defaultMode": 256, "items": [{ "key": "url", "path": "url" }, { "key": "ca.pem", "path": "ca.pem" }] } },
+          { "name": "session", "secret": { "secretName": "ok-console-session", "defaultMode": 256, "items": [{ "key": "keys.json", "path": "keys.json" }] } },
+          { "name": "oidc", "secret": { "secretName": "ok-console-oidc", "defaultMode": 256, "items": [{ "key": "client-secret", "path": "client-secret" }, { "key": "subjects.json", "path": "subjects.json" }] } },
+          { "name": "local-access", "secret": { "secretName": "ok-console-local-access", "defaultMode": 256, "items": [{ "key": "accounts.json", "path": "accounts.json" }, { "key": "pepper", "path": "pepper" }] } }
+        ]
+      }
+    }
+  }
+}

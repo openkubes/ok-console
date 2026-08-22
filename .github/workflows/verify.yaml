@@ -15,7 +15,7 @@ concurrency:
 jobs:
   console:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
@@ -45,12 +45,16 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
       - name: Lint
         run: pnpm lint
       - name: Test
         run: pnpm test
       - name: Build
         run: pnpm build
+      - name: Browser and accessibility evidence
+        run: pnpm test:e2e
       - name: Build secure runtime image
         run: docker build --build-arg VCS_REF="${{ github.sha }}" --tag ok-console:verify .
       - name: Smoke-test read-only non-root runtime
@@ -61,3 +65,13 @@ jobs:
           curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:8787/health/live
           curl --fail --silent --show-error http://127.0.0.1:8787/health/ready
           curl --fail --silent --show-error http://127.0.0.1:8787/
+      - name: Upload OK-164 browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ok-164-browser-evidence
+          path: |
+            playwright-report
+            test-results/e2e
+          if-no-files-found: warn
+          retention-days: 14

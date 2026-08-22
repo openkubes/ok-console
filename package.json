@@ -14,6 +14,9 @@
     "test:bff": "vitest run bff",
     "test:contract": "vitest run src/domain/presentationContract.test.ts",
     "test:deployment": "vitest run deploy/kubernetes/deployment.test.ts",
+    "pretest:e2e": "VITE_CONSOLE_DATA_MODE=bff VITE_CONSOLE_AUTH_MODE=prototype pnpm build",
+    "test:e2e": "playwright test",
+    "e2e:serve": "OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION=true OK_CONSOLE_BFF_HOST=127.0.0.1 OK_CONSOLE_BFF_PORT=8787 node bff/server.mjs",
     "test:postgres": "vitest run bff/security/postgresSessionStore.integration.test.ts",
     "preview": "vite preview"
   },
@@ -22,7 +25,9 @@
     "pg": "8.23.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@eslint/js": "9.34.0",
+    "@playwright/test": "1.62.1",
     "@testing-library/jest-dom": "6.8.0",
     "@testing-library/react": "16.3.0",
     "@types/react": "19.1.12",

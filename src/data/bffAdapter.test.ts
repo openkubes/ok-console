@@ -28,7 +28,7 @@ describe('BffConsoleAdapter', () => {
     expect(snapshot.source).toBe('bff')
     expect(snapshot.overview?.clusters.total).toBe(4)
     expect(snapshot.clusters.map((cluster) => cluster.name)).toEqual(['ok-mgmt', 'edge-07'])
-    expect(snapshot.clusters[0]).toMatchObject({ role: 'Management plane', version: 'v1.32.6' })
+    expect(snapshot.clusters[0]).toMatchObject({ role: 'Management plane', version: 'v1.32.6', capabilityCount: 4 })
     expect(snapshot.evidence.length).toBeGreaterThan(0)
     expect(fetcher).toHaveBeenCalledWith(
       '/api/console/v0/overview',

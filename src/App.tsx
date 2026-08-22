@@ -107,7 +107,7 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
             <h3>{cluster.name}</h3><p>{cluster.profile}</p>
             <dl className="mini-spec"><div><dt>Provider</dt><dd>{cluster.provider}</dd></div><div><dt>Region</dt><dd>{cluster.region}</dd></div><div><dt>Version</dt><dd>{cluster.version}</dd></div></dl>
           </button>
-          <footer><span>{cluster.capabilities.length} capabilities</span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></footer>
+          <footer><span>{cluster.capabilityCount ?? cluster.capabilities.length} capabilities</span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></footer>
         </article>)}
       </div>}
     </section>

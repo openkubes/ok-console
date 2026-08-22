@@ -12,7 +12,7 @@ export const platformFixture: PlatformSnapshot = {
       id: 'cluster-ok-mgmt', name: 'ok-mgmt', role: 'Management plane', provider: 'Bare metal',
       profile: 'Talos management', version: 'v1.32.6', region: 'fra-dc1', readiness: 'Ready',
       compatibility: 'Supported', contractVersion: 'platform.openkubes.io/v1alpha1', revision: 'rev-7d2a9c',
-      evidenceId: 'ev-mgmt-ready', capabilities: ['cap-identity', 'cap-gitops', 'cap-observability', 'cap-registry'],
+      evidenceId: 'ev-mgmt-ready', capabilities: ['cap-identity', 'cap-gitops', 'cap-observability', 'cap-registry'], capabilityCount: 4,
       lifecycle: [
         { label: 'Declared', state: 'Ready', detail: 'Contract accepted · generation 14' },
         { label: 'Infrastructure', state: 'Ready', detail: '3 control-plane nodes healthy' },
@@ -24,7 +24,7 @@ export const platformFixture: PlatformSnapshot = {
       id: 'cluster-ok-ai', name: 'ok-ai', role: 'Workload cluster', provider: 'KubeVirt',
       profile: 'AI accelerated', version: 'v1.32.6', region: 'fra-gpu1', readiness: 'Ready',
       compatibility: 'Supported', contractVersion: 'platform.openkubes.io/v1alpha1', revision: 'rev-a812ef',
-      evidenceId: 'ev-ai-ready', capabilities: ['cap-storage', 'cap-observability', 'cap-ingress'],
+      evidenceId: 'ev-ai-ready', capabilities: ['cap-storage', 'cap-observability', 'cap-ingress'], capabilityCount: 3,
       lifecycle: [
         { label: 'Declared', state: 'Ready', detail: 'Contract accepted · generation 8' },
         { label: 'Infrastructure', state: 'Ready', detail: 'GPU worker placement verified' },
@@ -36,7 +36,7 @@ export const platformFixture: PlatformSnapshot = {
       id: 'cluster-ok-shared', name: 'ok-shared', role: 'Workload cluster', provider: 'OpenStack',
       profile: 'Shared services', version: 'v1.31.9', region: 'ber-1', readiness: 'Pending',
       compatibility: 'Supported', contractVersion: 'platform.openkubes.io/v1alpha1', revision: 'rev-1c490d',
-      evidenceId: 'ev-shared-pending', capabilities: ['cap-identity', 'cap-registry', 'cap-messaging'],
+      evidenceId: 'ev-shared-pending', capabilities: ['cap-identity', 'cap-registry', 'cap-messaging'], capabilityCount: 3,
       lifecycle: [
         { label: 'Declared', state: 'Ready', detail: 'Contract accepted · generation 3' },
         { label: 'Infrastructure', state: 'Ready', detail: '5 nodes provisioned' },
@@ -48,7 +48,7 @@ export const platformFixture: PlatformSnapshot = {
       id: 'cluster-edge-07', name: 'edge-07', role: 'Workload cluster', provider: 'Bare metal',
       profile: 'Constrained edge', version: 'v1.30.12', region: 'factory-07', readiness: 'Unknown',
       compatibility: 'Read only', contractVersion: 'platform.openkubes.io/v1alpha0', revision: 'rev-88e913',
-      evidenceId: 'ev-edge-unknown', capabilities: ['cap-storage', 'cap-observability'],
+      evidenceId: 'ev-edge-unknown', capabilities: ['cap-storage', 'cap-observability'], capabilityCount: 2,
       lifecycle: [
         { label: 'Declared', state: 'Ready', detail: 'Legacy contract recognized' },
         { label: 'Infrastructure', state: 'Ready', detail: '2 edge nodes registered' },

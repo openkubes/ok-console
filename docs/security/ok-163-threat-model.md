@@ -69,5 +69,14 @@ authorization-revision check before protected authorization. Its conformance
 suite runs against a real PostgreSQL service in CI. Runtime TLS/key provisioning,
 failover and restore exercises remain required production evidence.
 
+The runtime now selects `disabled` or `postgres` explicitly and never falls
+back to memory. PostgreSQL mode installs session-backed authorization together
+with exact-Origin CSRF checks, requires verified TLS (apart from an explicit
+loopback-only development switch), reads database credentials and envelope keys
+only from bounded absolute file paths, and fails process startup on incomplete
+configuration. The first revision validator compares against an explicitly
+deployed identity-mapping revision; publishing that revision with every mapping
+change remains an operational requirement until a live policy adapter exists.
+
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

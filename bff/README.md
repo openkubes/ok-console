@@ -98,6 +98,35 @@ unverified authorization revisions, database errors, invalid epochs and
 ambiguous rotation outcomes fail closed. PostgreSQL replicas must not serve
 session authorization reads.
 
+### Secure runtime selection
+
+`server.mjs` selects the store only through
+`OK_CONSOLE_SESSION_STORE_MODE=disabled|postgres`. The default `disabled` mode
+preserves the local fixture prototype and returns `503 SESSION_UNAVAILABLE` on
+session routes. It never creates a hidden in-memory store. A non-fixture
+observed-state source is rejected in this mode so real observations cannot be
+exposed through the prototype authorizer.
+
+The `postgres` mode is atomic: process startup creates the PostgreSQL store,
+installs session-backed point-of-use authorization, and configures exact-Origin
+CSRF checks together. Missing or invalid inputs stop startup. Configure the
+non-secret values and mount the database URL, CA certificate, and envelope keys
+as files as shown in `.env.example`. The key file is a bounded JSON object whose
+values are base64-encoded 32-byte AES keys; keep old keys present while their
+envelopes can still exist, and select the write key by ID.
+
+Verified TLS is mandatory. The only exception is the explicit
+`OK_CONSOLE_POSTGRES_ALLOW_INSECURE_LOOPBACK=true` development switch, which is
+rejected unless the database host is loopback. Database URL query parameters
+cannot override the trusted TLS profile. The configured deployment epoch
+invalidates sessions from another deployment epoch, while the authorization
+revision must exactly match the deployed mapping revision before every
+protected read.
+
+The static revision comparison is the bounded first runtime implementation. A
+later identity-policy adapter can replace it with live revision validation
+without changing the session-store port.
+
 Rotation retains an internal digest-only session-family identifier. Logout
 locks the presented reference and revokes that entire family in one transaction,
 so a concurrent rotation cannot leave a newly issued reference active.
@@ -156,8 +185,9 @@ references, derives freshness locally, and converts upstream partial status to
 a safe `PARTIAL_DATA` warning. Upstream diagnostic text is never forwarded.
 
 Authentication for the upstream query is deliberately not invented here; it is
-part of OK-163. Until that boundary exists, use this mode only in a controlled
-network integration environment.
+part of OK-163. The process now requires the PostgreSQL session runtime before
+this source can be selected, so browser reads are session-authorized even in a
+controlled network integration environment.
 
 ### Explicit rollback to fixtures
 

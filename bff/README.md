@@ -174,6 +174,22 @@ CSRF-bound `DELETE /auth/session` for logout. The prototype mode remains the
 explicit default. Local/bootstrap authentication is disabled in live mode until
 its independent verifier, rate limit, audit, and recovery boundary is accepted.
 
+### Exceptional local-access verifier core
+
+`security/localAccess.mjs` provides the reviewed core for a later Bootstrap or
+Break-glass HTTP endpoint. It is not wired into the runtime and therefore
+cannot be invoked remotely in this slice. Accounts are explicit mappings with
+salted scrypt verifiers; unknown usernames execute the same asynchronous KDF
+path. Parameters are fixed to `N=32768`, `r=8`, `p=1` with a 64 MiB ceiling.
+
+Migration `003_local_access_throttle.sql` adds digest-only, database-time
+throttling shared by all BFF replicas. Five failed attempts in a 15-minute
+window block the principal for 15 minutes. The digest is HMAC-peppered so the
+table does not disclose configured usernames. Every attempt requires a bounded
+operational reason and emits a credential-free event through an injected audit
+port. The future HTTP/runtime slice must supply durable Evidence; until then,
+local access remains disabled in the live UI.
+
 Rotation retains an internal digest-only session-family identifier. Logout
 locks the presented reference and revokes that entire family in one transaction,
 so a concurrent rotation cannot leave a newly issued reference active.

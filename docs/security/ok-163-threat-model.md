@@ -96,5 +96,13 @@ disabled in live mode until its separate server verifier is implemented. A
 configuration guard prevents live authentication from being paired with fixture
 data.
 
+The exceptional-access verifier core now performs asynchronous memory-hard
+scrypt verification, follows the same KDF path for unknown principals, requires
+a bounded operational reason, and uses HMAC-digest-only PostgreSQL throttle
+state across replicas. It issues the shorter Bootstrap/BreakGlass session shape
+only after a reviewed account mapping verifies. No HTTP or runtime route is
+enabled yet; durable audit Evidence, credential custody, recovery exercises and
+the endpoint threat review remain required before live activation.
+
 None of these is satisfied by the graphical prototype or by the v0alpha1 data
 shapes alone.

@@ -96,7 +96,7 @@ curl --fail --silent --show-error http://127.0.0.1:18787/health/live >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:18787/health/ready >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:18787/ | grep -Fq '<div id="root"></div>'
 unauthorized_status="$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18787/api/console/v0/overview)"
-[[ "${unauthorized_status}" == "401" ]] || { echo "Unauthenticated overview returned ${unauthorized_status}, expected 401." >&2; exit 1; }
+[[ "${unauthorized_status}" == "403" ]] || { echo "Unauthenticated overview returned ${unauthorized_status}, expected contract-level 403." >&2; exit 1; }
 
 echo "OK-172 live slice verified."
 echo "Context: ${actual_context}"

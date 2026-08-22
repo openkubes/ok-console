@@ -8,6 +8,11 @@ const files: Record<string, string> = {
   '/run/secrets/postgres-url': 'postgresql://console:secret@127.0.0.1:5432/console',
   '/run/secrets/postgres-ca': 'test-ca',
   '/run/secrets/envelope-keys': JSON.stringify({ 'key-2026-08': key }),
+  '/run/secrets/oidc-client-secret': 'client-secret',
+  '/run/secrets/oidc-subjects': JSON.stringify({
+    version: 'v1',
+    subjects: [{ providerSubject: 'subject-1', identityId: 'user-1', displayName: 'Mapped User', assurance: ['Federated'], tenantIds: ['platform'], permissions: ['platform.read'] }],
+  }),
 }
 
 const baseEnv = {
@@ -98,6 +103,34 @@ describe('session runtime configuration', () => {
     })
 
     expect(poolConfiguration?.ssl).toBe(false)
+  })
+
+  it('wires OIDC only from a trusted issuer, confidential client secret, and explicit subject map', async () => {
+    const oidcProtocolFactory = vi.fn(async () => ({ marker: 'protocol' }))
+    const transactionStoreFactory = vi.fn(() => ({ create: vi.fn(), consume: vi.fn() }))
+    const runtime = await createSessionRuntime({
+      env: {
+        ...baseEnv,
+        OK_CONSOLE_OIDC_ENABLED: 'true',
+        OK_CONSOLE_OIDC_PROVIDER_ID: 'provider-1',
+        OK_CONSOLE_OIDC_ISSUER: 'https://identity.example/',
+        OK_CONSOLE_OIDC_CLIENT_ID: 'ok-console',
+        OK_CONSOLE_OIDC_CLIENT_SECRET_FILE: '/run/secrets/oidc-client-secret',
+        OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE: '/run/secrets/oidc-subjects',
+        OK_CONSOLE_OIDC_SUCCESS_REDIRECT: '/#/overview',
+      },
+      fileReader,
+      poolFactory: () => ({ end: async () => {} }),
+      storeFactory: () => ({ authorize: vi.fn(), create: vi.fn() }),
+      transactionStoreFactory,
+      oidcProtocolFactory,
+    })
+
+    expect(oidcProtocolFactory).toHaveBeenCalledWith({
+      issuer: 'https://identity.example/', clientId: 'ok-console', clientSecret: 'client-secret', timeoutSeconds: 5,
+    })
+    expect(transactionStoreFactory).toHaveBeenCalled()
+    expect(runtime.oidcHandler).toEqual(expect.any(Function))
   })
 
   it.each([

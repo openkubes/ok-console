@@ -31,6 +31,8 @@ using `ConsoleDataPort`; only its adapter changes.
 | `GET /api/console/v0/auth/session` | `ConsoleSession` | valid opaque session |
 | `POST /api/console/v0/auth/session/rotate` | `ConsoleSession` + rotated cookies | valid session + exact Origin + CSRF |
 | `DELETE /api/console/v0/auth/session` | empty `204` + cleared cookies | valid session + exact Origin + CSRF |
+| `GET /api/console/v0/auth/oidc/start` | `302` to the configured issuer | OIDC enabled |
+| `GET /api/console/v0/auth/oidc/callback` | `303` + opaque Console cookies | valid one-time flow + mapped subject |
 
 All other paths return a bounded `NOT_FOUND` response. Non-`GET` resource
 methods fail closed; there is no generic Kubernetes proxy or platform mutation
@@ -82,7 +84,7 @@ provider tests.
 
 ## PostgreSQL session-store profile
 
-Apply `security/postgres/001_console_sessions.sql` through the deployment's
+Apply the numbered files in `security/postgres` through the deployment's
 reviewed migration workflow. The BFF does not run schema migrations at request
 startup. Use a separate migration identity; the runtime role needs only bounded
 session-table DML. Construct `PostgresSessionStore` with:
@@ -126,6 +128,44 @@ protected read.
 The static revision comparison is the bounded first runtime implementation. A
 later identity-policy adapter can replace it with live revision validation
 without changing the session-store port.
+
+### OIDC Authorization Code flow
+
+Apply `security/postgres/002_oidc_transactions.sql` and enable
+`OK_CONSOLE_OIDC_ENABLED=true` only with the PostgreSQL runtime. The BFF uses
+the pinned `openid-client` library for issuer discovery, JWKS/signature and
+token-claim validation, Authorization Code exchange, PKCE S256, State, and
+Nonce validation. Discovery starts from the configured issuer identifier over
+HTTPS with a bounded timeout.
+
+PKCE verifier, State, and Nonce are encrypted in PostgreSQL for five minutes.
+The browser receives only a digest-backed `Secure`, `HttpOnly`, `SameSite=Lax`
+transaction reference, which is atomically deleted before callback validation;
+failed and replayed callbacks cannot reuse it. Provider tokens are neither
+stored nor returned to the browser.
+
+The confidential client secret and a versioned subject mapping are read from
+bounded mounted files. The mapping file shape is:
+
+```json
+{
+  "version": "v1",
+  "subjects": [{
+    "providerSubject": "issuer-scoped-opaque-subject",
+    "identityId": "openkubes-user-id",
+    "displayName": "Mapped display name",
+    "assurance": ["Federated"],
+    "tenantIds": ["platform"],
+    "permissions": ["platform.read", "clusters.read"]
+  }]
+}
+```
+
+Only the cryptographically validated `sub` selects a reviewed mapping. Email,
+display-name, role, and group claims never grant authority. Unmapped subjects,
+duplicate mappings, missing ID Tokens, stale transactions, provider errors,
+and configuration ambiguity fail closed with bounded errors. Register the exact
+callback `${OK_CONSOLE_ORIGIN}/api/console/v0/auth/oidc/callback` at the provider.
 
 Rotation retains an internal digest-only session-family identifier. Logout
 locks the presented reference and revokes that entire family in one transaction,

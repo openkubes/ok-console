@@ -18,6 +18,7 @@ const server = createServer(createConsoleBffHandler({
   ...(sessionRuntime.authorizer ? { authorizer: sessionRuntime.authorizer } : {}),
   sessionStore: sessionRuntime.sessionStore,
   expectedOrigin: sessionRuntime.expectedOrigin,
+  oidcHandler: sessionRuntime.oidcHandler,
   enableFailureInjection,
   requestObserver: ({ method, pathname, correlationId }) => {
     console.log(`${method} ${pathname} · ${correlationId}`)

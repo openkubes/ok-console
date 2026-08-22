@@ -149,11 +149,13 @@ export const createConsoleBffHandler = ({
   requestObserver = () => {},
   sessionStore = null,
   expectedOrigin,
+  oidcHandler = null,
 }) => async (request, response) => {
   const requestCorrelationId = correlationId()
   try {
     const url = new URL(request.url ?? '/', 'http://console.local')
     requestObserver({ method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
+    if (oidcHandler && await oidcHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
     if (await handleSessionHttp({
       request,
       response,

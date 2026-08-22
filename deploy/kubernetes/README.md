@@ -12,7 +12,7 @@ parser ambiguity.
 - `.invalid` origins and endpoints prevent accidental connection to a real
   identity provider or observed-state producer.
 - `REPLACE_*` authority values must come from reviewed environment policy.
-- The referenced Secret objects are not included. Provision them through the
+- The five referenced Secret objects are not included. Provision them through the
   accepted secret-delivery system with the keys and file contracts documented
   in `.env.example`; never commit their values.
 - The included NetworkPolicy is default-deny only. A target-specific overlay
@@ -43,7 +43,8 @@ state, and serves both static assets and `/api/console/v0` from port 8787.
 Before applying these objects, a deployment owner must:
 
 1. replace the image digest and every `.invalid` / `REPLACE_*` value;
-2. provision the four referenced Secrets outside Git;
+2. provision the five referenced Secrets outside Git, including the explicit
+   producer CA and Console BFF workload certificate/key;
 3. add narrow ingress, DNS, PostgreSQL, OIDC, and observed-state NetworkPolicies;
 4. confirm the CNI enforces NetworkPolicy and the namespace enforces Restricted
    Pod Security;

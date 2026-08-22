@@ -88,6 +88,7 @@ describe('OpenKubes Console', () => {
     }
     render(<App auth={auth}/>)
     fireEvent.click(await screen.findByRole('button', { name: /Use a local account/i }))
+    expect(screen.getByRole('heading', { name: 'Break-glass access' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Local username'), { target: { value: 'recovery-admin' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'one-time-secret' } })
     fireEvent.change(screen.getByLabelText(/Operational reason/i), { target: { value: 'Federation provider is unavailable' } })

@@ -70,6 +70,8 @@ export default function AuthEntry({ onAuthenticated, authMode = 'prototype', onS
   const localEnabled = authMode === 'bootstrap' || authMode === 'breakglass'
   const availableProviders = live ? (oidcEnabled ? providers.slice(0, 1) : []) : providers
   const localTitle = authMode === 'bootstrap' ? 'Bootstrap access' : authMode === 'breakglass' ? 'Break-glass access' : 'Bootstrap / break-glass'
+  const localSource = authMode === 'bootstrap' ? 'Local Bootstrap' : authMode === 'breakglass' ? 'Local Break-glass' : 'Local bootstrap / break-glass'
+  const localReviewTitle = authMode === 'bootstrap' ? 'Review bootstrap session' : 'Review break-glass session'
 
   const oidcSession: PrototypeSession = {
     method: 'oidc',
@@ -81,7 +83,7 @@ export default function AuthEntry({ onAuthenticated, authMode = 'prototype', onS
   const localSession: PrototypeSession = {
     method: 'local',
     identity: username,
-    source: 'Local bootstrap / break-glass',
+    source: localSource,
     assurance: 'Password · elevated review required',
     expiresIn: '15 minutes · in-memory prototype',
     reason,
@@ -172,7 +174,7 @@ export default function AuthEntry({ onAuthenticated, authMode = 'prototype', onS
           <p className="auth-simulation">{localEnabled ? 'Credentials are sent only to the same-origin exceptional-access BFF boundary.' : <>Prototype hint: username <code>blocked</code> demonstrates a denied attempt.</>}</p>
         </>}
 
-        {stage === 'local-review' && <SessionReview session={localSession} title="Review break-glass session" onEnter={() => onAuthenticated(localSession)} onBack={reset}/>} 
+        {stage === 'local-review' && <SessionReview session={localSession} title={localReviewTitle} onEnter={() => onAuthenticated(localSession)} onBack={reset}/>}
       </div>
       <footer className="auth-panel-footer"><span>Privacy</span><span>Security</span><span>OpenKubes</span><small>console.openkubes.io/v0alpha1</small></footer>
     </section>

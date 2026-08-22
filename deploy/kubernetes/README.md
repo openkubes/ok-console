@@ -133,6 +133,66 @@ to modify a pre-existing `openkubes-console` namespace unless it carries the
 `openkubes.io/managed-by=ok-170` ownership label. The Phase A inventory and the
 remaining live-integration gates are recorded in `docs/evidence/ok-170`.
 
+## OK-172 ok-shared live slice
+
+The `overlays/ok-shared-live` path is the render-first Phase B1 candidate. It
+pins the accepted Console `dev-v0.1.0-rc.4` and observed-state producer
+`console-observer-dev-v0.1.0-rc.3` digests. The Console uses PostgreSQL-backed
+bootstrap sessions and the producer's explicit `hosting-cluster` source. The
+source reads Kubernetes version, a bounded Node list, and the exact
+`Deployment/openkubes-console/ok-console`; it installs and reads no Crossplane,
+KubeVirt, or CAPI APIs.
+
+The target-specific dependencies are the existing Ready
+`ClusterIssuer/ok-shared-internal-ca`, CloudNativePG, `StorageClass/local-path`,
+Traefik `IngressClass/ok-ingress`, CoreDNS, and Cilium's explicit
+`kube-apiserver` entity. The verifier fails if those facts drift. Certificates
+use separate server and client identities; the producer requires the exact
+Console SPIFFE URI. NetworkPolicies permit only Traefik ingress, DNS,
+PostgreSQL, producer mTLS, and the producer's Kubernetes API read path.
+
+Render, perform server-side admission dry-run, and change no cluster state:
+
+```bash
+./deploy/kubernetes/verify-ok-shared-live.sh
+```
+
+The live field manager explicitly takes ownership of the reviewed Console image
+and mode fields previously owned by `ok-170-preview`. Both dry-run and apply use
+the same bounded server-side conflict policy, so the Preview-to-Phase-B1
+transition cannot be an accidental client-side merge.
+The existing Preview ingress-policy identity is deliberately reused and
+narrowed to Traefik, preventing the old same-namespace allow rule from
+remaining as an additive policy after the transition.
+
+Two application Secrets are deliberately absent from Git. Provision them from
+an interactive TTY; the password is hidden, confirmed, never passed in process
+arguments, and never printed. The provisioner refuses implicit rotation:
+
+```bash
+OK_CONSOLE_APPLY_BOOTSTRAP=true \
+  node ./deploy/kubernetes/provision-ok-shared-bootstrap.mjs
+```
+
+Store the entered password immediately in the approved credential manager.
+Then apply through the explicit live gate:
+
+```bash
+OK_CONSOLE_APPLY_LIVE=true ./deploy/kubernetes/verify-ok-shared-live.sh
+```
+
+The verifier waits for all certificates, the CNPG database, the producer and
+the Console; checks both immutable images and producer allow/deny RBAC; and
+proves health, readiness, static delivery, and unauthenticated API denial. It
+does not print Secret data and contains no delete or rollback mutation.
+
+The lab route is `https://console.ok-shared.internal:30443`. Resolve that name
+to an `ok-shared` node and trust only the public CA certificate carried in
+`Secret/ok-console-ingress-tls`. The initial username is `arash`; every login
+also requires a 12–512 character operational reason and writes credential-free
+audit Evidence to PostgreSQL. OIDC remains disabled until a separate reviewed
+identity-provider step replaces bootstrap access.
+
 ## Development image publication
 
 `.github/workflows/publish-dev-image.yaml` publishes only a `dev-v*` tag whose

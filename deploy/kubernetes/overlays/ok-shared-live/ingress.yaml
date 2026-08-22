@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ok-console
+  namespace: openkubes-console
+  labels:
+    app.kubernetes.io/name: ok-console
+    openkubes.io/environment: ok-shared-live
+spec:
+  ingressClassName: ok-ingress
+  tls:
+    - hosts:
+        - console.ok-shared.internal
+      secretName: ok-console-ingress-tls
+  rules:
+    - host: console.ok-shared.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ok-console
+                port:
+                  name: http

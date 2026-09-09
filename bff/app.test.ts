@@ -170,6 +170,31 @@ describe('read-only Console BFF provider', () => {
     expect(proxy.body).toMatchObject({ kind: 'Error', error: { code: 'NOT_FOUND' } })
   })
 
+  it('executes an authenticated CreateCluster dry-run through the injected runner boundary', async () => {
+    await stopBff()
+    await startBff({
+      source: fixtureSource,
+      dryRunExecutor: async ({ contract, identity, correlationId }) => ({
+        format: 'ok147-create-plan/v1',
+        operation: 'CreateCluster',
+        contractIdentity: contract.metadata?.name ?? 'unknown',
+        mutationAllowed: false,
+        actor: identity.id,
+        correlationId,
+      }),
+    })
+    const response = await fetch(`${baseUrl}/api/console/v0/operations/create-cluster/dry-run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contract: { apiVersion: 'clusters.openkubes.io/v1alpha1', metadata: { name: 'demo' } } }),
+    })
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.kind).toBe('CreateClusterDryRun')
+    expect(body.data.mutationAllowed).toBe(false)
+    expect(body.data.operation).toBe('CreateCluster')
+  })
+
   it('rejects unsupported Presentation Contract profiles', async () => {
     const { response, body } = await getJson('/api/console/v0/overview', {
       headers: { Accept: 'application/json; profile="console.openkubes.io/v9"' },

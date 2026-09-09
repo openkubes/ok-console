@@ -27,9 +27,25 @@ const DEFAULT_IDENTITY = {
 }
 
 const permissionFor = (pathname) => {
+  if (pathname === `${ROUTE_PREFIX}/operations/create-cluster/dry-run`) return 'clusters.read'
   if (pathname.includes('/evidence/')) return 'evidence.read'
   if (pathname.includes('/clusters')) return 'clusters.read'
   return 'platform.read'
+}
+
+const readJsonBody = async (request, maxBytes = 256 * 1024) => {
+  let size = 0
+  const chunks = []
+  for await (const chunk of request) {
+    size += chunk.length
+    if (size > maxBytes) throw new ConsoleBffError(413, 'VALIDATION_FAILED', 'The dry-run request is too large.')
+    chunks.push(chunk)
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    throw new ConsoleBffError(400, 'VALIDATION_FAILED', 'The dry-run request must be valid JSON.')
+  }
 }
 
 export const prototypeAuthorizer = async ({ permission }) => ({
@@ -152,6 +168,7 @@ export const createConsoleBffHandler = ({
   expectedOrigin,
   oidcHandler = null,
   localAccessHandler = null,
+  dryRunExecutor = null,
 }) => async (request, response) => {
   const requestCorrelationId = correlationId()
   try {
@@ -168,9 +185,24 @@ export const createConsoleBffHandler = ({
       expectedOrigin,
     })) return
 
-    if (request.method !== 'GET') {
-      throw new ConsoleBffError(405, 'FORBIDDEN', 'The Console BFF exposes read-only GET resources only.')
+    const dryRunPath = `${ROUTE_PREFIX}/operations/create-cluster/dry-run`
+    if (request.method === 'POST' && url.pathname === dryRunPath) {
+      const authorization = await authorizer({ request, pathname: url.pathname, permission: 'clusters.read' })
+      if (!authorization.allowed) throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot request a cluster dry-run.')
+      if (!dryRunExecutor) throw new ConsoleBffError(503, 'SOURCE_UNAVAILABLE', 'The Console dry-run runner is not configured.', true)
+      const input = await readJsonBody(request)
+      if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.contract !== 'object' || input.contract === null) {
+        throw new ConsoleBffError(400, 'VALIDATION_FAILED', 'The dry-run request requires a JSON object in contract.')
+      }
+      const result = await dryRunExecutor({ contract: input.contract, identity: authorization.identity, correlationId: requestCorrelationId })
+      sendJson(response, 200, successResponse('CreateClusterDryRun', result, responseMeta({
+        correlationId: requestCorrelationId,
+        observedAt: now().toISOString(),
+        freshness: 'Current',
+      })), requestCorrelationId)
+      return
     }
+    if (request.method !== 'GET') throw new ConsoleBffError(405, 'FORBIDDEN', 'The Console BFF exposes read-only GET resources only.')
 
     const accept = request.headers.accept
     if (accept?.includes('profile=') && !accept.includes(CONTRACT_VERSION)) {

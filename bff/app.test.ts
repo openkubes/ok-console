@@ -192,4 +192,26 @@ describe('read-only Console BFF provider', () => {
     expect(body).toMatchObject({ kind: 'Error', error: { code: 'SOURCE_UNAVAILABLE', retryable: true } })
     expect(JSON.stringify(body)).not.toContain('backend details')
   })
+
+  it.each([
+    ['Bootstrap', 'Local', 'Break glass'],
+    ['BreakGlass', 'Local', 'Break glass'],
+  ])('projects %s security identities into the coarse SessionContext contract', async (method, identitySource, assurance) => {
+    await stopBff()
+    await startBff({
+      source: fixtureSource,
+      authorizer: async () => ({
+        allowed: true,
+        identity: {
+          id: 'local-test', displayName: 'Local Test', identitySource: method, assurance,
+          permissions: ['platform.read'],
+        },
+      }),
+      correlationId: () => 'corr-session-method-test',
+    })
+    const { response, body } = await getJson('/api/console/v0/session')
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ data: { subject: { identitySource, assurance } } })
+    expect(validateConsoleResponse(body)).toEqual({ valid: true, errors: [] })
+  })
 })

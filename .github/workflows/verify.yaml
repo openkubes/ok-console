@@ -46,7 +46,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          for attempt in 1 2 3; do
+            pnpm exec playwright install --with-deps chromium && exit 0
+            echo "Chromium installation attempt ${attempt} failed; retrying after mirror cooldown."
+            sleep 15
+          done
+          exit 1
       - name: Lint
         run: pnpm lint
       - name: Test

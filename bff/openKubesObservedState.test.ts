@@ -124,7 +124,7 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(body).toMatchObject({
       meta: {
         freshness: 'Stale',
-        warnings: [{ code: 'SOURCE_STALE' }, { code: 'PARTIAL_DATA' }],
+        warnings: [{ code: 'SOURCE_STALE' }, { code: 'PARTIAL_DATA' }, { code: 'REDACTED' }],
       },
     })
     expect(serialized).not.toContain('kubeconfig')

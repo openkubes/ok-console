@@ -9,6 +9,15 @@ const READINESS = new Set(['Ready', 'Pending', 'Failed', 'Unknown'])
 const ROLES = new Set(['Management plane', 'Workload cluster'])
 const COMPATIBILITY = new Set(['Supported', 'Read only'])
 const CLASSIFICATION = new Set(['Immutable', 'Current'])
+const EVIDENCE_TYPES = new Set(['Observation', 'Transition', 'Authorization'])
+const EVIDENCE_OUTCOMES = new Set(['Ready', 'Pending', 'Failed', 'Unknown', 'Approved', 'Denied'])
+
+export class ObservedStateContractError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'ObservedStateContractError'
+  }
+}
 
 const record = (value, path) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path} must be an object.`)
@@ -101,8 +110,8 @@ const normalizeEvidence = (value, path) => {
   return {
     id: string(item.id, `${path}.id`),
     title: string(item.title, `${path}.title`),
-    type: string(item.type, `${path}.type`),
-    outcome: enumeration(item.outcome, READINESS, `${path}.outcome`),
+    type: enumeration(item.type, EVIDENCE_TYPES, `${path}.type`),
+    outcome: enumeration(item.outcome, EVIDENCE_OUTCOMES, `${path}.outcome`),
     clusterId: string(item.clusterId, `${path}.clusterId`),
     contract: string(item.contract, `${path}.contract`),
     revision: string(item.revision, `${path}.revision`),
@@ -133,7 +142,7 @@ const readBoundedBody = async (response) => {
 
 export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(), staleAfterMs = DEFAULT_STALE_AFTER_MS } = {}) => {
   const envelope = record(payload, '$')
-  if (envelope.apiVersion !== QUERY_VERSION || envelope.kind !== QUERY_KIND) throw new Error('Observed-state query contract is incompatible.')
+  if (envelope.apiVersion !== QUERY_VERSION || envelope.kind !== QUERY_KIND) throw new ObservedStateContractError('Observed-state query contract is incompatible.')
   const metadata = record(envelope.metadata, '$.metadata')
   const data = record(envelope.data, '$.data')
   const observedAt = string(metadata.observedAt, '$.metadata.observedAt')

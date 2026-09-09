@@ -26,8 +26,8 @@ export const sessionProjection = (snapshot, identity, expiresAt) => ({
   subject: {
     id: identity.id,
     displayName: identity.displayName,
-    identitySource: identity.identitySource,
-    assurance: identity.assurance,
+    identitySource: identity.identitySource === 'OIDC' ? 'OIDC' : 'Local',
+    assurance: identity.identitySource === 'OIDC' ? 'Federated' : 'Break glass',
   },
   environment: {
     id: snapshot.environment.id,

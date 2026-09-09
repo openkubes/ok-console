@@ -15,6 +15,7 @@ import {
   sessionProjection,
 } from './presentation.mjs'
 import { handleSessionHttp } from './security/httpSession.mjs'
+import { ObservedStateContractError } from './adapters/openKubesObservedState.mjs'
 
 const ROUTE_PREFIX = '/api/console/v0'
 const DEFAULT_IDENTITY = {
@@ -210,6 +211,11 @@ export const createConsoleBffHandler = ({
         errorResponse(error.code, error.message, error.retryable, requestCorrelationId, error.extra),
         requestCorrelationId,
       )
+      return
+    }
+
+    if (error instanceof ObservedStateContractError) {
+      sendJson(response, 502, errorResponse('CONTRACT_INCOMPATIBLE', 'The observed platform response is not compatible with this Console contract.', false, requestCorrelationId), requestCorrelationId)
       return
     }
 

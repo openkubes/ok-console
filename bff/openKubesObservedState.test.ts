@@ -131,6 +131,18 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(serialized).not.toContain('private backend details')
   })
 
+  it('accepts the contract-authorized Evidence variants from the real source', async () => {
+    const envelope = await observedEnvelope()
+    envelope.data.evidence[0] = {
+      ...envelope.data.evidence[0],
+      type: 'Authorization',
+      outcome: 'Approved',
+    }
+    const queryUrl = await startQuery(envelope)
+    const snapshot = await new OpenKubesObservedStateAdapter({ url: queryUrl }).readSnapshot()
+    expect(snapshot.evidence[0]).toMatchObject({ type: 'Authorization', outcome: 'Approved' })
+  })
+
   it('turns incompatible real source data into a bounded BFF failure', async () => {
     const envelope = await observedEnvelope()
     envelope.apiVersion = 'observed.openkubes.io/v9'
@@ -139,8 +151,8 @@ describe('OpenKubes observed-state query adapter', () => {
     const response = await fetch(`${bffUrl}/api/console/v0/clusters`)
     const body = await response.json()
 
-    expect(response.status).toBe(503)
-    expect(body).toMatchObject({ kind: 'Error', error: { code: 'SOURCE_UNAVAILABLE', retryable: true } })
+    expect(response.status).toBe(502)
+    expect(body).toMatchObject({ kind: 'Error', error: { code: 'CONTRACT_INCOMPATIBLE', retryable: false } })
     expect(JSON.stringify(body)).not.toContain('observed.openkubes.io/v9')
   })
 

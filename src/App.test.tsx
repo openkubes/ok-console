@@ -141,7 +141,7 @@ describe('OpenKubes Console', () => {
     await screen.findByText('Declare cluster intent')
     fireEvent.click(screen.getByRole('button', { name: /Generate contract/i }))
     fireEvent.click(screen.getByRole('button', { name: /Continue to authorization/i }))
-    const authorize = screen.getByRole('button', { name: /Authorize prototype/i })
+    const authorize = screen.getByRole('button', { name: /Run safe dry-run/i })
     expect(authorize).toBeDisabled()
     fireEvent.click(screen.getByRole('checkbox'))
     await waitFor(() => expect(authorize).toBeEnabled())

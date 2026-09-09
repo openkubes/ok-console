@@ -152,7 +152,7 @@ describe('OpenKubes observed-state query adapter', () => {
     const queryUrl = await startQuery(envelope)
     const source = new OpenKubesObservedStateAdapter({ url: queryUrl })
     const snapshot = await source.readSnapshot()
-    expect(snapshot.evidence[0].summary).toContain('token=[REDACTED]')
+    expect(snapshot.evidence[0].summary).toBe('Evidence summary withheld by the Console redaction boundary.')
     expect(snapshot.evidence[0].summary).not.toContain('super-secret')
     expect(snapshot.sourceHealth.warnings).toContainEqual({ code: 'REDACTED', message: expect.any(String) })
   })

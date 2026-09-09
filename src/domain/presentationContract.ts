@@ -375,6 +375,12 @@ const validateData = (kind: PresentationKind, value: unknown, errors: string[]) 
         requireString(value, field, errors)
       }
       requireTimestamp(value, 'observedAt', errors)
+      if (!['Observation', 'Transition', 'Authorization'].includes(String(value.type))) {
+        errors.push('data.type must be Observation, Transition, or Authorization')
+      }
+      if (!['Ready', 'Pending', 'Failed', 'Unknown', 'Approved', 'Denied'].includes(String(value.outcome))) {
+        errors.push('data.outcome is not supported')
+      }
       if (!['Immutable', 'Current'].includes(String(value.classification))) {
         errors.push('data.classification must be Immutable or Current')
       }

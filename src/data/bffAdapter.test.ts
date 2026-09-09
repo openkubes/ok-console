@@ -98,6 +98,6 @@ describe('BffConsoleAdapter', () => {
     const snapshot = await adapter.getSnapshot()
 
     expect(snapshot.clusters).toHaveLength(2)
-    expect(snapshot.warnings).toContain('1 evidence reference could not be loaded (SOURCE_UNAVAILABLE).')
+    expect(snapshot.warnings).toContain('1 evidence reference could not be loaded (NETWORK_ERROR).')
   })
 })

@@ -12,20 +12,10 @@ const CLASSIFICATION = new Set(['Immutable', 'Current'])
 const EVIDENCE_TYPES = new Set(['Observation', 'Transition', 'Authorization'])
 const EVIDENCE_OUTCOMES = new Set(['Ready', 'Pending', 'Failed', 'Unknown', 'Approved', 'Denied'])
 
-const redactSummary = (value) => {
-  let redacted = false
-  let summary = value
-  const replacements = [
-    { pattern: /((?:password|passphrase|token|secret|api[_ -]?key|private[_ -]?key|authorization|cookie)\s*[:=]\s*)[^\s,;]+/gi, replacement: '$1[REDACTED]' },
-    { pattern: /https?:\/\/[^\s]+/gi, replacement: '[REDACTED_URL]' },
-  ]
-  for (const { pattern, replacement } of replacements) {
-    const next = summary.replace(pattern, replacement)
-    redacted ||= next !== summary
-    summary = next
-  }
-  return { summary, redacted }
-}
+const redactSummary = () => ({
+  summary: 'Evidence summary withheld by the Console redaction boundary.',
+  redacted: true,
+})
 
 export class ObservedStateContractError extends Error {
   constructor(message) {
@@ -122,7 +112,7 @@ const normalizePlacement = (value, path) => {
 
 const normalizeEvidence = (value, path) => {
   const item = record(value, path)
-  const summary = redactSummary(string(item.summary, `${path}.summary`))
+  string(item.summary, `${path}.summary`)
   return {
     id: string(item.id, `${path}.id`),
     title: string(item.title, `${path}.title`),
@@ -244,7 +234,12 @@ export class OpenKubesObservedStateAdapter {
       const declaredLength = Number.parseInt(response.headers.get('content-length') ?? '0', 10)
       if (declaredLength > MAX_RESPONSE_BYTES) throw new Error('OpenKubes observed-state response exceeds the size limit.')
       const body = await readBoundedBody(response)
-      return normalizeOpenKubesObservedState(JSON.parse(body), { now: this.now, staleAfterMs: this.staleAfterMs })
+      try {
+        return normalizeOpenKubesObservedState(JSON.parse(body), { now: this.now, staleAfterMs: this.staleAfterMs })
+      } catch (error) {
+        if (error instanceof ObservedStateContractError) throw error
+        throw new ObservedStateContractError('Observed-state response failed structural or semantic contract validation.')
+      }
     } finally {
       clearTimeout(timer)
     }

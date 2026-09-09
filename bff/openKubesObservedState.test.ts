@@ -143,6 +143,20 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(snapshot.evidence[0]).toMatchObject({ type: 'Authorization', outcome: 'Approved' })
   })
 
+  it('redacts credential-shaped Evidence summary fragments at the source boundary', async () => {
+    const envelope = await observedEnvelope()
+    envelope.data.evidence[0] = {
+      ...envelope.data.evidence[0],
+      summary: 'provider token=super-secret and password: hunter2',
+    }
+    const queryUrl = await startQuery(envelope)
+    const source = new OpenKubesObservedStateAdapter({ url: queryUrl })
+    const snapshot = await source.readSnapshot()
+    expect(snapshot.evidence[0].summary).toContain('token=[REDACTED]')
+    expect(snapshot.evidence[0].summary).not.toContain('super-secret')
+    expect(snapshot.sourceHealth.warnings).toContainEqual({ code: 'REDACTED', message: expect.any(String) })
+  })
+
   it('turns incompatible real source data into a bounded BFF failure', async () => {
     const envelope = await observedEnvelope()
     envelope.apiVersion = 'observed.openkubes.io/v9'

@@ -144,6 +144,9 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       .filter((result): result is PromiseFulfilledResult<EvidenceRef | undefined> => result.status === 'fulfilled')
       .map((result) => result.value)
     const unavailableEvidence = evidenceResults.filter((result) => result.status === 'rejected').length
+    const evidenceFailures = evidenceResults
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason instanceof ConsoleDataError ? result.reason.code : 'INTERNAL_ERROR')
 
     return {
       generatedAt: overview.meta.observedAt,
@@ -152,7 +155,7 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       freshness: overview.meta.freshness,
       warnings: [
         ...(overview.meta.warnings?.map((warning) => warning.message) ?? []),
-        ...(unavailableEvidence > 0 ? [`${unavailableEvidence} evidence reference${unavailableEvidence === 1 ? '' : 's'} could not be loaded.`] : []),
+        ...(unavailableEvidence > 0 ? [`${unavailableEvidence} evidence reference${unavailableEvidence === 1 ? '' : 's'} could not be loaded (${[...new Set(evidenceFailures)].join(', ')}).`] : []),
       ],
       overview: overview.data,
       clusters: clusters.data.items.map(clusterFromSummary),

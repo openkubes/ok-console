@@ -12,6 +12,21 @@ const CLASSIFICATION = new Set(['Immutable', 'Current'])
 const EVIDENCE_TYPES = new Set(['Observation', 'Transition', 'Authorization'])
 const EVIDENCE_OUTCOMES = new Set(['Ready', 'Pending', 'Failed', 'Unknown', 'Approved', 'Denied'])
 
+const redactSummary = (value) => {
+  let redacted = false
+  let summary = value
+  const replacements = [
+    { pattern: /((?:password|passphrase|token|secret|api[_ -]?key|private[_ -]?key|authorization|cookie)\s*[:=]\s*)[^\s,;]+/gi, replacement: '$1[REDACTED]' },
+    { pattern: /https?:\/\/[^\s]+/gi, replacement: '[REDACTED_URL]' },
+  ]
+  for (const { pattern, replacement } of replacements) {
+    const next = summary.replace(pattern, replacement)
+    redacted ||= next !== summary
+    summary = next
+  }
+  return { summary, redacted }
+}
+
 export class ObservedStateContractError extends Error {
   constructor(message) {
     super(message)
@@ -107,6 +122,7 @@ const normalizePlacement = (value, path) => {
 
 const normalizeEvidence = (value, path) => {
   const item = record(value, path)
+  const summary = redactSummary(string(item.summary, `${path}.summary`))
   return {
     id: string(item.id, `${path}.id`),
     title: string(item.title, `${path}.title`),
@@ -117,8 +133,9 @@ const normalizeEvidence = (value, path) => {
     revision: string(item.revision, `${path}.revision`),
     observedAt: string(item.observedAt, `${path}.observedAt`),
     source: string(item.source, `${path}.source`),
-    summary: string(item.summary, `${path}.summary`),
+    summary: summary.summary,
     classification: enumeration(item.classification, CLASSIFICATION, `${path}.classification`),
+    redacted: summary.redacted,
   }
 }
 
@@ -190,6 +207,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
       warnings: [
         ...(stale ? [{ code: 'SOURCE_STALE', message: 'The latest OpenKubes observation is outside the configured freshness window.' }] : []),
         ...(partial ? [{ code: 'PARTIAL_DATA', message: 'The OpenKubes query source reported a partial observation.' }] : []),
+        ...(evidence.some((item) => item.redacted) ? [{ code: 'REDACTED', message: 'Sensitive Evidence summary content was redacted at the Console source boundary.' }] : []),
       ],
     },
   }

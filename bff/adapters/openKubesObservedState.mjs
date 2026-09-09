@@ -113,6 +113,7 @@ const normalizePlacement = (value, path) => {
 const normalizeEvidence = (value, path) => {
   const item = record(value, path)
   string(item.summary, `${path}.summary`)
+  const summary = redactSummary()
   return {
     id: string(item.id, `${path}.id`),
     title: string(item.title, `${path}.title`),

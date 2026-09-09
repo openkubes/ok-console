@@ -3,12 +3,16 @@ import { createConsoleBffHandler } from './app.mjs'
 import { createObservedStateSource } from './source.mjs'
 import { createSessionRuntime } from './security/runtime.mjs'
 import { createRuntimeHttpHandler } from './runtimeHttp.mjs'
+import { createClusterDryRunHttpAdapter } from './adapters/createClusterDryRun.mjs'
 
 const host = process.env.OK_CONSOLE_BFF_HOST ?? '127.0.0.1'
 const port = Number.parseInt(process.env.OK_CONSOLE_BFF_PORT ?? '8787', 10)
 const enableFailureInjection = process.env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true'
 const sourceMode = process.env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture'
 const sessionRuntime = await createSessionRuntime()
+const dryRunExecutor = process.env.OK_CONSOLE_DRY_RUN_URL
+  ? createClusterDryRunHttpAdapter({ url: process.env.OK_CONSOLE_DRY_RUN_URL })
+  : null
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('OK_CONSOLE_BFF_PORT must be an integer between 1 and 65535.')
@@ -22,6 +26,7 @@ const apiHandler = createConsoleBffHandler({
   oidcHandler: sessionRuntime.oidcHandler,
   localAccessHandler: sessionRuntime.localAccessHandler,
   enableFailureInjection,
+  dryRunExecutor,
   requestObserver: ({ method, pathname, correlationId }) => {
     console.log(`${method} ${pathname} · ${correlationId}`)
   },

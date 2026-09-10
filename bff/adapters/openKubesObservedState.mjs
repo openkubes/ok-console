@@ -17,6 +17,11 @@ const redactSummary = () => ({
   redacted: true,
 })
 
+const SENSITIVE_TEXT = /(?:password|passphrase|token|secret|private[_ -]?key|kubeconfig|bearer)\s*[:=]/i
+const redactDetail = (value) => SENSITIVE_TEXT.test(value)
+  ? 'Lifecycle detail withheld by the Console redaction boundary.'
+  : value
+
 export class ObservedStateContractError extends Error {
   constructor(message) {
     super(message)
@@ -93,7 +98,7 @@ const normalizeCluster = (value, path) => {
       return {
         label: string(stageRecord.label, `${stagePath}.label`),
         state: enumeration(stageRecord.state, READINESS, `${stagePath}.state`),
-        detail: string(stageRecord.detail, `${stagePath}.detail`),
+        detail: redactDetail(string(stageRecord.detail, `${stagePath}.detail`)),
       }
     }),
   }
@@ -174,6 +179,9 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   const ageMs = now().getTime() - observedTime
   if (ageMs < -MAX_FUTURE_SKEW_MS) throw new Error('Observed-state timestamp is too far in the future.')
   const stale = ageMs > staleAfterMs
+  if (Object.prototype.hasOwnProperty.call(metadata, 'partial') && typeof metadata.partial !== 'boolean') {
+    throw new ObservedStateContractError('$.metadata.partial must be a boolean when present.')
+  }
   const partial = metadata.partial === true
   return {
     observedAt,

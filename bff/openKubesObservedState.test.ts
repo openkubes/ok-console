@@ -9,6 +9,7 @@ import { createConsoleBffHandler } from './app.mjs'
 import { createObservedStateSource } from './source.mjs'
 
 type JsonRecord = Record<string, unknown>
+type MutableEnvelope = { data: { clusters: Array<{ lifecycle: Array<{ detail: string }>; provider: string }> } }
 
 const servers: Server[] = []
 const fixtureSource = new FixtureObservedStateAdapter()
@@ -158,11 +159,11 @@ describe('OpenKubes observed-state query adapter', () => {
   })
 
   it.each([
-    ['lifecycle detail', (envelope: any) => { envelope.data.clusters[0].lifecycle[0].detail = 'Authorization: Bearer redaction-negative-proof' }],
-    ['provider scalar', (envelope: any) => { envelope.data.clusters[0].provider = 'password=redaction-negative-proof' }],
+    ['lifecycle detail', (envelope: MutableEnvelope) => { envelope.data.clusters[0].lifecycle[0].detail = 'Authorization: Bearer redaction-negative-proof' }],
+    ['provider scalar', (envelope: MutableEnvelope) => { envelope.data.clusters[0].provider = 'password=redaction-negative-proof' }],
   ])('redacts credential-shaped %s at the source boundary', async (_label, mutate) => {
     const envelope = await observedEnvelope()
-    mutate(envelope)
+    mutate(envelope as unknown as MutableEnvelope)
     const snapshot = await new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }).readSnapshot()
     expect(JSON.stringify(snapshot)).not.toContain('redaction-negative-proof')
     expect(JSON.stringify(snapshot)).toContain('Value withheld by the Console redaction boundary.')

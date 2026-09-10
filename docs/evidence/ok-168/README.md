@@ -12,7 +12,7 @@ TLS profile:
 - the BFF presents a client certificate and private key loaded from bounded,
   read-only mounted files;
 - the producer trusts only its configured client CA and authorizes the exact
-  `spiffe://openkubes.io/ns/openkubes-console/sa/ok-console-bff` URI SAN;
+  `spiffe://openkubes.io/ns/openkubes-console/sa/ok-console` URI SAN;
 - TLS 1.2 is the minimum on both sides;
 - the versioned query remains GET-only, bounded and redaction-safe; and
 - TLS or identity failure never falls back to fixtures.
@@ -41,4 +41,3 @@ The tests use ephemeral, test-only certificate authorities. They prove protocol
 and policy behavior, not production CA custody. A production claim still needs
 reviewed certificate issuance, rotation overlap, revocation behavior, expiry
 alerting, target-cluster NetworkPolicy enforcement and recovery exercises.
-

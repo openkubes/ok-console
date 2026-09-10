@@ -17,10 +17,9 @@ const redactSummary = () => ({
   redacted: true,
 })
 
-const SENSITIVE_TEXT = /(?:password|passphrase|token|secret|private[_ -]?key|kubeconfig|bearer)\s*[:=]/i
-const redactDetail = (value) => SENSITIVE_TEXT.test(value)
-  ? 'Lifecycle detail withheld by the Console redaction boundary.'
-  : value
+const SENSITIVE_TEXT = /(?:password|passphrase|token|secret|private[_ -]?key|kubeconfig)\s*[:=]|authorization\s*:\s*bearer\b/i
+const REDACTED_TEXT = 'Value withheld by the Console redaction boundary.'
+const redactText = (value) => SENSITIVE_TEXT.test(value) ? REDACTED_TEXT : value
 
 export class ObservedStateContractError extends Error {
   constructor(message) {
@@ -82,14 +81,14 @@ const normalizeCluster = (value, path) => {
     id: string(item.id, `${path}.id`),
     name: string(item.name, `${path}.name`),
     role: enumeration(item.role, ROLES, `${path}.role`),
-    provider: string(item.provider, `${path}.provider`),
-    profile: string(item.profile, `${path}.profile`),
-    kubernetesVersion: string(item.kubernetesVersion, `${path}.kubernetesVersion`),
-    region: string(item.region, `${path}.region`),
+    provider: redactText(string(item.provider, `${path}.provider`)),
+    profile: redactText(string(item.profile, `${path}.profile`)),
+    kubernetesVersion: redactText(string(item.kubernetesVersion, `${path}.kubernetesVersion`)),
+    region: redactText(string(item.region, `${path}.region`)),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     compatibility: enumeration(item.compatibility, COMPATIBILITY, `${path}.compatibility`),
-    contractVersion: string(item.contractVersion, `${path}.contractVersion`),
-    revision: string(item.revision, `${path}.revision`),
+    contractVersion: redactText(string(item.contractVersion, `${path}.contractVersion`)),
+    revision: redactText(string(item.revision, `${path}.revision`)),
     evidenceId: string(item.evidenceId, `${path}.evidenceId`),
     capabilities: list(item.capabilities, `${path}.capabilities`).map((capability, index) => normalizeCapability(capability, `${path}.capabilities[${index}]`)),
     lifecycle: list(item.lifecycle, `${path}.lifecycle`).map((stage, index) => {
@@ -98,7 +97,7 @@ const normalizeCluster = (value, path) => {
       return {
         label: string(stageRecord.label, `${stagePath}.label`),
         state: enumeration(stageRecord.state, READINESS, `${stagePath}.state`),
-        detail: redactDetail(string(stageRecord.detail, `${stagePath}.detail`)),
+        detail: redactText(string(stageRecord.detail, `${stagePath}.detail`)),
       }
     }),
   }
@@ -108,8 +107,8 @@ const normalizePlacement = (value, path) => {
   const item = record(value, path)
   return {
     id: string(item.id, `${path}.id`),
-    name: string(item.name, `${path}.name`),
-    targetCluster: string(item.targetCluster, `${path}.targetCluster`),
+    name: redactText(string(item.name, `${path}.name`)),
+    targetCluster: redactText(string(item.targetCluster, `${path}.targetCluster`)),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     evidenceId: string(item.evidenceId, `${path}.evidenceId`),
   }
@@ -121,14 +120,14 @@ const normalizeEvidence = (value, path) => {
   const summary = redactSummary()
   return {
     id: string(item.id, `${path}.id`),
-    title: string(item.title, `${path}.title`),
+    title: redactText(string(item.title, `${path}.title`)),
     type: enumeration(item.type, EVIDENCE_TYPES, `${path}.type`),
     outcome: enumeration(item.outcome, EVIDENCE_OUTCOMES, `${path}.outcome`),
     clusterId: string(item.clusterId, `${path}.clusterId`),
-    contract: string(item.contract, `${path}.contract`),
-    revision: string(item.revision, `${path}.revision`),
+    contract: redactText(string(item.contract, `${path}.contract`)),
+    revision: redactText(string(item.revision, `${path}.revision`)),
     observedAt: string(item.observedAt, `${path}.observedAt`),
-    source: string(item.source, `${path}.source`),
+    source: redactText(string(item.source, `${path}.source`)),
     summary: summary.summary,
     classification: enumeration(item.classification, CLASSIFICATION, `${path}.classification`),
     redacted: summary.redacted,

@@ -157,6 +157,21 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(snapshot.sourceHealth.warnings).toContainEqual({ code: 'REDACTED', message: expect.any(String) })
   })
 
+  it('redacts credential-shaped lifecycle details at the source boundary', async () => {
+    const envelope = await observedEnvelope()
+    envelope.data.clusters[0].lifecycle[0].detail = 'password: do-not-forward'
+    const snapshot = await new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }).readSnapshot()
+    expect(snapshot.clusters[0].lifecycle[0].detail).toBe('Lifecycle detail withheld by the Console redaction boundary.')
+    expect(JSON.stringify(snapshot)).not.toContain('do-not-forward')
+  })
+
+  it('rejects malformed partial semantics instead of silently treating them as complete', async () => {
+    const envelope = await observedEnvelope()
+    envelope.metadata.partial = 'true'
+    await expect(new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }).readSnapshot())
+      .rejects.toThrow('$.metadata.partial must be a boolean when present.')
+  })
+
   it('turns incompatible real source data into a bounded BFF failure', async () => {
     const envelope = await observedEnvelope()
     envelope.apiVersion = 'observed.openkubes.io/v9'

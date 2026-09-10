@@ -1,6 +1,29 @@
 # OK-170 ok-shared development integration evidence
 
-Status: **Phase A preview deployed and verified — live integration not yet claimed**
+Status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
+
+This record supersedes the Phase-A-only acceptance wording below. The current
+development deployment is useful for recovery work, but it is not a completed
+live-integration claim. Independent review requires the predecessor tickets to
+reach GO and a fresh Phase-B evidence bundle before promotion.
+
+## Current Phase-B observation (2026-09-10)
+
+- Console: 2/2 Ready on `ok-shared`, BreakGlass/OIDC/PostgreSQL profile;
+  running digest `sha256:dc98054b520bb89b4b8aae1b77e1da8ffa86bbdf359efbeb9e350caa3a79261b`.
+- Observed-state producer: 1/1 Ready, read-only mTLS path exercised;
+  running digest `sha256:2af5f7fe9612a4fe006fbb931f47356d0e797339542d9012752a9208e8cd359c`.
+- GitHub verify run `34454450914` is green, but CI does not replace independent
+  review or live recovery evidence.
+
+The following acceptance gates remain open: deploy an image containing the
+merged tenant-scope fix, prove scalar redaction and strict partial semantics,
+complete real browser OIDC/session/logout and adversarial-token evidence,
+rehearse producer outage and bootstrap-only rollback with epoch/transaction
+verification, and record the exact final rendered manifests and evidence.
+
+Until those gates are complete, keep this environment in development status and
+do not promote it as production-ready.
 
 ## Identified target
 

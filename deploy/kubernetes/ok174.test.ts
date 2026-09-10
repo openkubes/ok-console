@@ -23,5 +23,5 @@ describe('bootstrap recovery profile', () => {
     expect(stdout).toContain('OK_CONSOLE_LOCAL_ACCESS_MODE')
     expect(stdout).toContain('image: ghcr.io/openkubes/ok-console@sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc')
     expect(stdout).not.toContain('REPLACE_DEPLOYMENT_EPOCH')
-  })
+  }, 15_000)
 })

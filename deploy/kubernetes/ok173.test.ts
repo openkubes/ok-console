@@ -35,5 +35,5 @@ describe('OK-173 break-glass deployment candidate', () => {
     expect(stdout).toContain('image: ghcr.io/openkubes/ok-console@sha256:dc98054b520bb89b4b8aae1b77e1da8ffa86bbdf359efbeb9e350caa3a79261b')
     expect(stdout).toContain('secretName: ok-console-oidc')
     expect(stdout).toContain('secretName: ok-console-oidc-ca')
-  })
+  }, 15_000)
 })

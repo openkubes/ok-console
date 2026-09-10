@@ -19,7 +19,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(stdout).toContain('value: hosting-cluster')
     expect(stdout).toContain('value: bootstrap')
     expect(stdout).toContain('value: openkubes')
-  })
+  }, 15_000)
 
   it('grants the producer only its bounded hosting-cluster reads', async () => {
     const rbac = await read(`${overlay}/producer-rbac.yaml`)

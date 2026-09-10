@@ -157,12 +157,15 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(snapshot.sourceHealth.warnings).toContainEqual({ code: 'REDACTED', message: expect.any(String) })
   })
 
-  it('redacts credential-shaped lifecycle details at the source boundary', async () => {
+  it.each([
+    ['lifecycle detail', (envelope: any) => { envelope.data.clusters[0].lifecycle[0].detail = 'Authorization: Bearer redaction-negative-proof' }],
+    ['provider scalar', (envelope: any) => { envelope.data.clusters[0].provider = 'password=redaction-negative-proof' }],
+  ])('redacts credential-shaped %s at the source boundary', async (_label, mutate) => {
     const envelope = await observedEnvelope()
-    envelope.data.clusters[0].lifecycle[0].detail = 'password: do-not-forward'
+    mutate(envelope)
     const snapshot = await new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }).readSnapshot()
-    expect(snapshot.clusters[0].lifecycle[0].detail).toBe('Lifecycle detail withheld by the Console redaction boundary.')
-    expect(JSON.stringify(snapshot)).not.toContain('do-not-forward')
+    expect(JSON.stringify(snapshot)).not.toContain('redaction-negative-proof')
+    expect(JSON.stringify(snapshot)).toContain('Value withheld by the Console redaction boundary.')
   })
 
   it('rejects malformed partial semantics instead of silently treating them as complete', async () => {

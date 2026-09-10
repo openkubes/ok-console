@@ -25,6 +25,24 @@ verification, and record the exact final rendered manifests and evidence.
 Until those gates are complete, keep this environment in development status and
 do not promote it as production-ready.
 
+## Recovery rehearsal result (2026-09-10)
+
+The controlled rehearsal was executed against `ok-shared` with no Secret
+material retrieved or printed.
+
+1. The pre-rehearsal BreakGlass/OIDC deployment was recorded at epoch
+   `ok-shared-phase-b2-oidc-1` and rc.3 digest `sha256:705edc32...e8ccbc`.
+2. The pinned `ok-shared-bootstrap-recovery` profile was applied. Both Console
+   replicas became Ready with OIDC disabled, Bootstrap enabled, and epoch
+   `ok-shared-bootstrap-recovery-v1`.
+3. The BreakGlass overlay was restored, rc.3 was re-pinned, and both replicas
+   became Ready again with OIDC enabled, BreakGlass enabled, and epoch
+   `ok-shared-phase-b2-oidc-1`.
+
+The rehearsal proves reversible profile transitions and epoch advancement. It
+does not claim successful human browser authentication or database-row counts;
+those remain operator/browser evidence items for the independent review.
+
 ## Identified target
 
 - Context: `ok-shared-admin@ok-shared`

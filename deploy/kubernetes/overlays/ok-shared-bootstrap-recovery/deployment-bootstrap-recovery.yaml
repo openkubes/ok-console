@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ok-console
+  namespace: openkubes-console
+spec:
+  template:
+    spec:
+      containers:
+        - name: console
+          env:
+            - name: OK_CONSOLE_SESSION_EPOCH
+              value: ok-shared-bootstrap-recovery-v1
+            - name: OK_CONSOLE_AUTHORIZATION_REVISION
+              value: ok-shared-bootstrap-recovery-v1
+            - name: OK_CONSOLE_OIDC_ENABLED
+              value: "false"
+            - name: OK_CONSOLE_LOCAL_ACCESS_MODE
+              value: bootstrap

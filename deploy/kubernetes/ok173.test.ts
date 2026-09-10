@@ -14,7 +14,7 @@ describe('OK-173 break-glass deployment candidate', () => {
     const deployment = await read('./overlays/ok-shared-breakglass/deployment-breakglass.yaml')
     const policy = await read('./overlays/ok-shared-breakglass/network-policy-breakglass.yaml')
 
-    expect(overlay).toContain('sha256:20860b2f87ffd9454c5925aba4fac83dc1c6f4787ec89b935fbcb76fc68600f3')
+    expect(overlay).toContain('sha256:dc98054b520bb89b4b8aae1b77e1da8ffa86bbdf359efbeb9e350caa3a79261b')
     expect(deployment).toContain('OK_CONSOLE_OIDC_ENABLED')
     expect(deployment).toContain('value: "true"')
     expect(deployment).toContain('value: breakglass')
@@ -32,7 +32,7 @@ describe('OK-173 break-glass deployment candidate', () => {
 
   it('renders a valid candidate manifest with the immutable image', async () => {
     const { stdout } = await exec('kubectl', ['kustomize', 'deploy/kubernetes/overlays/ok-shared-breakglass'])
-    expect(stdout).toContain('image: ghcr.io/openkubes/ok-console@sha256:20860b2f87ffd9454c5925aba4fac83dc1c6f4787ec89b935fbcb76fc68600f3')
+    expect(stdout).toContain('image: ghcr.io/openkubes/ok-console@sha256:dc98054b520bb89b4b8aae1b77e1da8ffa86bbdf359efbeb9e350caa3a79261b')
     expect(stdout).toContain('secretName: ok-console-oidc')
     expect(stdout).toContain('secretName: ok-console-oidc-ca')
   })

@@ -92,6 +92,7 @@ describe('session runtime configuration', () => {
     expect(authorize).toHaveBeenCalledWith(request.headers.cookie, {
       permission: 'clusters.read',
       environmentId: 'community-preview',
+      tenantId: 'platform',
     })
     await runtime.close()
     await runtime.close()

@@ -26,6 +26,7 @@ const baseEnv = {
   OK_CONSOLE_SESSION_STORE_MODE: 'postgres',
   OK_CONSOLE_ORIGIN: 'https://console.openkubes.example',
   OK_CONSOLE_ENVIRONMENT_ID: 'community-preview',
+  OK_CONSOLE_TENANT_ID: 'platform',
   OK_CONSOLE_SESSION_EPOCH: 'epoch-2026-08',
   OK_CONSOLE_AUTHORIZATION_REVISION: 'rbac-42',
   OK_CONSOLE_POSTGRES_URL_FILE: '/run/secrets/postgres-url',

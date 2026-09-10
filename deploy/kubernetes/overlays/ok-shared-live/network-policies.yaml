@@ -61,6 +61,16 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openkubes-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ok147-console-dry-run
+      ports:
+        - protocol: TCP
+          port: 8790
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

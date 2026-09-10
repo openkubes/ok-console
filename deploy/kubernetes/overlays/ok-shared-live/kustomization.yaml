@@ -40,6 +40,8 @@ patches:
             value: https://console.ok-shared.internal:30443
           - name: OK_CONSOLE_ENVIRONMENT_ID
             value: ok-shared
+          - name: OK_CONSOLE_TENANT_ID
+            value: platform
           - name: OK_CONSOLE_SESSION_EPOCH
             value: ok-shared-phase-b1-1
           - name: OK_CONSOLE_AUTHORIZATION_REVISION

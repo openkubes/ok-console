@@ -229,6 +229,7 @@ export const createSessionRuntime = async ({
 
   const expectedOrigin = parseOrigin(required(env, 'OK_CONSOLE_ORIGIN'))
   const environmentId = required(env, 'OK_CONSOLE_ENVIRONMENT_ID')
+  const tenantId = required(env, 'OK_CONSOLE_TENANT_ID')
   const deploymentEpoch = required(env, 'OK_CONSOLE_SESSION_EPOCH')
   const authorizationRevision = required(env, 'OK_CONSOLE_AUTHORIZATION_REVISION')
   const primaryKeyId = required(env, 'OK_CONSOLE_SESSION_ENVELOPE_PRIMARY_KEY_ID')
@@ -274,6 +275,7 @@ export const createSessionRuntime = async ({
   const authorizer = ({ request, permission }) => sessionStore.authorize(request.headers.cookie, {
     permission,
     environmentId,
+    tenantId,
   })
   let oidcHandler = null
   if (env.OK_CONSOLE_OIDC_ENABLED === 'true') {

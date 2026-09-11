@@ -16,9 +16,9 @@ spec:
             - name: NODE_EXTRA_CA_CERTS
               value: /run/secrets/ok-console/oidc-ca/ca.crt
             - name: OK_CONSOLE_SESSION_EPOCH
-              value: ok-shared-phase-b2-oidc-1
+              value: REPLACE_POST_RECOVERY_EPOCH
             - name: OK_CONSOLE_AUTHORIZATION_REVISION
-              value: ok-shared-breakglass-v1
+              value: REPLACE_POST_RECOVERY_AUTHORIZATION_REVISION
             - name: OK_CONSOLE_OIDC_ENABLED
               value: "true"
             - name: OK_CONSOLE_OIDC_PROVIDER_ID

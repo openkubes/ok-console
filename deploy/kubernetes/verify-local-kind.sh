@@ -112,7 +112,30 @@ kubectl --context "kind-${cluster_name}" \
   >"${port_forward_log}" 2>&1 &
 port_forward_pid="$!"
 
-curl --fail --silent --show-error --retry 20 --retry-all-errors --retry-delay 1 "http://127.0.0.1:${local_port}/health/live"
+# `kubectl port-forward` can take a few seconds to bind after the process is
+# started, and it may briefly accept then close a connection while the service
+# endpoint is being selected. Probe until the tunnel is actually usable and
+# fail with its captured diagnostics instead of racing the first curl call.
+port_forward_ready=false
+for _ in $(seq 1 30); do
+  if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
+    echo 'kubectl port-forward exited before the local probe became ready.' >&2
+    cat "${port_forward_log}" >&2
+    exit 1
+  fi
+  if curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/live" >/dev/null 2>&1; then
+    port_forward_ready=true
+    break
+  fi
+  sleep 1
+done
+if [[ "${port_forward_ready}" != true ]]; then
+  echo "Timed out waiting for the local port-forward on ${local_port}." >&2
+  cat "${port_forward_log}" >&2
+  exit 1
+fi
+
+curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/live"
 curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/ready"
 curl --fail --silent --show-error "http://127.0.0.1:${local_port}/" >/dev/null
 

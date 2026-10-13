@@ -197,7 +197,7 @@ for _ in $(seq 1 30); do
     cat "${port_forward_log}" >&2
     exit 1
   fi
-  if curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/live" >/dev/null 2>&1; then
+  if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/live" >/dev/null 2>&1; then
     port_forward_ready=true
     break
   fi
@@ -209,9 +209,9 @@ if [[ "${port_forward_ready}" != true ]]; then
   exit 1
 fi
 
-curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/live"
-curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/ready"
-curl --fail --silent --show-error "http://127.0.0.1:${local_port}/" >/dev/null
+curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/live"
+curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/ready"
+curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/" >/dev/null
 
 runtime_image_id="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console get pod "${pod_name}" -o jsonpath='{.status.containerStatuses[0].imageID}')"
 runtime_node_env="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console exec "${pod_name}" -- /nodejs/bin/node -e "process.stdout.write(process.env.NODE_ENV)")"

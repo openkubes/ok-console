@@ -123,6 +123,10 @@ Console in explicit fixture/read-only mode without production credentials:
 pnpm verify:kind
 ```
 
+After the restart, the verifier waits up to 120 seconds for old ReplicaSet Pods
+to disappear, then forwards directly to the current ReplicaSet’s single Ready,
+non-terminating Pod. Image-ID and NODE_ENV reads use that same Pod.
+
 The complete candidate lifecycle, digest-verification commands, retained-cluster
 option, and production boundary are documented in the
 [`Kubernetes deployment runbook`](deploy/kubernetes/README.md). The evolving

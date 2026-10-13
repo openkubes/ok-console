@@ -106,15 +106,89 @@ runtime_security="$(kubectl --context "kind-${cluster_name}" --namespace openkub
 kubectl --context "kind-${cluster_name}" --namespace openkubes-console rollout restart deployment/ok-console
 kubectl --context "kind-${cluster_name}" --namespace openkubes-console rollout status deployment/ok-console --timeout=120s
 
+# Service selectors can still match terminating Pods from the previous rollout.
+# Resolve the current ReplicaSet by Deployment ownership and revision instead.
+deployment_identity="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console --request-timeout=10s get deployment ok-console -o jsonpath='{.metadata.uid}{"|"}{.metadata.annotations.deployment\.kubernetes\.io/revision}')"
+IFS='|' read -r deployment_uid deployment_revision <<<"${deployment_identity}"
+[[ -n "${deployment_uid}" && -n "${deployment_revision}" ]] || {
+  echo "Deployment ok-console has no UID or revision: ${deployment_identity}" >&2
+  exit 1
+}
+replica_sets="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console --request-timeout=10s get replicasets -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.uid}{"|"}{.metadata.annotations.deployment\.kubernetes\.io/revision}{"|"}{.metadata.ownerReferences[?(@.controller==true)].uid}{"\n"}{end}')"
+deployment_rs_uids=()
+current_rs_uids=()
+current_rs_names=()
+found_replica_sets=()
+while IFS='|' read -r rs_name rs_uid rs_revision rs_owner_uid; do
+  [[ "${rs_owner_uid}" == "${deployment_uid}" ]] || continue
+  deployment_rs_uids+=("${rs_uid}")
+  found_replica_sets+=("${rs_name}(revision=${rs_revision})")
+  if [[ "${rs_revision}" == "${deployment_revision}" ]]; then
+    current_rs_uids+=("${rs_uid}")
+    current_rs_names+=("${rs_name}")
+  fi
+done <<<"${replica_sets}"
+if [[ "${#current_rs_uids[@]}" != 1 ]]; then
+  echo "Expected exactly one ReplicaSet for Deployment ok-console revision ${deployment_revision}; found ${#current_rs_uids[@]}. Deployment ReplicaSets: ${found_replica_sets[*]:-none}" >&2
+  exit 1
+fi
+current_rs_uid="${current_rs_uids[0]}"
+current_rs_name="${current_rs_names[0]}"
+
+# Wait for every old ReplicaSet's Pods to disappear, including terminating Pods.
+old_pods_deadline=$((SECONDS + 120))
+leftover_pods=()
+while true; do
+  remaining_seconds=$((old_pods_deadline - SECONDS))
+  if (( remaining_seconds <= 0 )); then
+    echo "Timed out after 120s waiting for Pods of old ReplicaSets of Deployment ok-console to disappear. Leftover Pods: ${leftover_pods[*]:-none}" >&2
+    exit 1
+  fi
+  if ! pods="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console --request-timeout="${remaining_seconds}s" get pods -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.ownerReferences[?(@.controller==true)].uid}{"|"}{.status.conditions[?(@.type=="Ready")].status}{"|"}{.metadata.deletionTimestamp}{"|"}{.status.phase}{"\n"}{end}')"
+  then
+    echo "Failed to list Pods while waiting for old ReplicaSets of Deployment ok-console. Last observed leftover Pods: ${leftover_pods[*]:-not yet observed}" >&2
+    exit 1
+  fi
+  leftover_pods=()
+  ready_pods=()
+  found_current_pods=()
+  while IFS='|' read -r found_pod_name pod_owner_uid pod_ready pod_deletion_timestamp pod_phase; do
+    if [[ "${pod_owner_uid}" == "${current_rs_uid}" ]]; then
+      found_current_pods+=("${found_pod_name}(Ready=${pod_ready:-unknown},deletionTimestamp=${pod_deletion_timestamp:-none},phase=${pod_phase:-unknown})")
+      if [[ "${pod_ready}" == True && -z "${pod_deletion_timestamp}" ]]; then
+        ready_pods+=("${found_pod_name}")
+      fi
+    else
+      for rs_uid in "${deployment_rs_uids[@]}"; do
+        if [[ "${pod_owner_uid}" == "${rs_uid}" ]]; then
+          leftover_pods+=("${found_pod_name}")
+          break
+        fi
+      done
+    fi
+  done <<<"${pods}"
+  if (( SECONDS >= old_pods_deadline )); then
+    echo "Timed out after 120s waiting for Pods of old ReplicaSets of Deployment ok-console to disappear. Leftover Pods: ${leftover_pods[*]:-none}" >&2
+    exit 1
+  fi
+  [[ "${#leftover_pods[@]}" == 0 ]] && break
+  sleep 1
+done
+if [[ "${#ready_pods[@]}" != 1 ]]; then
+  echo "Expected exactly one Ready, non-terminating Pod of ReplicaSet ${current_rs_name}; found ${#ready_pods[@]}. Current ReplicaSet Pods: ${found_current_pods[*]:-none}" >&2
+  exit 1
+fi
+pod_name="${ready_pods[0]}"
+echo "Selected Pod ${pod_name} of ReplicaSet ${current_rs_name} (Deployment revision ${deployment_revision})."
+
 kubectl --context "kind-${cluster_name}" \
   --namespace openkubes-console \
-  port-forward service/ok-console "${local_port}:8787" \
+  port-forward "pod/${pod_name}" "${local_port}:8787" \
   >"${port_forward_log}" 2>&1 &
 port_forward_pid="$!"
 
 # `kubectl port-forward` can take a few seconds to bind after the process is
-# started, and it may briefly accept then close a connection while the service
-# endpoint is being selected. Probe until the tunnel is actually usable and
+# started. Probe until the tunnel is actually usable and
 # fail with its captured diagnostics instead of racing the first curl call.
 port_forward_ready=false
 for _ in $(seq 1 30); do
@@ -139,7 +213,6 @@ curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/live"
 curl --fail --silent --show-error "http://127.0.0.1:${local_port}/health/ready"
 curl --fail --silent --show-error "http://127.0.0.1:${local_port}/" >/dev/null
 
-pod_name="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console get pod -l app.kubernetes.io/name=ok-console -o jsonpath='{.items[0].metadata.name}')"
 runtime_image_id="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console get pod "${pod_name}" -o jsonpath='{.status.containerStatuses[0].imageID}')"
 runtime_node_env="$(kubectl --context "kind-${cluster_name}" --namespace openkubes-console exec "${pod_name}" -- /nodejs/bin/node -e "process.stdout.write(process.env.NODE_ENV)")"
 

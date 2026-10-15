@@ -111,7 +111,7 @@ export interface PlatformOverviewData {
     total: number
     critical: number
   }
-  managementPlane: ClusterSummaryData
+  managementPlane: ClusterSummaryData | null
   recentPlacements: Array<{
     id: string
     name: string
@@ -310,7 +310,7 @@ const validateData = (kind: PresentationKind, value: unknown, errors: string[]) 
       } else if (!Number.isInteger(value.openFindings.total) || !Number.isInteger(value.openFindings.critical)) {
         errors.push('data.openFindings values must be integers')
       }
-      validateClusterSummary(value.managementPlane, errors, 'data.managementPlane')
+      if (value.managementPlane !== null) validateClusterSummary(value.managementPlane, errors, 'data.managementPlane')
       if (!Array.isArray(value.recentPlacements)) {
         errors.push('data.recentPlacements must be an array')
       } else {

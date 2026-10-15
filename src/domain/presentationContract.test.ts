@@ -72,6 +72,25 @@ describe('Presentation Contract v0alpha1', () => {
     expect(result.errors).toContain('data.managementPlane.readiness is not supported')
   })
 
+  it('accepts an overview without a visible management plane', () => {
+    const response = structuredClone(platformOverview) as unknown as { data: Record<string, unknown> }
+    response.data.managementPlane = null
+
+    expect(validateConsoleResponse(response)).toEqual({ valid: true, errors: [] })
+    const overviewData = schema.$defs.platformOverviewData as { properties: { managementPlane: unknown } }
+    expect(overviewData.properties.managementPlane).toEqual({
+      anyOf: [{ $ref: '#/$defs/clusterSummary' }, { type: 'null' }],
+    })
+  })
+
+  it.each([undefined, 'cluster-ok-mgmt', {}])('rejects an invalid management plane value %j', (value) => {
+    const response = structuredClone(platformOverview) as unknown as { data: Record<string, unknown> }
+    if (value === undefined) delete response.data.managementPlane
+    else response.data.managementPlane = value
+
+    expect(validateConsoleResponse(response).valid).toBe(false)
+  })
+
   it.each(['token', 'accessToken', 'kubeconfig', 'privateKey', 'password'])(
     'rejects the forbidden credential field %s anywhere in a response',
     (field) => {

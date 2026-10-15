@@ -158,7 +158,7 @@
             "critical": { "type": "integer", "minimum": 0 }
           }
         },
-        "managementPlane": { "$ref": "#/$defs/clusterSummary" },
+        "managementPlane": { "anyOf": [{ "$ref": "#/$defs/clusterSummary" }, { "type": "null" }] },
         "recentPlacements": {
           "type": "array",
           "items": {

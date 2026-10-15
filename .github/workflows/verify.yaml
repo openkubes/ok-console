@@ -65,7 +65,8 @@ jobs:
         run: docker build --build-arg VCS_REF="${{ github.sha }}" --tag ok-console:verify .
       - name: Smoke-test read-only non-root runtime
         run: |
-          runtime_id="$(docker run --detach --read-only --cap-drop ALL --security-opt no-new-privileges=true --publish 127.0.0.1:8787:8787 ok-console:verify)"
+          # Disposable CI smoke container: explicitly acknowledge unauthenticated prototype serving.
+          runtime_id="$(docker run --env OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true --env OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED=true --detach --read-only --cap-drop ALL --security-opt no-new-privileges=true --publish 127.0.0.1:8787:8787 ok-console:verify)"
           trap 'docker rm --force "${runtime_id}"' EXIT
           test "$(docker inspect --format '{{.Config.User}}' ok-console:verify)" = "1000:1000"
           curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:8787/health/live

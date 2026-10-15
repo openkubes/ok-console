@@ -60,6 +60,11 @@ those remain operator/browser evidence items for the independent review.
 
 The inventory was read-only. No Secret content was retrieved.
 
+> **2026-10-15 update:** The unauthenticated preview deployment path and its
+> verifier were retired after the BFF began requiring explicit development
+> prototype authorization. The current shared-cluster Console deployment uses
+> the live profile; this dated record preserves the original Phase A evidence.
+
 ## Phase A: immutable visual preview
 
 The `ok-shared-preview` overlay selects the accepted Console candidate by the

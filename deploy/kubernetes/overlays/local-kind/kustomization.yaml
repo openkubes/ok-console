@@ -30,6 +30,10 @@ patches:
             value: "8787"
           - name: OK_CONSOLE_SESSION_STORE_MODE
             value: disabled
+          - name: OK_CONSOLE_DEV_PROTOTYPE_ENABLED
+            value: "true"
+          - name: OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED
+            value: "true"
           - name: OK_CONSOLE_OIDC_ENABLED
             value: "false"
           - name: OK_CONSOLE_LOCAL_ACCESS_MODE

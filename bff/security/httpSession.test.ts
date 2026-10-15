@@ -3,7 +3,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FixtureObservedStateAdapter } from '../adapters/fixtureObservedState.mjs'
-import { createConsoleBffHandler } from '../app.mjs'
+import { createConsoleBffHandler, prototypeAuthorizer } from '../app.mjs'
 import { CSRF_COOKIE, InMemorySessionStore, SESSION_COOKIE } from './session.mjs'
 
 const subject = {
@@ -28,6 +28,7 @@ beforeEach(async () => {
   store = new InMemorySessionStore({ now: () => new Date('2026-08-21T19:00:00Z') })
   server = createServer(createConsoleBffHandler({
     source: new FixtureObservedStateAdapter(),
+    authorizer: prototypeAuthorizer,
     sessionStore: store,
     expectedOrigin,
     correlationId: () => 'corr-session-http',
@@ -122,6 +123,7 @@ describe('OK-163 Console session HTTP boundary', () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     server = createServer(createConsoleBffHandler({
       source: new FixtureObservedStateAdapter(),
+      authorizer: prototypeAuthorizer,
       correlationId: () => 'corr-no-session-store',
     }))
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))

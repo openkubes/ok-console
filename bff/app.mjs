@@ -159,7 +159,7 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
 
 export const createConsoleBffHandler = ({
   source,
-  authorizer = prototypeAuthorizer,
+  authorizer,
   enableFailureInjection = false,
   now = () => new Date(),
   correlationId = () => `corr-${randomUUID()}`,
@@ -169,93 +169,99 @@ export const createConsoleBffHandler = ({
   oidcHandler = null,
   localAccessHandler = null,
   dryRunExecutor = null,
-}) => async (request, response) => {
-  const requestCorrelationId = correlationId()
-  try {
-    const url = new URL(request.url ?? '/', 'http://console.local')
-    requestObserver({ method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
-    if (oidcHandler && await oidcHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
-    if (localAccessHandler && await localAccessHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
-    if (await handleSessionHttp({
-      request,
-      response,
-      pathname: url.pathname,
-      correlationId: requestCorrelationId,
-      sessionStore,
-      expectedOrigin,
-    })) return
+}) => {
+  if (typeof authorizer !== 'function') {
+    throw new TypeError('createConsoleBffHandler requires an explicit callable authorizer.')
+  }
 
-    const dryRunPath = `${ROUTE_PREFIX}/operations/create-cluster/dry-run`
-    if (request.method === 'POST' && url.pathname === dryRunPath) {
-      const authorization = await authorizer({ request, pathname: url.pathname, permission: 'clusters.read' })
-      if (!authorization.allowed) throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot request a cluster dry-run.')
-      if (!dryRunExecutor) throw new ConsoleBffError(503, 'SOURCE_UNAVAILABLE', 'The Console dry-run runner is not configured.', true)
-      const input = await readJsonBody(request)
-      if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.contract !== 'object' || input.contract === null) {
-        throw new ConsoleBffError(400, 'VALIDATION_FAILED', 'The dry-run request requires a JSON object in contract.')
-      }
-      const result = await dryRunExecutor({ contract: input.contract, identity: authorization.identity, correlationId: requestCorrelationId })
-      sendJson(response, 200, successResponse('CreateClusterDryRun', result, responseMeta({
+  return async (request, response) => {
+    const requestCorrelationId = correlationId()
+    try {
+      const url = new URL(request.url ?? '/', 'http://console.local')
+      requestObserver({ method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
+      if (oidcHandler && await oidcHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
+      if (localAccessHandler && await localAccessHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
+      if (await handleSessionHttp({
+        request,
+        response,
+        pathname: url.pathname,
         correlationId: requestCorrelationId,
-        observedAt: now().toISOString(),
-        freshness: 'Current',
-      })), requestCorrelationId)
-      return
-    }
-    if (request.method !== 'GET') throw new ConsoleBffError(405, 'FORBIDDEN', 'The Console BFF exposes read-only GET resources only.')
+        sessionStore,
+        expectedOrigin,
+      })) return
 
-    const accept = request.headers.accept
-    if (accept?.includes('profile=') && !accept.includes(CONTRACT_VERSION)) {
-      throw new ConsoleBffError(406, 'CONTRACT_INCOMPATIBLE', 'The requested Presentation Contract profile is not supported.')
-    }
+      const dryRunPath = `${ROUTE_PREFIX}/operations/create-cluster/dry-run`
+      if (request.method === 'POST' && url.pathname === dryRunPath) {
+        const authorization = await authorizer({ request, pathname: url.pathname, permission: 'clusters.read' })
+        if (!authorization.allowed) throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot request a cluster dry-run.')
+        if (!dryRunExecutor) throw new ConsoleBffError(503, 'SOURCE_UNAVAILABLE', 'The Console dry-run runner is not configured.', true)
+        const input = await readJsonBody(request)
+        if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.contract !== 'object' || input.contract === null) {
+          throw new ConsoleBffError(400, 'VALIDATION_FAILED', 'The dry-run request requires a JSON object in contract.')
+        }
+        const result = await dryRunExecutor({ contract: input.contract, identity: authorization.identity, correlationId: requestCorrelationId })
+        sendJson(response, 200, successResponse('CreateClusterDryRun', result, responseMeta({
+          correlationId: requestCorrelationId,
+          observedAt: now().toISOString(),
+          freshness: 'Current',
+        })), requestCorrelationId)
+        return
+      }
+      if (request.method !== 'GET') throw new ConsoleBffError(405, 'FORBIDDEN', 'The Console BFF exposes read-only GET resources only.')
 
-    if (!url.pathname.startsWith(`${ROUTE_PREFIX}/`)) {
-      throw new ConsoleBffError(404, 'NOT_FOUND', 'No read-only Console resource exists at this path.')
-    }
+      const accept = request.headers.accept
+      if (accept?.includes('profile=') && !accept.includes(CONTRACT_VERSION)) {
+        throw new ConsoleBffError(406, 'CONTRACT_INCOMPATIBLE', 'The requested Presentation Contract profile is not supported.')
+      }
 
-    const authorization = await authorizer({
-      request,
-      pathname: url.pathname,
-      permission: permissionFor(url.pathname),
-    })
-    if (!authorization.allowed) {
-      throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot read the requested Console projection.')
-    }
+      if (!url.pathname.startsWith(`${ROUTE_PREFIX}/`)) {
+        throw new ConsoleBffError(404, 'NOT_FOUND', 'No read-only Console resource exists at this path.')
+      }
 
-    const failure = enableFailureInjection ? url.searchParams.get('failure') : null
-    failureResponse(failure)
+      const authorization = await authorizer({
+        request,
+        pathname: url.pathname,
+        permission: permissionFor(url.pathname),
+      })
+      if (!authorization.allowed) {
+        throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot read the requested Console projection.')
+      }
 
-    const snapshot = await source.readSnapshot()
-    const payload = routeResponse({
-      pathname: url.pathname,
-      snapshot,
-      identity: authorization.identity,
-      now,
-      correlationId: requestCorrelationId,
-      failure,
-    })
-    sendJson(response, 200, payload, requestCorrelationId)
-  } catch (error) {
-    if (error instanceof ConsoleBffError) {
+      const failure = enableFailureInjection ? url.searchParams.get('failure') : null
+      failureResponse(failure)
+
+      const snapshot = await source.readSnapshot()
+      const payload = routeResponse({
+        pathname: url.pathname,
+        snapshot,
+        identity: authorization.identity,
+        now,
+        correlationId: requestCorrelationId,
+        failure,
+      })
+      sendJson(response, 200, payload, requestCorrelationId)
+    } catch (error) {
+      if (error instanceof ConsoleBffError) {
+        sendJson(
+          response,
+          error.status,
+          errorResponse(error.code, error.message, error.retryable, requestCorrelationId, error.extra),
+          requestCorrelationId,
+        )
+        return
+      }
+
+      if (error instanceof ObservedStateContractError) {
+        sendJson(response, 502, errorResponse('CONTRACT_INCOMPATIBLE', 'The observed platform response is not compatible with this Console contract.', false, requestCorrelationId), requestCorrelationId)
+        return
+      }
+
       sendJson(
         response,
-        error.status,
-        errorResponse(error.code, error.message, error.retryable, requestCorrelationId, error.extra),
+        503,
+        errorResponse('SOURCE_UNAVAILABLE', 'The observed platform source is unavailable.', true, requestCorrelationId, { retryAfterSeconds: 15 }),
         requestCorrelationId,
       )
-      return
     }
-
-    if (error instanceof ObservedStateContractError) {
-      sendJson(response, 502, errorResponse('CONTRACT_INCOMPATIBLE', 'The observed platform response is not compatible with this Console contract.', false, requestCorrelationId), requestCorrelationId)
-      return
-    }
-
-    sendJson(
-      response,
-      503,
-      errorResponse('SOURCE_UNAVAILABLE', 'The observed platform source is unavailable.', true, requestCorrelationId, { retryAfterSeconds: 15 }),
-      requestCorrelationId,
-    )
   }
 }

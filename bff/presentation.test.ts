@@ -3,10 +3,12 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { validateConsoleResponse } from '../src/domain/presentationContract'
+import { authorizedSnapshot } from './authorizedSnapshot.mjs'
 import { overviewProjection } from './presentation.mjs'
 import platformOverview from '../contracts/presentation/v0alpha1/examples/platform-overview.json'
 
-const snapshot = JSON.parse(readFileSync(new URL('./fixtures/observed-state.json', import.meta.url), 'utf8'))
+const raw = JSON.parse(readFileSync(new URL('./fixtures/observed-state.json', import.meta.url), 'utf8'))
+const snapshot = authorizedSnapshot(raw, { environmentId: raw.environment.id, tenantIds: ['platform'] })
 
 describe('overview projection', () => {
   it('omits the management plane when the visible snapshot contains none', () => {

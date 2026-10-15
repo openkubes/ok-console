@@ -23,6 +23,35 @@ describe('OK-163 authorization contract', () => {
     expect(JSON.stringify(result)).not.toContain('issuer-subject-opaque-9f2')
   })
 
+  it('narrows the authorized scope to the requested deployment tenant', () => {
+    const multiTenantContext = structuredClone(authorizationContext)
+    multiTenantContext.scope.tenantIds = ['tenant-a', 'tenant-b']
+
+    const deploymentResult = authorizeSecurityContext(multiTenantContext, {
+      ...request,
+      tenantId: 'tenant-a',
+    }, now)
+    const environmentResult = authorizeSecurityContext(multiTenantContext, {
+      permission: request.permission,
+      environmentId: request.environmentId,
+    }, now)
+
+    expect(deploymentResult).toMatchObject({
+      allowed: true,
+      scope: {
+        environmentId: 'community-preview',
+        tenantIds: ['tenant-a'],
+      },
+    })
+    expect(environmentResult).toMatchObject({
+      allowed: true,
+      scope: {
+        environmentId: 'community-preview',
+        tenantIds: ['tenant-a', 'tenant-b'],
+      },
+    })
+  })
+
   it('rejects privilege expansion requested by the caller', () => {
     expect(authorizeSecurityContext(authorizationContext, { ...request, permission: 'clusters.delete' }, now))
       .toEqual({ allowed: false, reason: 'PERMISSION_DENIED', identity: null })

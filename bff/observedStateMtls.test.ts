@@ -44,7 +44,7 @@ beforeAll(async () => {
 
   const fixture = await new FixtureObservedStateAdapter().readSnapshot()
   const envelope = {
-    apiVersion: 'observed.openkubes.io/v0alpha1',
+    apiVersion: 'observed.openkubes.io/v0alpha2',
     kind: 'ConsoleObservedState',
     metadata: { observedAt: fixture.observedAt, sourceRevision: fixture.sourceRevision },
     data: {
@@ -64,7 +64,7 @@ beforeAll(async () => {
     minVersion: 'TLSv1.2',
   }, (_request, response) => {
     const body = JSON.stringify(envelope)
-    response.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) })
+    response.writeHead(200, { 'Content-Type': 'application/json; profile="observed.openkubes.io/v0alpha2"', 'Content-Length': Buffer.byteLength(body) })
     response.end(body)
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -81,7 +81,7 @@ afterAll(async () => {
 
 const environment = (hostname = 'localhost') => ({
   OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes',
-  OK_CONSOLE_OBSERVED_STATE_URL: `https://${hostname}:${port}/api/console-observed-state/v0alpha1`,
+  OK_CONSOLE_OBSERVED_STATE_URL: `https://${hostname}:${port}/api/console-observed-state/v0alpha2`,
   OK_CONSOLE_OBSERVED_STATE_CA_FILE: join(root, 'trusted-ca.crt'),
   OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE: join(root, 'console-bff.crt'),
   OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE: join(root, 'console-bff.key'),

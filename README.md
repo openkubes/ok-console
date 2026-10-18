@@ -130,6 +130,8 @@ port-forward must report `Forwarding from 127.0.0.1:<local-port>` for the exact
 requested port within 30 seconds before HTTP probes run. An occupied local port,
 an exited forwarder, or a missing/mismatched forwarding line fails verification
 with the captured port-forward diagnostics.
+After forwarding readiness, the first `/health/live` probe gets up to 30 attempts,
+each with a five-second timeout and a one-second pause between failures.
 
 The complete candidate lifecycle, digest-verification commands, retained-cluster
 option, and production boundary are documented in the

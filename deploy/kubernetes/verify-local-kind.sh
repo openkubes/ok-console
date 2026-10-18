@@ -86,11 +86,11 @@ select_current_pod() {
         done
       fi
     done <<<"${pods}"
+    [[ "${#leftover_pods[@]}" == 0 ]] && break
     if (( SECONDS >= deadline )); then
       echo "Timed out after ${timeout_seconds}s waiting for Pods of old ReplicaSets of Deployment ok-console to disappear. Leftover Pods: ${leftover_pods[*]:-none}" >&2
       return 1
     fi
-    [[ "${#leftover_pods[@]}" == 0 ]] && break
     sleep "${poll_interval}"
   done
   if [[ "${#current_pods[@]}" != 1 ]]; then
@@ -116,14 +116,9 @@ start_and_wait_for_port_forward() {
   deadline=$((SECONDS + timeout_seconds))
 
   while (( SECONDS < deadline )); do
-    if ! jobs -pr | grep -Fxq "${port_forward_pid}"; then
-      echo "kubectl port-forward exited before reporting readiness for 127.0.0.1:${local_port}." >&2
-      cat "${port_forward_log}" >&2
-      return 1
-    fi
     while IFS= read -r observed_line; do
       if [[ "${observed_line}" == "${expected_line}" ]]; then
-        if ! jobs -pr | grep -Fxq "${port_forward_pid}"; then
+        if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
           echo "kubectl port-forward exited immediately after reporting readiness for 127.0.0.1:${local_port}." >&2
           cat "${port_forward_log}" >&2
           return 1
@@ -136,6 +131,11 @@ start_and_wait_for_port_forward() {
         return 1
       fi
     done <"${port_forward_log}"
+    if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
+      echo "kubectl port-forward exited before reporting readiness for 127.0.0.1:${local_port}." >&2
+      cat "${port_forward_log}" >&2
+      return 1
+    fi
     sleep "${poll_interval}"
   done
 
@@ -241,7 +241,24 @@ kubectl --context "kind-${cluster_name}" --namespace openkubes-console rollout s
 select_current_pod
 start_and_wait_for_port_forward
 
-curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/live"
+# A reported listener can still encounter a transient first-stream failure.
+# Bound the probe budget independently of port-forward readiness: at most 30
+# attempts of 5 seconds each, with a 1-second pause between attempts (~180s).
+for ((attempt = 1; attempt <= 30; attempt++)); do
+  if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
+    echo "kubectl port-forward exited during live health probing for 127.0.0.1:${local_port}." >&2
+    cat "${port_forward_log}" >&2
+    exit 1
+  fi
+  if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/live"; then
+    break
+  fi
+  if (( attempt == 30 )); then
+    echo 'Live health probe failed after 30 attempts (5s per attempt).' >&2
+    exit 1
+  fi
+  sleep 1
+done
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/ready"
 curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/" >/dev/null
 

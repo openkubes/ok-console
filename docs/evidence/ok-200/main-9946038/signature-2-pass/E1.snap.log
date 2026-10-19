@@ -1,0 +1,29 @@
+--- snap pid=2317
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 00000000:2253 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 178058 1 ffff896d0178e5c0 100 0 0 10 0                    
+  11: 0100007F:2253 0100007F:CAB8 01 00000000:00000000 00:00000000 00000000  1000        0 184666 2 ffff896d30a31bc0 20 4 31 10 -1                   
+  12: 0100007F:2253 0100007F:CAB0 01 00000000:00000000 00:00000000 00000000  1000        0 184567 1 ffff896d0cc0d340 20 4 31 10 -1                   
+ListenOverflows 0
+ListenDrops 0
+net/core/somaxconn=4096
+net/ipv4/tcp_syn_retries=6
+conntrack=211/65536
+iptables_lines=0
+--- snap pid=2317
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 00000000:2253 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 178058 1 ffff896d0178e5c0 100 0 0 10 0                    
+  13: 0100007F:2253 0100007F:CACC 01 00000000:00000000 00:00000000 00000000  1000        0 185147 1 ffff896d0cc0c0c0 20 4 31 10 -1                   
+  14: 0100007F:2253 0100007F:CABC 01 00000000:00000000 00:00000000 00000000  1000        0 184986 1 ffff896d0cc0ca00 20 4 31 10 -1                   
+ListenOverflows 0
+ListenDrops 0
+net/core/somaxconn=4096
+net/ipv4/tcp_syn_retries=6
+conntrack=213/65536
+iptables_lines=0
+--- snap pid=2317
+awk: cannot open /proc/2317/net/tcp (No such file or directory)
+awk: cannot open /proc/2317/net/netstat (No such file or directory)
+net/core/somaxconn=
+net/ipv4/tcp_syn_retries=
+conntrack=218/65536
+iptables_lines=0

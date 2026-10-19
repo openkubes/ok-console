@@ -1,0 +1,22 @@
+2026-10-19T06:35:20.893 == start main=9946038
+2026-10-19T06:35:20.981 == baseline verify:kind (kept cluster)
+2026-10-19T06:37:18.303 == baseline rc=0
+2026-10-19T06:37:18.477 == containerd: containerd github.com/containerd/containerd v1.6.9 1c90a442489720eec95342e1789ee8a5e1b9536f
+2026-10-19T06:37:18.620 == kernel: 6.18.40.1-microsoft-standard-WSL2
+2026-10-19T06:37:18.994 == pod=ok-console-9cbfbf4b6-cqfvc sandbox_pid=2317
+2026-10-19T06:37:19.197 == E1 start (left 3481s)
+deployment.apps/ok-console restarted
+2026-10-19T06:37:29.162 == E1 dial errors: 0 refused: <evidence dir>/E1.portforward.log:0 <evidence dir>/E1.curl.log:0 
+2026-10-19T06:37:29.179 == E2: remove liveness on the live cluster only
+deployment.apps/ok-console patched
+Waiting for deployment "ok-console" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "ok-console" rollout to finish: 1 old replicas are pending termination...
+deployment "ok-console" successfully rolled out
+2026-10-19T06:37:38.316 == E2 pod=ok-console-75c6f7cfdb-6v84g sandbox_pid=3072 app_pid=3101
+2026-10-19T06:37:41.791 == E2a app stopped
+2026-10-19T06:38:42.312 == E2b burst 700
+2026-10-19T06:41:20.659 == E2 app continued
+2026-10-19T06:45:37.508 == E2b ListenOverflows before=0 after=712; exact signature lines: 21
+2026-10-19T06:45:37.530 == E3
+2026-10-19T06:45:37.621 == done (elapsed 617s)
+2026-10-19T06:45:37.629 == cleanup

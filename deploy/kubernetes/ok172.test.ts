@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
@@ -9,11 +9,16 @@ const execute = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 const overlay = './overlays/ok-shared-live'
 
+const yamlToJson = (manifest: string) => JSON.parse(execFileSync('python3', [
+  '-c',
+  'import json, sys, yaml; json.dump([item for item in yaml.safe_load_all(sys.stdin) if item is not None], sys.stdout)',
+], { input: manifest, encoding: 'utf8' }))
+
 describe('OK-172 ok-shared live slice invariants', () => {
   it('renders only immutable accepted candidates without credential objects or placeholders', async () => {
     const { stdout } = await execute('kubectl', ['kustomize', new URL(overlay, import.meta.url).pathname])
     expect(stdout).toContain('ghcr.io/openkubes/ok-console@sha256:10cfb281bc5d0d14aaea34ca072ea4b92d69183df617c1a2d19c1d3a5d6aac6b')
-    expect(stdout).toContain('ghcr.io/openkubes/observed-state-producer@sha256:2af5f7fe9612a4fe006fbb931f47356d0e797339542d9012752a9208e8cd359c')
+    expect(stdout).toContain('ghcr.io/openkubes/observed-state-producer@sha256:9f239237c4f5b51815e61a537b24d2da7aa7b3b6092d84b1422362d2a1fe6297')
     expect(stdout).not.toMatch(/REPLACE_|\.invalid|sha256:0{64}|image: .+:latest/)
     expect(stdout).not.toMatch(/^kind: Secret$/m)
     expect(stdout).toContain('value: hosting-cluster')
@@ -41,6 +46,44 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(producer).toContain('value: spiffe://openkubes.io/ns/openkubes-console/sa/ok-console')
     expect(producer).toContain('path: client-ca.crt')
     expect(producer).toContain('defaultMode: 288')
+  })
+
+  it('mounts the reviewed tenant ownership allocation into the producer', () => {
+    const rendered = execFileSync('kubectl', ['kustomize', new URL(overlay, import.meta.url).pathname], { encoding: 'utf8' })
+    const resources = yamlToJson(rendered) as Array<{
+      kind?: string
+      metadata?: { name?: string }
+      data?: Record<string, string>
+      spec?: { template?: { spec?: {
+        containers?: Array<{
+          name?: string
+          env?: Array<{ name?: string, value?: string }>
+          volumeMounts?: Array<{ name?: string, mountPath?: string, readOnly?: boolean }>
+        }>
+        volumes?: Array<{ name?: string, configMap?: { name?: string, defaultMode?: number } }>
+      } } }
+    }>
+    const ownership = resources.find((resource) => resource.kind === 'ConfigMap' && resource.metadata?.name === 'observed-state-producer-ownership')
+    const deployment = resources.find((resource) => resource.kind === 'Deployment' && resource.metadata?.name === 'observed-state-producer')
+    const producer = deployment?.spec?.template?.spec?.containers?.find((container) => container.name === 'producer')
+
+    expect(ownership?.data?.['ownership.json']).toBe('{"tenants":{"management/ok-mgmt":"platform","hosting/ok-shared":"platform"}}\n')
+    expect(producer?.env).toContainEqual({
+      name: 'OK_OBSERVER_OWNERSHIP_FILE',
+      value: '/var/run/config/openkubes/ownership/ownership.json',
+    })
+    expect(producer?.volumeMounts).toContainEqual({
+      name: 'ownership',
+      mountPath: '/var/run/config/openkubes/ownership',
+      readOnly: true,
+    })
+    expect(deployment?.spec?.template?.spec?.volumes).toContainEqual({
+      name: 'ownership',
+      configMap: {
+        name: 'observed-state-producer-ownership',
+        defaultMode: 288,
+      },
+    })
   })
 
   it('pins PostgreSQL and initializes the session, OIDC and bootstrap relations', async () => {

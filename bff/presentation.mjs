@@ -37,12 +37,15 @@ export const sessionProjection = (snapshot, identity, expiresAt) => ({
   expiresAt,
 })
 
+// An authorized view may contain no management plane; report that as null rather than inventing one.
+const optionalClusterSummary = (cluster) => (cluster ? clusterSummary(cluster) : null)
+
 export const overviewProjection = (snapshot) => ({
   clusters: countReadiness(snapshot.clusters),
   capabilities: { ...snapshot.metrics.capabilities },
   workloadClaims: { ...snapshot.metrics.workloadClaims },
   openFindings: { ...snapshot.metrics.openFindings },
-  managementPlane: clusterSummary(snapshot.clusters.find((cluster) => cluster.role === 'Management plane')),
+  managementPlane: optionalClusterSummary(snapshot.clusters.find((cluster) => cluster.role === 'Management plane')),
   recentPlacements: snapshot.placements.map((placement) => ({
     id: placement.id,
     name: placement.name,

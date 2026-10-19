@@ -33,6 +33,18 @@ type Workload = {
 }
 
 describe('OK-173 deployable overlay authorization invariants', () => {
+  it('uses the ownership-aware observed-state contract in the live Console', () => {
+    const rendered = execFileSync('kubectl', ['kustomize', new URL('./overlays/ok-shared-live/', import.meta.url).pathname], { encoding: 'utf8' })
+    const resources = yamlToJson(rendered) as Workload[]
+    const deployment = resources.find((resource) => resource.kind === 'Deployment' && resource.metadata?.name === 'ok-console')
+    const console = deployment?.spec?.template?.spec?.containers?.find((container) => container.name === 'console')
+
+    expect(console?.env).toContainEqual({
+      name: 'OK_CONSOLE_OBSERVED_STATE_URL',
+      value: 'https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha2',
+    })
+  })
+
   it('renders every overlay except local-kind and keeps the Console out of prototype mode', async () => {
     const overlaysRoot = new URL('./overlays/', import.meta.url)
     const localKind = await readdir(new URL('./overlays/local-kind/', import.meta.url))

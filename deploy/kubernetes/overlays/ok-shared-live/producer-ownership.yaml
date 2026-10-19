@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: observed-state-producer-ownership
+  namespace: openkubes-console
+  labels:
+    app.kubernetes.io/name: observed-state-producer
+    app.kubernetes.io/part-of: openkubes
+data:
+  # This allocation reproduces today's single-tenant visibility exactly.
+  ownership.json: |
+    {"tenants":{"management/ok-mgmt":"platform","hosting/ok-shared":"platform"}}

@@ -4,6 +4,8 @@ import { createServer, type Server } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { validateConsoleResponse } from '../src/domain/presentationContract'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
+import authorizationContext from '../contracts/security/v0alpha1/examples/authorization-context.json'
+import { authorizeSecurityContext } from './security/authorization.mjs'
 import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 
 type JsonRecord = Record<string, unknown>
@@ -108,11 +110,12 @@ describe('read-only Console BFF provider', () => {
     const source = {
       readSnapshot: async () => ({
         ...raw,
-        environment: { ...raw.environment, id: { token: 'credential-material-123' } },
+        environment: { ...raw.environment, displayName: { token: 'credential-material-123' } },
       }),
     }
     const authorizer = async () => ({
       allowed: true,
+      scope: { environmentId: 'community-preview', tenantIds: ['platform'] },
       identity: {
         id: 'test',
         displayName: 'Test',
@@ -148,8 +151,8 @@ describe('read-only Console BFF provider', () => {
     const stale = await getJson('/api/console/v0/overview?failure=stale')
     const degraded = await getJson('/api/console/v0/overview?failure=degraded')
 
-    expect(stale.body).toMatchObject({ meta: { freshness: 'Stale', warnings: [{ code: 'SOURCE_STALE' }] } })
-    expect(degraded.body).toMatchObject({ meta: { warnings: [{ code: 'PARTIAL_DATA' }] } })
+    expect(stale.body).toMatchObject({ meta: { freshness: 'Stale', warnings: expect.arrayContaining([expect.objectContaining({ code: 'SOURCE_STALE' })]) } })
+    expect(degraded.body).toMatchObject({ meta: { warnings: expect.arrayContaining([expect.objectContaining({ code: 'PARTIAL_DATA' })]) } })
     expect(validateConsoleResponse(stale.body)).toEqual({ valid: true, errors: [] })
     expect(validateConsoleResponse(degraded.body)).toEqual({ valid: true, errors: [] })
   })
@@ -237,6 +240,7 @@ describe('read-only Console BFF provider', () => {
       source: fixtureSource,
       authorizer: async () => ({
         allowed: true,
+        scope: { environmentId: 'community-preview', tenantIds: ['platform'] },
         identity: {
           id: 'local-test', displayName: 'Local Test', identitySource: method, assurance,
           permissions: ['platform.read'],
@@ -249,4 +253,149 @@ describe('read-only Console BFF provider', () => {
     expect(body).toMatchObject({ data: { subject: { identitySource, assurance } } })
     expect(validateConsoleResponse(body)).toEqual({ valid: true, errors: [] })
   })
+})
+
+// Exercise authorization before every projection with a valid, mixed-owner graph.
+const mixedSnapshot = async () => {
+  const raw = await fixtureSource.readSnapshot()
+  const environmentId = raw.environment.id
+  const clusters = raw.clusters.map((cluster: { id: string; capabilities: JsonRecord[] }) => {
+    const ownership = { environmentId, tenantId: cluster.id === 'cluster-ok-ai' ? 'A' : 'B' }
+    return { ...cluster, ownership, capabilities: cluster.capabilities.map((capability) => ({ ...capability, ownership })) }
+  })
+  const ownerFor = (id: string) => clusters.find((cluster: { id: string }) => cluster.id === id)!.ownership
+  const counts = (total: number) => ({ total, ready: total, pending: 0, failed: 0, unknown: 0 })
+  return {
+    ...raw,
+    clusters,
+    evidence: raw.evidence.map((item: { clusterId: string }) => ({ ...item, ownership: ownerFor(item.clusterId) })),
+    placements: raw.placements.map((item: { targetCluster: string }) => {
+      const targetClusterId = `cluster-${item.targetCluster}`
+      return { ...item, targetClusterId, ownership: ownerFor(targetClusterId) }
+    }),
+    metrics: ['A', 'B'].map((tenantId, index) => ({
+      ownership: { environmentId, tenantId },
+      capabilities: counts(index ? 90 : 3), workloadClaims: counts(index ? 80 : 1),
+      openFindings: { total: index ? 70 : 2, critical: 0 },
+    })),
+  }
+}
+
+const startMixed = async (snapshot: Awaited<ReturnType<typeof mixedSnapshot>>, allowed = true) => {
+  await stopBff()
+  await startBff({
+    source: { readSnapshot: async () => snapshot },
+    authorizer: async ({ permission }) => authorizeSecurityContext({
+      ...structuredClone(authorizationContext),
+      scope: { environmentId: snapshot.environment.id, tenantIds: ['A', 'B'] },
+      permissions: allowed ? ['platform.read', 'clusters.read', 'evidence.read'] : [],
+    }, { permission, environmentId: snapshot.environment.id, tenantId: 'A' }, () => new Date('2026-08-21T19:05:00Z')),
+    correlationId: () => 'corr-object-auth',
+  })
+}
+
+describe('OK-173 object authorization', () => {
+  it('filters lists, capabilities, overview counts, metrics and recent placements before projection', async () => {
+    await startMixed(await mixedSnapshot())
+    const list = await getJson('/api/console/v0/clusters')
+    expect(list.response.status).toBe(200)
+    expect(list.body).toMatchObject({ data: { items: [{ id: 'cluster-ok-ai', capabilityCount: 3 }] } })
+    expect((list.body.data as { items: unknown[] }).items).toHaveLength(1)
+    const overview = await getJson('/api/console/v0/overview')
+    expect(overview.body).toMatchObject({ data: {
+      clusters: { total: 1, ready: 1, pending: 0, failed: 0, unknown: 0 },
+      capabilities: { total: 3 }, workloadClaims: { total: 1 }, openFindings: { total: 2 },
+      managementPlane: null, recentPlacements: [{ id: 'claim-private-ai' }],
+    } })
+    expect((overview.body.data as { recentPlacements: unknown[] }).recentPlacements).toHaveLength(1)
+    const detail = await getJson('/api/console/v0/clusters/cluster-ok-ai')
+    expect(detail.response.status).toBe(200)
+    expect((detail.body.data as { capabilities: unknown[] }).capabilities).toHaveLength(3)
+    const evidence = await getJson('/api/console/v0/evidence/ev-ai-ready')
+    expect(evidence.response.status).toBe(200)
+    const session = await getJson('/api/console/v0/session')
+    expect(session.response.status).toBe(200)
+    expect(validateConsoleResponse(session.body)).toEqual({ valid: true, errors: [] })
+    expect(JSON.stringify(session.body)).not.toContain('tenantIds')
+  })
+
+  it.each([
+    ['clusters', 'cluster-ok-mgmt'], ['evidence', 'ev-mgmt-ready'],
+  ])('makes foreign %s indistinguishable from missing ids', async (route, foreignId) => {
+    await startMixed(await mixedSnapshot())
+    const foreign = await getJson(`/api/console/v0/${route}/${foreignId}`)
+    const missing = await getJson(`/api/console/v0/${route}/random-missing-id`)
+    expect(foreign.response.status).toBe(404)
+    expect(missing.response.status).toBe(404)
+    expect(foreign.body).toEqual(missing.body)
+  })
+
+  it('denies route permission before reading or looking up an object', async () => {
+    await stopBff()
+    await startBff({ source: { readSnapshot: async () => { throw new Error('lookup must not run') } },
+      authorizer: async () => ({ allowed: false, identity: null }) })
+    expect((await getJson('/api/console/v0/clusters/cluster-ok-ai')).response.status).toBe(403)
+  })
+
+  it('fails closed without an authorized scope', async () => {
+    await stopBff()
+    await startBff({ source: fixtureSource, authorizer: async () => ({ ...(await prototypeAuthorizer({ permission: 'platform.read' })), scope: undefined }) })
+    expect((await getJson('/api/console/v0/overview')).response.status).toBe(403)
+  })
+
+  it('keeps unavailable visible metric leaves unavailable and ignores unavailable hidden buckets', async () => {
+    const raw = await mixedSnapshot()
+    raw.metrics[1].capabilities.total = null
+    await startMixed(raw)
+    expect((await getJson('/api/console/v0/overview')).body).toMatchObject({ data: { capabilities: { total: 3 } } })
+    raw.metrics[0].capabilities.total = null
+    raw.metrics[0].openFindings.total = null
+    const overview = await getJson('/api/console/v0/overview')
+    expect(overview.body).toMatchObject({ data: { capabilities: { total: null, ready: 3 }, openFindings: { total: null } } })
+    expect(validateConsoleResponse(overview.body)).toEqual({ valid: true, errors: [] })
+  })
+})
+
+it('sums all visible metric buckets while unavailable wins and an empty scope yields no objects', async () => {
+  const raw = await mixedSnapshot()
+  raw.metrics.push({ ...structuredClone(raw.metrics[0]), capabilities: { total: 4, ready: 4, pending: 0, failed: 0, unknown: 0 } })
+  await startMixed(raw)
+  expect((await getJson('/api/console/v0/overview')).body).toMatchObject({ data: { capabilities: { total: 7, ready: 7 } } })
+  raw.metrics[2].capabilities.total = null
+  expect((await getJson('/api/console/v0/overview')).body).toMatchObject({ data: { capabilities: { total: null, ready: 7 } } })
+  await stopBff()
+  await startBff({ source: { readSnapshot: async () => raw }, authorizer: async () => ({
+    ...(await prototypeAuthorizer({ permission: 'platform.read' })), scope: { environmentId: raw.environment.id, tenantIds: [] },
+  }) })
+  const overview = await getJson('/api/console/v0/overview')
+  expect(overview.body).toMatchObject({ data: { clusters: { total: 0 }, capabilities: { total: 0 }, managementPlane: null, recentPlacements: [] } })
+})
+
+
+it('rejects a session scope for another environment before projection', async () => {
+  const snapshot = await mixedSnapshot()
+  await stopBff()
+  await startBff({ source: { readSnapshot: async () => snapshot }, authorizer: async () => ({
+    ...(await prototypeAuthorizer({ permission: 'platform.read' })),
+    scope: { environmentId: 'another-environment', tenantIds: ['A'] },
+  }) })
+  expect((await getJson('/api/console/v0/overview')).response.status).toBe(403)
+})
+
+it('does not reveal hidden evidence through object-derived metadata on overview or session', async () => {
+  const raw = await mixedSnapshot()
+  for (const cluster of raw.clusters) {
+    cluster.ownership.tenantId = 'B'
+    for (const capability of cluster.capabilities) capability.ownership.tenantId = 'B'
+  }
+  for (const item of [...raw.evidence, ...raw.placements, ...raw.metrics]) item.ownership.tenantId = 'B'
+  // Keep the adapter's warning about redacted evidence; it must be scoped before projection.
+  raw.sourceHealth = { freshness: 'Current', warnings: [{ code: 'REDACTED', message: 'Sensitive Evidence summary content was redacted at the Console source boundary.' }] }
+  await startMixed(raw)
+  for (const route of ['overview', 'session']) {
+    const result = await getJson(`/api/console/v0/${route}`)
+    expect(result.response.status).toBe(200)
+    expect((result.body.meta as { warnings?: Array<{ code: string }> }).warnings ?? []).not.toEqual(expect.arrayContaining([expect.objectContaining({ code: 'REDACTED' })]))
+    expect(validateConsoleResponse(result.body)).toEqual({ valid: true, errors: [] })
+  }
 })

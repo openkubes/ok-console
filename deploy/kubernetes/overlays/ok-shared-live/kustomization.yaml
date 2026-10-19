@@ -7,6 +7,7 @@ resources:
   - postgres-migrations.yaml
   - postgres-cluster.yaml
   - producer-rbac.yaml
+  - producer-ownership.yaml
   - producer-deployment.yaml
   - network-policies.yaml
   - ingress.yaml
@@ -65,7 +66,7 @@ patches:
           - name: OK_CONSOLE_OBSERVED_STATE_MODE
             value: openkubes
           - name: OK_CONSOLE_OBSERVED_STATE_URL
-            value: https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha1
+            value: https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha2
           - name: OK_CONSOLE_OBSERVED_STATE_CA_FILE
             value: /run/secrets/ok-console/observed-state/ca.crt
           - name: OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE

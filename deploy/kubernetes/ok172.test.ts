@@ -18,7 +18,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
   it('renders only immutable accepted candidates without credential objects or placeholders', async () => {
     const { stdout } = await execute('kubectl', ['kustomize', new URL(overlay, import.meta.url).pathname])
     expect(stdout).toContain('ghcr.io/openkubes/ok-console@sha256:10cfb281bc5d0d14aaea34ca072ea4b92d69183df617c1a2d19c1d3a5d6aac6b')
-    expect(stdout).toContain('ghcr.io/openkubes/observed-state-producer@sha256:2af5f7fe9612a4fe006fbb931f47356d0e797339542d9012752a9208e8cd359c')
+    expect(stdout).toContain('ghcr.io/openkubes/observed-state-producer@sha256:9f239237c4f5b51815e61a537b24d2da7aa7b3b6092d84b1422362d2a1fe6297')
     expect(stdout).not.toMatch(/REPLACE_|\.invalid|sha256:0{64}|image: .+:latest/)
     expect(stdout).not.toMatch(/^kind: Secret$/m)
     expect(stdout).toContain('value: hosting-cluster')

@@ -139,9 +139,45 @@ non-terminating. Image-ID and NODE_ENV reads use that same Pod. The IPv4-only
 port-forward must report `Forwarding from 127.0.0.1:<local-port>` for the exact
 requested port within 30 seconds before HTTP probes run. An occupied local port,
 an exited forwarder, or a missing/mismatched forwarding line fails verification
-with the captured port-forward diagnostics.
+with failure diagnostics when capture is available.
 After forwarding readiness, the first `/health/live` probe gets up to 30 attempts,
 each with a five-second timeout and a one-second pause between failures.
+
+The verifier requires Bash 4.4 or newer (`exec {fd}>` dynamic file descriptors,
+waitable process-substitution `$!`, and `${var,,}` lowercase expansion in the
+helper). On failure after this invocation created the cluster, when `timeout` is
+available it prints `Failure diagnostics: <directory>` as it exits.
+The private temporary directory is `${TMPDIR:-/tmp}/ok-console-ok200-failure.*`;
+retain it for diagnosis and remove it when no longer needed. Successful
+verification skips capture unless the subsequent Kind cluster deletion fails;
+that teardown failure captures diagnostics even though verification passed, and
+the overall exit status is the cleanup failure's non-zero status.
+Preflight refusals (including an existing unowned cluster) and exit status
+130/143 skip capture. `timeout` is optional: without it, failure capture is skipped with
+`timeout unavailable; capture skipped` on stderr and no artifact path is printed.
+The raw port-forward log is not echoed to the terminal.
+
+The artifact contains:
+
+- `capture.txt`: capture timestamps, elapsed verification time, and budget limits.
+- `port-forward.txt`: allowlisted forwarding events, normalized HTTP request
+  timing/status and host-free path classes, and known error classes.
+- `listener.txt`: local listener state for the requested port.
+- `netstat.txt`: local `/proc/net/netstat` ListenOverflows/ListenDrops at
+  verification start and capture time, plus their deltas when available.
+- `versions.txt`: client/tool versions and the owned Kind node's containerd version.
+- `workloads.txt`: selected Pod/ReplicaSet identity, ownership and readiness fields.
+
+Capture is best effort: commands have a three-second limit clamped to the remaining
+26-second capture budget, with a 29-second outer timeout and one-second kill grace.
+Files have individual byte limits, including 16 KiB for port-forward output, and
+an aggregate 256 KiB cap. Only allowlisted fields and normalized error classes reach
+disk; raw URLs, query strings, headers, kubeconfigs, arbitrary stderr and application
+logs are discarded. Unsupported log formats, missing tools, timeouts or truncation
+can leave incomplete evidence. Local counters cover the host network namespace and
+may include unrelated activity; they do not prove a Pod-network cause. Capture
+preserves the verification exit status and does not establish the cause of
+signature 2.
 
 The complete candidate lifecycle, digest-verification commands, retained-cluster
 option, and production boundary are documented in the

@@ -1,0 +1,6 @@
+klog I1019 19:15:28.972053 round_trippers.go:632 GET path=core-api status=200 milliseconds=54
+klog I1019 19:15:28.991863 round_trippers.go:632 GET path=core-api status=200 milliseconds=7
+klog I1019 19:15:28.994771 tunneling_dialer.go:120 diagnostic=websocket-upgrade-start
+klog I1019 19:15:29.045964 round_trippers.go:632 GET path=pod-portforward status=101 milliseconds=51
+klog I1019 19:15:29.045995 tunneling_dialer.go:130 diagnostic=websocket-upgrade-complete
+error: kubectl could not listen on the requested port (details omitted)

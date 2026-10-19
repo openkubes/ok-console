@@ -1,0 +1,15 @@
+I1019 19:25:26.310106       4 round_trippers.go:553] GET http://127.0.0.1:1/api?timeout=1s  in 0 milliseconds
+E1019 19:25:26.310194       4 memcache.go:265] couldn't get current server API group list: Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.310208       4 cached_discovery.go:120] skipped caching discovery info due to Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.310217       4 shortcut.go:100] Error loading discovery information: Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.310504       4 round_trippers.go:553] GET http://127.0.0.1:1/api?timeout=1s  in 0 milliseconds
+E1019 19:25:26.310557       4 memcache.go:265] couldn't get current server API group list: Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.311759       4 cached_discovery.go:120] skipped caching discovery info due to Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.312156       4 round_trippers.go:553] GET http://127.0.0.1:1/api?timeout=1s  in 0 milliseconds
+E1019 19:25:26.312208       4 memcache.go:265] couldn't get current server API group list: Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.312913       4 cached_discovery.go:120] skipped caching discovery info due to Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.313214       4 round_trippers.go:553] GET http://127.0.0.1:1/api?timeout=1s  in 0 milliseconds
+E1019 19:25:26.313265       4 memcache.go:265] couldn't get current server API group list: Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.314446       4 cached_discovery.go:120] skipped caching discovery info due to Get "http://127.0.0.1:1/api?timeout=1s": dial tcp 127.0.0.1:1: connect: connection refused
+I1019 19:25:26.314480       4 helpers.go:264] Connection error: Get http://127.0.0.1:1/api?timeout=1s: dial tcp 127.0.0.1:1: connect: connection refused
+The connection to the server 127.0.0.1:1 was refused - did you specify the right host or port?

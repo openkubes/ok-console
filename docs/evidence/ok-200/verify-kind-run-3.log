@@ -1,0 +1,133 @@
+
+> @openkubes/ok-console@0.1.0 verify:kind <ok-console checkout>
+> ./deploy/kubernetes/verify-local-kind.sh
+
+No kind clusters found.
+Creating cluster "ok-console-ok169" ...
+ • Ensuring node image (kindest/node:v1.25.3) 🖼  ...
+ ✓ Ensuring node image (kindest/node:v1.25.3) 🖼
+ • Preparing nodes 📦   ...
+ ✓ Preparing nodes 📦 
+ • Writing configuration 📜  ...
+ ✓ Writing configuration 📜
+ • Starting control-plane 🕹️  ...
+ ✓ Starting control-plane 🕹️
+ • Installing CNI 🔌  ...
+ ✓ Installing CNI 🔌
+ • Installing StorageClass 💾  ...
+ ✓ Installing StorageClass 💾
+ • Waiting ≤ 1m30s for control-plane = Ready ⏳  ...
+ ✓ Waiting ≤ 1m30s for control-plane = Ready ⏳
+ • Ready after 29s 💚
+Set kubectl context to "kind-ok-console-ok169"
+You can now use your cluster with:
+
+kubectl cluster-info --context kind-ok-console-ok169
+
+Thanks for using kind! 😊
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile:
+#1 transferring dockerfile: 1.71kB 0.1s done
+#1 DONE 0.3s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#2 DONE 0.9s
+
+#3 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/node:22.22.0-alpine3.22@sha256:7aa86fa052f6e4b101557ccb56717cb4311be1334381f526fe013418fe157384
+#4 DONE 0.1s
+
+#5 [internal] load metadata for gcr.io/distroless/nodejs22-debian13:nonroot@sha256:4e4fb0ce55fd73901600796ef079a9490369d2515d7da31633a91608c82ca13b
+#5 DONE 0.1s
+
+#6 [internal] load .dockerignore
+#6 transferring context:
+#6 transferring context: 156B 0.1s done
+#6 DONE 0.1s
+
+#7 [build  1/10] FROM docker.io/library/node:22.22.0-alpine3.22@sha256:7aa86fa052f6e4b101557ccb56717cb4311be1334381f526fe013418fe157384
+#7 DONE 0.0s
+
+#8 [runtime 1/6] FROM gcr.io/distroless/nodejs22-debian13:nonroot@sha256:4e4fb0ce55fd73901600796ef079a9490369d2515d7da31633a91608c82ca13b
+#8 DONE 0.0s
+
+#9 [internal] load build context
+#9 transferring context: 4.75kB 0.7s done
+#9 DONE 0.7s
+
+#10 [build  9/10] COPY contracts ./contracts
+#10 CACHED
+
+#11 [build  4/10] RUN corepack enable && pnpm install --frozen-lockfile
+#11 CACHED
+
+#12 [runtime 2/6] WORKDIR /app
+#12 CACHED
+
+#13 [build  8/10] COPY bff ./bff
+#13 CACHED
+
+#14 [build  3/10] COPY package.json pnpm-lock.yaml ./
+#14 CACHED
+
+#15 [runtime 3/6] COPY --chown=1000:1000 --from=build /workspace/package.json ./package.json
+#15 CACHED
+
+#16 [build  5/10] COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json eslint.config.js ./
+#16 CACHED
+
+#17 [build  6/10] COPY public ./public
+#17 CACHED
+
+#18 [runtime 4/6] COPY --chown=1000:1000 --from=build /workspace/node_modules ./node_modules
+#18 CACHED
+
+#19 [build 10/10] RUN pnpm build     && pnpm prune --prod     && test -z "$(find node_modules -type f -name '*.node' -print -quit)"
+#19 CACHED
+
+#20 [runtime 5/6] COPY --chown=1000:1000 --from=build /workspace/bff ./bff
+#20 CACHED
+
+#21 [build  2/10] WORKDIR /workspace
+#21 CACHED
+
+#22 [build  7/10] COPY src ./src
+#22 CACHED
+
+#23 [runtime 6/6] COPY --chown=1000:1000 --from=build /workspace/dist ./dist
+#23 CACHED
+
+#24 exporting to image
+#24 exporting layers done
+#24 writing image sha256:c436bea874dc9196998afad90f0d728b390dd6c01f404b0b1224ca0f1099310b done
+#24 naming to docker.io/library/ok-console:ok-169-e25fb4c4537f done
+#24 DONE 0.0s
+Image: "" with ID "sha256:c436bea874dc9196998afad90f0d728b390dd6c01f404b0b1224ca0f1099310b" not yet present on node "ok-console-ok169-control-plane", loading...
+namespace/openkubes-console created
+serviceaccount/ok-console created
+service/ok-console created
+deployment.apps/ok-console created
+poddisruptionbudget.policy/ok-console created
+networkpolicy.networking.k8s.io/ok-console-default-deny created
+networkpolicy.networking.k8s.io/ok-console-local-ingress created
+Waiting for deployment "ok-console" rollout to finish: 0 of 1 updated replicas are available...
+deployment "ok-console" successfully rolled out
+deployment.apps/ok-console restarted
+Waiting for deployment "ok-console" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "ok-console" rollout to finish: 1 old replicas are pending termination...
+deployment "ok-console" successfully rolled out
+Selected Pod ok-console-68fb94bddf-p544n of ReplicaSet ok-console-68fb94bddf (Deployment revision 2).
+OK-169 local Kubernetes deployment proof passed.
+Source revision: e25fb4c4537fd51ad34626136c6cfbab20a1b13f
+Verified image revision: e25fb4c4537fd51ad34626136c6cfbab20a1b13f
+Requested image: ok-console:ok-169-e25fb4c4537f
+Runtime image ID: docker.io/library/import-2026-10-18@sha256:0adfeb147c5a3890e161c45686931f619cf78ed9c24c6a544a10a340d3c5bfcc
+Runtime NODE_ENV: production
+Runtime security: false true true false ALL
+Console URL during verification: http://127.0.0.1:18787
+Cluster retained: false
+Deleting cluster "ok-console-ok169" ...

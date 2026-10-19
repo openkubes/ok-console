@@ -123,6 +123,16 @@ Console in explicit fixture/read-only mode without production credentials:
 pnpm verify:kind
 ```
 
+After the restart, the verifier waits up to 120 seconds for old ReplicaSet Pods
+to disappear, then requires exactly one Pod of the current ReplicaSet, Ready and
+non-terminating. Image-ID and NODE_ENV reads use that same Pod. The IPv4-only
+port-forward must report `Forwarding from 127.0.0.1:<local-port>` for the exact
+requested port within 30 seconds before HTTP probes run. An occupied local port,
+an exited forwarder, or a missing/mismatched forwarding line fails verification
+with the captured port-forward diagnostics.
+After forwarding readiness, the first `/health/live` probe gets up to 30 attempts,
+each with a five-second timeout and a one-second pause between failures.
+
 The complete candidate lifecycle, digest-verification commands, retained-cluster
 option, and production boundary are documented in the
 [`Kubernetes deployment runbook`](deploy/kubernetes/README.md). The evolving

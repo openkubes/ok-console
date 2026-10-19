@@ -89,10 +89,12 @@ const environment = (scenario = 'normal') => {
   }
 }
 
-const capture = async (scenario = 'normal') => {
+const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string) => {
   const env = environment(scenario)
   const directory = join(fixtureDirectory, `artifacts-${execution}`)
   await mkdir(directory)
+  const netstatBaseline =
+    suppliedNetstatBaseline ?? (await exec('bash', [helper, 'snapshot-netstat'], { env })).stdout.trim()
   const forwardLog = join(fixtureDirectory, `forward-${execution}.log`)
   await writeFile(forwardLog, [
     'Forwarding from 127.0.0.1:18787 -> 8787',
@@ -104,12 +106,16 @@ const capture = async (scenario = 'normal') => {
     '',
   ].join('\n'))
   const started = performance.now()
-  const result = await exec('bash', [helper, 'capture', directory, 'test', '18787', 'current-pod', '9', forwardLog], {
-    env,
-    timeout: 10000,
-    killSignal: 'SIGKILL',
-  })
-  return { directory, env, elapsedMs: performance.now() - started, result }
+  const result = await exec(
+    'bash',
+    [helper, 'capture', directory, 'test', '18787', 'current-pod', '9', forwardLog, netstatBaseline],
+    {
+      env,
+      timeout: 10000,
+      killSignal: 'SIGKILL',
+    },
+  )
+  return { directory, env, elapsedMs: performance.now() - started, netstatBaseline, result }
 }
 
 describe('OK-200 failure diagnostic capture', () => {
@@ -121,9 +127,19 @@ describe('OK-200 failure diagnostic capture', () => {
       'error: unable to forward connection: connection refused',
       'I1019 09:42:11.213456       1 round_trippers.go:553] GET https://api.internal.invalid/api/v1/pods?token=planted-trace-token 503 Service Unavailable in 12 milliseconds',
       'I1019 09:42:11.213456       1 portforward.go:406] GET https://api.internal.invalid/api/v1/pods?token=planted-portforward-trace-token (503) 12ms',
+      'I1019 09:42:11.213456       1 round_trippers.go:632] "Response" verb="POST" url="https://api.internal.invalid/api/v1/namespaces/openkubes-console/pods/current-pod/portforward?token=planted-structured-token" status="101 Switching Protocols" milliseconds=17',
+      'I1019 09:42:12.113456       1 round_trippers.go:632] "Response" verb="GET" url="https://api.internal.invalid/api?token=planted-refused-response-token" status="" milliseconds=150',
+      'E1019 09:42:12.213456       1 memcache.go:265] couldn\'t get current server API group list: Get "https://api.internal.invalid/api?token=planted-memcache-token": dial tcp 127.0.0.1:6443: connect: connection refused',
+      'E1019 09:42:13.213456       1 portforward.go:406] error copying from remote stream to local connection: read tcp 127.0.0.1:18787: connection reset by peer',
+      'E1019 09:42:14.213456       1 round_trippers.go:632] request failed: dial tcp 127.0.0.1:6443: i/o timeout',
+      'E1019 09:42:15.213456       1 spdy.go:97] stream terminated with EOF',
+      'E1019 09:42:16.213456       1 tunneling_dialer.go:102] unable to upgrade streaming request: websocket: bad handshake',
+      'E1019 09:42:17.213456       1 fallback_dialer.go:53] fallback to secondary dialer from primary dialer err: unable to upgrade streaming request',
+      'F1019 09:42:18.213456       1 helpers.go:115] Unable to connect to the server: Get "https://api.internal.invalid/api?token=planted-tls-token": tls: failed to verify certificate',
       'Authorization: Bearer planted-filter-bearer',
       'https://internal.example.invalid/path?token=planted-filter-url',
       'apiVersion: v1',
+      'apiversion: v1',
       'clusters:',
       'certificate-authority-data: planted-kubeconfig-ca-data',
       'client-key-data: planted-kubeconfig-client-key',
@@ -143,7 +159,109 @@ describe('OK-200 failure diagnostic capture', () => {
     expect(sanitized).toContain('error: kubectl was unable to forward the requested port (details omitted)')
     expect(sanitized).toContain('round_trippers.go:553 GET status=503 elapsed=12 milliseconds')
     expect(sanitized).toContain('portforward.go:406 GET status=503 elapsed=12ms')
+    expect(sanitized).toContain(
+      'round_trippers.go:632 POST path=pod-portforward status=101 milliseconds=17',
+    )
+    expect(sanitized).toContain(
+      'round_trippers.go:632 GET path=core-api status=unavailable milliseconds=150',
+    )
+    expect(sanitized).toContain('memcache.go:265 diagnostic=connection-refused')
+    expect(sanitized).toContain('portforward.go:406 diagnostic=connection-reset')
+    expect(sanitized).toContain('round_trippers.go:632 diagnostic=i/o-timeout')
+    expect(sanitized).toContain('spdy.go:97 diagnostic=eof')
+    expect(sanitized).toContain('tunneling_dialer.go:102 diagnostic=upgrade-failed')
+    expect(sanitized).toContain('fallback_dialer.go:53 diagnostic=fallback-to-spdy')
+    expect(sanitized).toContain('helpers.go:115 diagnostic=tls')
     expect(Buffer.byteLength(sanitized)).toBeLessThanOrEqual(16384)
+    const refilteredOutput = join(fixtureDirectory, 'refiltered-forward.log')
+    await exec('bash', ['-c', 'cat "$1" | bash "$2" filter-port-forward "$3"', '_', output, helper, refilteredOutput], {
+      env: environment(),
+    })
+    expect(await readFile(refilteredOutput, 'utf8')).toBe(sanitized)
+  })
+
+  it('keeps malformed forwarding readiness markers safe so the verifier can reject them', async () => {
+    const output = join(fixtureDirectory, 'malformed-forward.log')
+    const input = [
+      'Forwarding from 127.0.0.1:18787 -> 9999',
+      'Forwarding from 127.0.0.1:18787 -> 8787 trailing token=planted-forward-token',
+      'Forwarding from 127.0.0.1:18788 -> 8787',
+    ].join('\n')
+    await exec('bash', ['-c', 'printf "%s\\n" "$1" | bash "$2" filter-port-forward "$3"', '_', input, helper, output], {
+      env: environment(),
+    })
+    const sanitized = await readFile(output, 'utf8')
+    expect(sanitized).toContain('Forwarding from 127.0.0.1:18787 -> unexpected endpoint')
+    expect(sanitized).toContain('Forwarding from 127.0.0.1:18788 -> 8787')
+    expect(sanitized).not.toContain('9999')
+    expect(sanitized).not.toContain('planted-')
+  })
+
+  it('returns only the local TCP listen-overflow counter pair', async () => {
+    const { stdout, stderr } = await exec('bash', [helper, 'snapshot-netstat'], { env: environment() })
+    expect(stderr).toBe('')
+    expect(stdout).toMatch(/^TcpExt ListenOverflows=\d+ ListenDrops=\d+\n$/)
+  })
+
+  it('preserves valid start and end counters when a decreasing counter makes the delta unavailable', async () => {
+    const baseline = 'TcpExt ListenOverflows=999999999999 ListenDrops=999999999999'
+    const { directory } = await capture('normal', baseline)
+    const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
+    expect(netstat).toContain(`start ${baseline}`)
+    expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    expect(netstat).toContain('delta TcpExt ListenOverflows=unavailable ListenDrops=unavailable')
+  })
+
+  it('keeps a missing verification-start counter unavailable instead of fabricating a failure-time baseline', async () => {
+    const unavailable = 'TcpExt ListenOverflows=unavailable ListenDrops=unavailable'
+    const { directory } = await capture('normal', unavailable)
+    const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
+    expect(netstat).toContain(`start ${unavailable}`)
+    expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    expect(netstat).toContain(`delta ${unavailable}`)
+  })
+
+  it('clamps version, Pod, and ReplicaSet command timeouts to the remaining capture budget', async () => {
+    const timeoutDirectory = join(fixtureDirectory, `timeout-${execution++}`)
+    const artifacts = join(fixtureDirectory, `deadline-artifacts-${execution++}`)
+    const timeoutLog = join(fixtureDirectory, `deadline-timeout-${execution++}.log`)
+    await mkdir(timeoutDirectory)
+    await mkdir(artifacts)
+    await writeFile(
+      join(timeoutDirectory, 'timeout'),
+      `#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\\n' "$*" >>"$CAPTURE_TIMEOUT_LOG"
+`,
+    )
+    await chmod(join(timeoutDirectory, 'timeout'), 0o755)
+    const env = {
+      ...environment(),
+      PATH: `${timeoutDirectory}:${fixtureDirectory}:${process.env.PATH}`,
+      CAPTURE_TIMEOUT_LOG: timeoutLog,
+    }
+    await exec(
+      'bash',
+      [
+        '-c',
+        `source "$1"
+artifact_dir="$2"
+: >"$2/version.txt"
+deadline=$((SECONDS + 1))
+run_bounded versions "$2/version.txt" 1024 kubectl version --client
+deadline=$((SECONDS + 1))
+capture_workloads "$2/workloads.txt" kind-test
+`,
+        '_',
+        helper,
+        artifacts,
+      ],
+      { env },
+    )
+    const calls = await readFile(timeoutLog, 'utf8')
+    expect(calls).toContain('--signal=TERM --kill-after=1s 1s kubectl version --client')
+    expect(calls).toMatch(/--signal=TERM --kill-after=1s 1s kubectl .* get pods /)
+    expect(calls).toMatch(/--signal=TERM --kill-after=1s 1s kubectl .* get replicasets /)
   })
 
   it('caps a flood of valid forwarding lines by bytes', async () => {
@@ -174,7 +292,7 @@ describe('OK-200 failure diagnostic capture', () => {
   })
 
   it('writes only allowlisted sanitized files, stays within the aggregate byte cap, and invokes bounded diagnostic commands', async () => {
-    const { directory, env, elapsedMs } = await capture()
+    const { directory, env, elapsedMs, netstatBaseline } = await capture()
     const files = await readdir(directory)
     expect(files.sort()).toEqual(['capture.txt', 'listener.txt', 'netstat.txt', 'port-forward.txt', 'versions.txt', 'workloads.txt'])
     const contents = await Promise.all(files.map((file) => readFile(join(directory, file), 'utf8')))
@@ -186,7 +304,10 @@ describe('OK-200 failure diagnostic capture', () => {
       'klog I1019 09:42:11.213456 round_trippers.go:553 GET status=503 elapsed=12 milliseconds',
     )
     expect(await readFile(join(directory, 'listener.txt'), 'utf8')).toMatch(/^LISTEN 0 4096 127\.0\.0\.1:18787 0\.0\.0\.0:\*\s*$/m)
-    expect(await readFile(join(directory, 'netstat.txt'), 'utf8')).toMatch(/^TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
+    expect(netstat).toContain(`start ${netstatBaseline}`)
+    expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('Client Version: v1.32.0')
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('kind v0.25.0')
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('containerd github.com/containerd/containerd v2.0.0')

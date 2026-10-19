@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+  echo 'verify-local-kind.sh requires Bash 4.4 or newer.' >&2
+  exit 1
+fi
+
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 failure_capture_helper="${script_dir}/capture-local-kind-failure.sh"
 rendered_manifest=""
@@ -11,6 +16,7 @@ failure_artifact_dir=""
 created_cluster=false
 port_forward_pid=""
 verification_started_seconds=0
+netstat_baseline=""
 
 cleanup() {
   if [[ -n "${port_forward_pid}" ]]; then
@@ -31,6 +37,11 @@ cleanup() {
 }
 
 capture_failure() {
+  [[ "${created_cluster}" == true ]] || return 0
+  if ! command -v timeout >/dev/null; then
+    echo 'timeout unavailable; capture skipped' >&2
+    return 0
+  fi
   if [[ -x "${failure_capture_helper}" ]]; then
     failure_artifact_dir="$(mktemp -d -t ok-console-ok200-failure.XXXXXX 2>/dev/null)"
     if [[ -n "${failure_artifact_dir}" ]]; then
@@ -41,6 +52,7 @@ capture_failure() {
         "${pod_name:-}" \
         "$((SECONDS - verification_started_seconds))" \
         "${port_forward_log:-}" \
+        "${netstat_baseline:-}" \
         >/dev/null 2>&1 || true
     fi
   fi
@@ -62,14 +74,16 @@ on_exit() {
       port_forward_filter_pid=""
     fi
   fi
-  if (( original_status != 0 )); then
+  if (( original_status != 0 && original_status != 130 && original_status != 143 )); then
     capture_failure
   fi
   cleanup
   cleanup_status="$?"
   if (( original_status == 0 && cleanup_status != 0 )); then
     original_status="${cleanup_status}"
-    capture_failure
+    if (( original_status != 130 && original_status != 143 )); then
+      capture_failure
+    fi
   fi
   [[ -z "${rendered_manifest}" ]] || rm -f "${rendered_manifest}"
   [[ -z "${port_forward_log}" ]] || rm -f "${port_forward_log}"
@@ -77,6 +91,11 @@ on_exit() {
     printf 'Failure diagnostics: %s\n' "${failure_artifact_dir}" >&2
   fi
   exit "${original_status}"
+}
+
+port_forward_filter_is_running() {
+  [[ -n "${port_forward_filter_pid}" ]] || return 1
+  kill -0 "${port_forward_filter_pid}" 2>/dev/null
 }
 
 select_current_pod() {
@@ -179,8 +198,16 @@ start_and_wait_for_port_forward() {
   deadline=$((SECONDS + timeout_seconds))
 
   while (( SECONDS < deadline )); do
+    if ! port_forward_filter_is_running; then
+      echo 'port-forward output filter exited before readiness was established.' >&2
+      return 1
+    fi
     while IFS= read -r observed_line; do
       if [[ "${observed_line}" == "${expected_line}" ]]; then
+        if ! port_forward_filter_is_running; then
+          echo 'port-forward output filter exited before readiness was established.' >&2
+          return 1
+        fi
         if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
           echo "kubectl port-forward exited immediately after reporting readiness for 127.0.0.1:${local_port}." >&2
           return 1
@@ -192,6 +219,10 @@ start_and_wait_for_port_forward() {
         return 1
       fi
     done <"${port_forward_log}"
+    if ! port_forward_filter_is_running; then
+      echo 'port-forward output filter exited before readiness was established.' >&2
+      return 1
+    fi
     if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
       echo "kubectl port-forward exited before reporting readiness for 127.0.0.1:${local_port}." >&2
       return 1
@@ -222,7 +253,7 @@ main() {
   exit 1
 }
 
-for command_name in docker kind kubectl curl git timeout; do
+for command_name in docker kind kubectl curl git; do
   command -v "${command_name}" >/dev/null || {
     echo "Required command not found: ${command_name}" >&2
     exit 1
@@ -255,6 +286,7 @@ if kind get clusters | grep -Fxq "${cluster_name}"; then
   echo 'Delete it explicitly or select a different OK_CONSOLE_KIND_CLUSTER.' >&2
   exit 1
 fi
+netstat_baseline="$("${failure_capture_helper}" snapshot-netstat 2>/dev/null || true)"
 kind create cluster --name "${cluster_name}" --wait 90s
 created_cluster=true
 

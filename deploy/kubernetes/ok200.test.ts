@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
-import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,10 +13,16 @@ const exec = promisify(execFile)
 const checkedInVerifier = fileURLToPath(new URL('./verify-local-kind.sh', import.meta.url))
 const verifier = process.env.OK200_VERIFIER_UNDER_TEST ?? checkedInVerifier
 let fixtureDirectory = ''
+let missingCurlDirectory = ''
+let noTimeoutDirectory = ''
+let baselineTraceVerifier = ''
 let execution = 0
 
 const kubectlStub = `#!/usr/bin/env bash
 set -Eeuo pipefail
+printf 'kubectl' >> "\${KUBECTL_ARGV_LOG}"
+printf ' <%s>' "$@" >> "\${KUBECTL_ARGV_LOG}"
+printf '\n' >> "\${KUBECTL_ARGV_LOG}"
 fail() { printf 'unexpected kubectl invocation: %s\\n' "$*" >&2; exit 2; }
 if [[ "\${1:-}" == kustomize ]]; then
   [[ "$#" == 2 ]] || fail "$@"
@@ -68,8 +74,14 @@ elif [[ "\${1:-}" == port-forward ]]; then
   : > "\${KUBECTL_STARTED}"
   exec node "\${KUBECTL_BINDER}" "$@"
 elif [[ "\${1:-}" == rollout && ( "\${2:-}" == status || "\${2:-}" == restart ) && "\${3:-}" == deployment/ok-console ]]; then
-  if [[ "\${KUBECTL_SCENARIO}" == main-rollout-fail || "\${KUBECTL_SCENARIO}" == main-capture-helper-fail ]]; then
+  if [[ "\${KUBECTL_SCENARIO}" == main-rollout-fail || "\${KUBECTL_SCENARIO}" == main-capture-helper-fail || "\${KUBECTL_SCENARIO}" == main-timeout-unavailable || "\${KUBECTL_SCENARIO}" == main-baseline-trace ]]; then
     [[ "\${2:-}" != status ]] || exit 7
+  fi
+  if [[ "\${KUBECTL_SCENARIO}" == main-status-130 ]]; then
+    [[ "\${2:-}" != status ]] || exit 130
+  fi
+  if [[ "\${KUBECTL_SCENARIO}" == main-status-143 ]]; then
+    [[ "\${2:-}" != status ]] || exit 143
   fi
   :
 elif [[ "\${1:-}" == get && "\${2:-}" == pod && "\${3:-}" == current-pod ]]; then
@@ -101,7 +113,7 @@ server.once('error', (error) => {
 })
 server.listen(port, '127.0.0.1', () => {
   let line = ''
-  if (process.env.KUBECTL_SCENARIO === 'ready' || process.env.KUBECTL_SCENARIO.startsWith('main-') || process.env.KUBECTL_SCENARIO === 'line-then-exit') {
+  if (process.env.KUBECTL_SCENARIO === 'ready' || process.env.KUBECTL_SCENARIO.startsWith('main-') || process.env.KUBECTL_SCENARIO === 'line-then-exit' || process.env.KUBECTL_SCENARIO === 'filter-exit') {
     line = 'Forwarding from 127.0.0.1:' + port + ' -> 8787'
   } else if (process.env.KUBECTL_SCENARIO === 'wrong-port') {
     line = 'Forwarding from 127.0.0.1:' + (port + 1) + ' -> 8787'
@@ -109,6 +121,10 @@ server.listen(port, '127.0.0.1', () => {
     line = 'Forwarding from 127.0.0.1:' + port + '0 -> 8787'
   } else if (process.env.KUBECTL_SCENARIO === 'wrong-address') {
     line = 'Forwarding from [::1]:' + port + ' -> 8787'
+  } else if (process.env.KUBECTL_SCENARIO === 'wrong-target') {
+    line = 'Forwarding from 127.0.0.1:' + port + ' -> 9999'
+  } else if (process.env.KUBECTL_SCENARIO === 'trailing-readiness') {
+    line = 'Forwarding from 127.0.0.1:' + port + ' -> 8787 trailing-data'
   }
   if (line) {
     if (process.env.EVENT_LOG) fs.appendFileSync(process.env.EVENT_LOG, 'forward:' + line + '\\n')
@@ -125,6 +141,9 @@ setTimeout(() => process.exit(3), 5000)
 
 const dockerStub = `#!/usr/bin/env bash
 set -Eeuo pipefail
+printf 'docker' >> "\${DOCKER_ARGV_LOG}"
+printf ' <%s>' "$@" >> "\${DOCKER_ARGV_LOG}"
+printf '\n' >> "\${DOCKER_ARGV_LOG}"
 if [[ "\${1:-}" == image && "\${2:-}" == inspect && " $* " == *" --format "* ]]; then
   printf '%s' "\${OK_CONSOLE_EXPECTED_REVISION}"
 elif [[ "\${1:-}" == image && "\${2:-}" == inspect ]]; then
@@ -137,9 +156,15 @@ fi
 
 const kindStub = `#!/usr/bin/env bash
 set -Eeuo pipefail
+printf 'kind' >> "\${KIND_ARGV_LOG}"
+printf ' <%s>' "$@" >> "\${KIND_ARGV_LOG}"
+printf '\n' >> "\${KIND_ARGV_LOG}"
 case "\${1:-} \${2:-}" in
-  'get clusters') : ;;
-  'create cluster'|'load docker-image') : ;;
+  'get clusters') [[ "\${KUBECTL_SCENARIO}" != preflight-already-exists ]] || printf 'test\\n' ;;
+  'create cluster')
+    if [[ "\${KUBECTL_SCENARIO}" == main-baseline-trace ]]; then printf 'kind-create\n' >> "\${BASELINE_TRACE}"; fi
+    : ;;
+  'load docker-image') : ;;
   'delete cluster')
     [[ "\${KUBECTL_SCENARIO}" != main-rollout-fail ]] || exit 9
     [[ "\${KUBECTL_SCENARIO}" != main-success-cleanup-fail ]] || exit 8
@@ -165,6 +190,8 @@ if [[ " $* " == *" rev-parse HEAD "* ]]; then
   printf '%s\\n' "\${OK_CONSOLE_EXPECTED_REVISION}"
 elif [[ " $* " == *" rev-parse --short=12 HEAD "* ]]; then
   printf '0123456789ab\\n'
+elif [[ " $* " == *" status --porcelain --untracked-files=normal "* ]]; then
+  [[ "\${KUBECTL_SCENARIO}" != preflight-dirty ]] || printf ' M src/App.tsx\\n'
 else
   printf 'unexpected git invocation: %s\\n' "$*" >&2
   exit 2
@@ -200,6 +227,46 @@ if [[ "\${path}" == /health/live ]]; then
 fi
 `
 
+const captureRecorderStub = `#!/usr/bin/env bash
+set -Eeuo pipefail
+case "\${1:-}" in
+  snapshot-netstat)
+    printf 'snapshot\n' >> "\${BASELINE_TRACE}"
+    printf 'TcpExt ListenOverflows=11 ListenDrops=7\n'
+    ;;
+  capture)
+    printf 'capture:%s\n' "\${8:-missing}" >> "\${BASELINE_TRACE}"
+    printf '<%s>\n' "$@" > "\${CAPTURE_HELPER_ARGV}"
+    ;;
+  *) exit 2 ;;
+esac
+`
+
+const createIsolatedToolDirectory = async (name: string, omitted: string) => {
+  const directory = join(fixtureDirectory, name)
+  await mkdir(directory)
+  const tools = new Map([
+    ['bash', '/bin/bash'],
+    ['dirname', '/usr/bin/dirname'],
+    ['mktemp', '/usr/bin/mktemp'],
+    ['rm', '/usr/bin/rm'],
+    ['sed', '/usr/bin/sed'],
+    ['grep', '/usr/bin/grep'],
+    ['awk', '/usr/bin/awk'],
+    ['docker', join(fixtureDirectory, 'docker')],
+    ['kind', join(fixtureDirectory, 'kind')],
+    ['kubectl', join(fixtureDirectory, 'kubectl')],
+    ['curl', join(fixtureDirectory, 'curl')],
+    ['git', join(fixtureDirectory, 'git')],
+    ['sleep', join(fixtureDirectory, 'sleep')],
+    ['timeout', join(fixtureDirectory, 'timeout')],
+  ])
+  await Promise.all([...tools]
+    .filter(([tool]) => tool !== omitted)
+    .map(([tool, target]) => symlink(target, join(directory, tool))))
+  return directory
+}
+
 beforeAll(async () => {
   fixtureDirectory = await mkdtemp(join(tmpdir(), 'ok-console-ok200-'))
   const files = new Map([
@@ -209,6 +276,7 @@ beforeAll(async () => {
     ['kind', kindStub],
     ['git', gitStub],
     ['curl', curlStub],
+    ['capture-recorder', captureRecorderStub],
     ['timeout', `#!/usr/bin/env bash
 set -Eeuo pipefail
 if [[ "\${KUBECTL_SCENARIO}" == main-capture-helper-fail && "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
@@ -221,6 +289,13 @@ exec /usr/bin/timeout "$@"
   ])
   await Promise.all([...files].map(([name, contents]) => writeFile(join(fixtureDirectory, name), contents)))
   await Promise.all([...files.keys()].filter((name) => name !== 'binder.cjs').map((name) => chmod(join(fixtureDirectory, name), 0o755)))
+  missingCurlDirectory = await createIsolatedToolDirectory('missing-curl-bin', 'curl')
+  noTimeoutDirectory = await createIsolatedToolDirectory('no-timeout-bin', 'timeout')
+  const traceDirectory = join(fixtureDirectory, 'baseline-trace-verifier')
+  await mkdir(traceDirectory)
+  baselineTraceVerifier = join(traceDirectory, 'verify-local-kind.sh')
+  await copyFile(checkedInVerifier, baselineTraceVerifier)
+  await symlink(join(fixtureDirectory, 'capture-recorder'), join(traceDirectory, 'capture-local-kind-failure.sh'))
 })
 
 afterAll(async () => {
@@ -235,8 +310,12 @@ const environment = (scenario: string) => {
     TMPDIR: fixtureDirectory,
     KUBECTL_SCENARIO: scenario,
     KIND_CAPTURE_MARKER: join(fixtureDirectory, `kind-capture-${id}`),
+    KIND_ARGV_LOG: join(fixtureDirectory, `kind-argv-${id}`),
+    KUBECTL_ARGV_LOG: join(fixtureDirectory, `kubectl-argv-${id}`),
+    DOCKER_ARGV_LOG: join(fixtureDirectory, `docker-argv-${id}`),
     CAPTURE_OUTER_MARKER: join(fixtureDirectory, `capture-outer-${id}`),
     CAPTURE_ARGV_LOG: join(fixtureDirectory, `capture-calls-${id}`),
+    CAPTURE_HELPER_ARGV: join(fixtureDirectory, `capture-helper-argv-${id}`),
     KUBECTL_BINDER: join(fixtureDirectory, 'binder.cjs'),
     KUBECTL_STATE: join(fixtureDirectory, `kubectl-state-${id}`),
     KUBECTL_PID: join(fixtureDirectory, `kubectl-pid-${id}`),
@@ -244,6 +323,7 @@ const environment = (scenario: string) => {
     CURL_STATE: join(fixtureDirectory, `curl-state-${id}`),
     CURL_LOG: join(fixtureDirectory, `curl-log-${id}`),
     EVENT_LOG: join(fixtureDirectory, `event-log-${id}`),
+    BASELINE_TRACE: join(fixtureDirectory, `baseline-trace-${id}`),
     OK_CONSOLE_KIND_CLUSTER: 'test',
     OK_CONSOLE_IMAGE: 'ok-console:test',
     OK_CONSOLE_EXPECTED_REVISION: '0123456789abcdef0123456789abcdef01234567',
@@ -274,6 +354,8 @@ const waitForForward = async (scenario: string, port: number, timeoutSeconds = 2
   const log = join(fixtureDirectory, `port-forward-${scenario}-${port}.log`)
   const readOverride = scenario === 'line-then-exit'
     ? 'read() { builtin read "$@"; status=$?; if (( status == 0 )) && [[ "${observed_line:-}" == "${expected_line:-}" ]]; then wait "${port_forward_pid}" || true; fi; return "${status}"; }'
+    : scenario === 'filter-exit'
+      ? 'read() { builtin read "$@"; status=$?; if (( status == 0 )) && [[ "${observed_line:-}" == "${expected_line:-}" ]]; then kill "${port_forward_filter_pid}"; wait "${port_forward_filter_pid}" || true; fi; return "${status}"; }'
     : staleLog
       ? 'read() { while [[ ! -e "${KUBECTL_STARTED}" ]]; do :; done; builtin read "$@"; }'
       : ''
@@ -298,11 +380,20 @@ const waitForForward = async (scenario: string, port: number, timeoutSeconds = 2
   })
 }
 
-const runMain = async (scenario: string) => {
+const runMain = async (
+  scenario: string,
+  overrides: Record<string, string | undefined> = {},
+  path = `${fixtureDirectory}:${process.env.PATH}`,
+  verifierPath = verifier,
+) => {
   const port = await unusedPort()
-  const env = { ...environment(scenario), OK_CONSOLE_LOCAL_PORT: String(port) }
+  const env: NodeJS.ProcessEnv = { ...environment(scenario), PATH: path, OK_CONSOLE_LOCAL_PORT: String(port) }
+  for (const [name, value] of Object.entries(overrides)) {
+    if (value === undefined) delete env[name]
+    else env[name] = value
+  }
   try {
-    const result = await exec(verifier, [], { env, timeout: 10000, killSignal: 'SIGKILL' })
+    const result = await exec(verifierPath, [], { env, timeout: 10000, killSignal: 'SIGKILL' })
     return { ...result, env }
   } catch (error) {
     throw Object.assign(error as object, { env })
@@ -313,6 +404,78 @@ const cleanupFailureArtifact = async (failure: { stderr?: string }) => {
   const directory = failure.stderr?.match(/^Failure diagnostics: (.+)$/m)?.[1]
   if (directory) await rm(directory, { recursive: true, force: true })
 }
+
+const expectNoKubectlOrDockerCalls = async (env: NodeJS.ProcessEnv) => {
+  await expect(readFile(env.KUBECTL_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(readFile(env.DOCKER_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+}
+
+describe('OK-200 verification preflight', () => {
+  it('does not run kubectl or docker when a required tool is missing', async () => {
+    const run = runMain('preflight-missing-tool', {}, missingCurlDirectory)
+    await expect(run).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('Required command not found: curl'),
+    })
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+    await expectNoKubectlOrDockerCalls(failure.env)
+    expect(failure.stderr).not.toContain('Failure diagnostics:')
+  })
+
+  it('does not run kubectl or docker for a dirty default-image worktree', async () => {
+    const run = runMain('preflight-dirty', { OK_CONSOLE_IMAGE: undefined })
+    await expect(run).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('Refusing to label a local image from a dirty worktree'),
+    })
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+    await expectNoKubectlOrDockerCalls(failure.env)
+    expect(failure.stderr).not.toContain('Failure diagnostics:')
+  })
+
+  it('does not run kubectl or docker for an invalid local port', async () => {
+    const run = runMain('preflight-bad-port', { OK_CONSOLE_LOCAL_PORT: '999' })
+    await expect(run).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('OK_CONSOLE_LOCAL_PORT must be a four- or five-digit port.'),
+    })
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+    await expectNoKubectlOrDockerCalls(failure.env)
+    expect(failure.stderr).not.toContain('Failure diagnostics:')
+  })
+
+  it('refuses an existing cluster with only the expected Kind lookup argv and no capture', async () => {
+    const run = runMain('preflight-already-exists')
+    await expect(run).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('Kind cluster test already exists; refusing to modify an unowned cluster.'),
+    })
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+    await expectNoKubectlOrDockerCalls(failure.env)
+    expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toBe('kind <get> <clusters>\n')
+    expect(failure.stderr).not.toContain('Failure diagnostics:')
+  })
+
+  it('passes the verification-start netstat snapshot as the final capture argument', async () => {
+    const env = environment('capture-argv')
+    const recorder = join(fixtureDirectory, 'capture-recorder')
+    const forwardLog = join(fixtureDirectory, `capture-forward-${execution}.log`)
+    await writeFile(forwardLog, '')
+    await exec('bash', [
+      '-c',
+      'source "$1"; failure_capture_helper="$2"; created_cluster=true; cluster_name=test; local_port=18787; pod_name=current-pod; verification_started_seconds="${SECONDS}"; port_forward_log="$3"; netstat_baseline="TcpExt ListenOverflows=11 ListenDrops=7"; capture_failure',
+      '_',
+      verifier,
+      recorder,
+      forwardLog,
+    ], { env })
+    const argv = await readFile(env.CAPTURE_HELPER_ARGV!, 'utf8')
+    expect(argv).toMatch(/^<capture>\n<.+>\n<test>\n<18787>\n<current-pod>\n<0>\n/)
+    expect(argv).toContain(`<${forwardLog}>\n<TcpExt ListenOverflows=11 ListenDrops=7>\n`)
+    const artifactDirectory = argv.split('\n')[1]?.slice(1, -1)
+    if (artifactDirectory) await rm(artifactDirectory, { recursive: true, force: true })
+  })
+})
 
 describe('OK-200 current ReplicaSet Pod selection', () => {
   it('rejects an unknown kubectl scenario instead of selecting a valid Pod', async () => {
@@ -362,6 +525,8 @@ describe('OK-200 port-forward readiness', () => {
     ['wrong-port', 'reported an unexpected forwarding endpoint'],
     ['wrong-port-prefix', 'reported an unexpected forwarding endpoint'],
     ['wrong-address', 'reported an unexpected forwarding endpoint'],
+    ['wrong-target', 'reported an unexpected forwarding endpoint'],
+    ['trailing-readiness', 'reported an unexpected forwarding endpoint'],
   ])('rejects %s with its cause', async (scenario, cause) => {
     await expect(waitForForward(scenario, await unusedPort(), scenario === 'missing-line' ? 1 : 2))
       .rejects.toMatchObject({ stderr: expect.stringContaining(cause) })
@@ -380,6 +545,12 @@ describe('OK-200 port-forward readiness', () => {
   it('rejects a forwarder that exits immediately after its readiness line', async () => {
     await expect(waitForForward('line-then-exit', await unusedPort(), 2)).rejects.toMatchObject({
       stderr: expect.stringContaining('exited immediately after reporting readiness'),
+    })
+  })
+
+  it('rejects an exited output filter while the forwarder remains alive', async () => {
+    await expect(waitForForward('filter-exit', await unusedPort(), 2)).rejects.toMatchObject({
+      stderr: expect.stringContaining('port-forward output filter exited'),
     })
   })
 
@@ -437,6 +608,9 @@ describe('OK-200 main verification flow', () => {
     const capture = await readFile(join(directory!, 'port-forward.txt'), 'utf8')
     expect(capture).toContain('error: kubectl was unable to forward the requested port (details omitted)')
     expect(capture).not.toMatch(/planted-|Authorization|https:|apiVersion/i)
+    const netstat = await readFile(join(directory!, 'netstat.txt'), 'utf8')
+    expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
     await cleanupFailureArtifact(failure)
   })
 
@@ -502,6 +676,39 @@ describe('OK-200 main verification flow', () => {
     expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('outer-helper-failed\n')
     expect(failure.stderr).toContain('Failure diagnostics:')
     await cleanupFailureArtifact(failure)
+  })
+
+  it('preserves verification failure and records a skipped capture when timeout is unavailable', async () => {
+    const run = runMain('main-timeout-unavailable', {}, noTimeoutDirectory)
+    await expect(run).rejects.toMatchObject({ code: 7 })
+    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+    expect(failure.stderr).toContain('timeout unavailable; capture skipped')
+    expect(failure.stderr).not.toContain('Failure diagnostics:')
+    await expect(readFile(failure.env.CAPTURE_HELPER_ARGV!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('takes the netstat baseline before cluster creation and passes that snapshot to capture', async () => {
+    const run = runMain('main-baseline-trace', {}, `${fixtureDirectory}:${process.env.PATH}`, baselineTraceVerifier)
+    await expect(run).rejects.toMatchObject({ code: 7 })
+    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+    expect(await readFile(failure.env.BASELINE_TRACE!, 'utf8')).toBe([
+      'snapshot',
+      'kind-create',
+      'capture:TcpExt ListenOverflows=11 ListenDrops=7',
+      '',
+    ].join('\n'))
+    await cleanupFailureArtifact(failure)
+  })
+
+  it.each([
+    ['main-status-130', 130],
+    ['main-status-143', 143],
+  ])('does not capture an interrupted verification for %s', async (scenario, status) => {
+    const run = runMain(scenario)
+    await expect(run).rejects.toMatchObject({ code: status })
+    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+    expect(failure.stderr).not.toContain('Failure diagnostics:')
+    await expect(readFile(failure.env.CAPTURE_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reports verification success but preserves a later Kind cleanup failure', async () => {

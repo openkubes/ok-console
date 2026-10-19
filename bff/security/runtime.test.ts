@@ -44,11 +44,46 @@ const fileReader = async (filename: string) => {
 describe('session runtime configuration', () => {
   it('keeps the session service explicitly disabled without reading secrets', async () => {
     const reader = vi.fn()
-    const runtime = await createSessionRuntime({ env: {}, fileReader: reader })
+    const runtime = await createSessionRuntime({ env: { OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true' }, fileReader: reader })
 
-    expect(runtime).toMatchObject({ mode: 'disabled', sessionStore: null, authorizer: undefined })
+    expect(runtime).toMatchObject({ mode: 'disabled', prototypeEnabled: true, sessionStore: null, authorizer: undefined })
     expect(reader).not.toHaveBeenCalled()
     await runtime.close()
+  })
+
+  it('requires exact prototype opt-in when session configuration is missing or disabled', async () => {
+    await expect(createSessionRuntime({ env: {} })).rejects.toThrow('OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true')
+    await expect(createSessionRuntime({ env: { OK_CONSOLE_SESSION_STORE_MODE: 'disabled', OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'True' } }))
+      .rejects.toThrow('OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true')
+    await expect(createSessionRuntime({ env: { OK_CONSOLE_SESSION_STORE_MODE: 'disabled' } }))
+      .rejects.toThrow('OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true')
+    await expect(createSessionRuntime({ env: { OK_CONSOLE_SESSION_STORE_MODE: 'disabled', OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED: 'true' } }))
+      .rejects.toThrow('OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true')
+  })
+
+  it.each(['127.0.0.1', '::1', 'localhost'])('allows prototype binding to %s', async (host) => {
+    await expect(createSessionRuntime({ env: { OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_BFF_HOST: host } }))
+      .resolves.toMatchObject({ mode: 'disabled', prototypeEnabled: true })
+  })
+
+  it('requires exact disposable-cluster acknowledgment for non-loopback or production prototype runtime', async () => {
+    for (const host of ['0.0.0.0', '::', '10.0.0.5', 'console.example']) {
+      await expect(createSessionRuntime({ env: {
+        OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_BFF_HOST: host,
+      } })).rejects.toThrow('prototype BFF host')
+    }
+    await expect(createSessionRuntime({ env: {
+      OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_BFF_HOST: '0.0.0.0',
+      OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED: 'True',
+    } })).rejects.toThrow('prototype BFF host')
+    await expect(createSessionRuntime({ env: {
+      OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', NODE_ENV: 'production',
+      OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED: 'True',
+    } })).rejects.toThrow('cannot use NODE_ENV=production')
+    await expect(createSessionRuntime({ env: {
+      OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_BFF_HOST: '0.0.0.0', NODE_ENV: 'production',
+      OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED: 'true',
+    } })).resolves.toMatchObject({ mode: 'disabled', prototypeEnabled: true })
   })
 
   it('does not expose a non-fixture source through the prototype authorizer', async () => {

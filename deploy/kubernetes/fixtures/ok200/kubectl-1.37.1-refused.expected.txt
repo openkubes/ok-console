@@ -1,0 +1,9 @@
+klog I1019 19:25:26.638232 round_trippers.go:632 GET path=core-api status=unavailable milliseconds=0
+klog E1019 19:25:26.638341 memcache.go:381 diagnostic=connection-refused
+klog I1019 19:25:26.638722 round_trippers.go:632 GET path=core-api status=unavailable milliseconds=0
+klog E1019 19:25:26.638783 memcache.go:381 diagnostic=connection-refused
+klog I1019 19:25:26.640357 round_trippers.go:632 GET path=core-api status=unavailable milliseconds=0
+klog E1019 19:25:26.640417 memcache.go:381 diagnostic=connection-refused
+klog I1019 19:25:26.640710 round_trippers.go:632 GET path=core-api status=unavailable milliseconds=0
+klog E1019 19:25:26.640769 memcache.go:381 diagnostic=connection-refused
+klog I1019 19:25:26.641965 helpers.go:265 diagnostic=connection-refused

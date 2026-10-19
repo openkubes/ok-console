@@ -1,0 +1,4 @@
+klog I1019 18:37:03.022618 round_trippers.go:553 GET status=200 elapsed=16 milliseconds
+klog I1019 18:37:03.032430 round_trippers.go:553 GET status=200 elapsed=4 milliseconds
+klog I1019 18:37:03.082506 round_trippers.go:553 POST status=101 elapsed=46 milliseconds
+error: kubectl could not listen on the requested port (details omitted)

@@ -1,0 +1,6 @@
+I1019 19:15:28.972053       1 round_trippers.go:632] "Response" verb="GET" url="https://api.example.invalid/api/v1/namespaces/openkubes-console/pods/current-pod" status="200 OK" milliseconds=54
+I1019 19:15:28.991863       1 round_trippers.go:632] "Response" verb="GET" url="https://api.example.invalid/api/v1/namespaces/openkubes-console/pods/current-pod" status="200 OK" milliseconds=7
+I1019 19:15:28.994771       1 tunneling_dialer.go:120] "Before WebSocket Upgrade Connection..."
+I1019 19:15:29.045964       1 round_trippers.go:632] "Response" verb="GET" url="https://api.example.invalid/api/v1/namespaces/openkubes-console/pods/current-pod/portforward" status="101 Switching Protocols" milliseconds=51
+I1019 19:15:29.045995       1 tunneling_dialer.go:130] "Negotiation complete" protocol="portforward.k8s.io"
+unable to listen on port 18787: Listeners failed to create with the following errors: unable to create listener: Error listen tcp4 127.0.0.1:18787: bind: address already in use

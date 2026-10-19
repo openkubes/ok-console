@@ -1,0 +1,25 @@
+I1019 19:25:26.637642      14 envvar.go:195] "Feature gate default state" feature="AtomicFIFO" enabled=true
+I1019 19:25:26.637679      14 envvar.go:195] "Feature gate default state" feature="InformerResourceVersion" enabled=true
+I1019 19:25:26.637687      14 envvar.go:195] "Feature gate default state" feature="WatchListClient" enabled=true
+I1019 19:25:26.637693      14 envvar.go:195] "Feature gate default state" feature="UnlockWhileProcessingFIFO" enabled=true
+I1019 19:25:26.637699      14 envvar.go:195] "Feature gate default state" feature="InOrderInformersBatchProcess" enabled=true
+I1019 19:25:26.637705      14 envvar.go:195] "Feature gate default state" feature="ClientsPreferCBOR" enabled=false
+I1019 19:25:26.637710      14 envvar.go:195] "Feature gate default state" feature="ClientsAllowCARotation" enabled=true
+I1019 19:25:26.637716      14 envvar.go:195] "Feature gate default state" feature="InOrderInformers" enabled=true
+I1019 19:25:26.637721      14 envvar.go:195] "Feature gate default state" feature="ClientsAllowTLSCacheGC" enabled=true
+I1019 19:25:26.637725      14 envvar.go:195] "Feature gate default state" feature="ClientsAllowCBOR" enabled=false
+I1019 19:25:26.638232      14 round_trippers.go:632] "Response" verb="GET" url="http://127.0.0.1:1/api?timeout=1s" status="" milliseconds=0
+E1019 19:25:26.638341      14 memcache.go:381] "Couldn't get current server API group list" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.638380      14 cached_discovery.go:153] "Skipped caching discovery info due to error" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.638392      14 shortcut.go:177] "Error loading discovery information" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.638722      14 round_trippers.go:632] "Response" verb="GET" url="http://127.0.0.1:1/api?timeout=1s" status="" milliseconds=0
+E1019 19:25:26.638783      14 memcache.go:381] "Couldn't get current server API group list" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.640010      14 cached_discovery.go:153] "Skipped caching discovery info due to error" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.640357      14 round_trippers.go:632] "Response" verb="GET" url="http://127.0.0.1:1/api?timeout=1s" status="" milliseconds=0
+E1019 19:25:26.640417      14 memcache.go:381] "Couldn't get current server API group list" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.640430      14 cached_discovery.go:153] "Skipped caching discovery info due to error" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.640710      14 round_trippers.go:632] "Response" verb="GET" url="http://127.0.0.1:1/api?timeout=1s" status="" milliseconds=0
+E1019 19:25:26.640769      14 memcache.go:381] "Couldn't get current server API group list" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.641911      14 cached_discovery.go:153] "Skipped caching discovery info due to error" err="Get \"http://127.0.0.1:1/api?timeout=1s\": dial tcp 127.0.0.1:1: connect: connection refused"
+I1019 19:25:26.641965      14 helpers.go:265] Connection error: Get http://127.0.0.1:1/api?timeout=1s: dial tcp 127.0.0.1:1: connect: connection refused
+The connection to the server 127.0.0.1:1 was refused - did you specify the right host or port?

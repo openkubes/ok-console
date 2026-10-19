@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const exec = promisify(execFile)
 const helper = fileURLToPath(new URL('./capture-local-kind-failure.sh', import.meta.url))
+const realFixtures = fileURLToPath(new URL('./fixtures/ok200/', import.meta.url))
 let fixtureDirectory = ''
 let execution = 0
 
@@ -18,7 +19,11 @@ set -Eeuo pipefail
 printf 'kubectl %s\\n' "$*" >>"$CAPTURE_ARGV_LOG"
 case "$*" in
   'version --client')
-    printf 'Client Version: v1.32.0\\n'
+    if [[ -n "\${CAPTURE_VERSION_FIXTURE:-}" ]]; then
+      cat "$CAPTURE_VERSION_FIXTURE"
+    else
+      printf 'Client Version: v1.32.0\\n'
+    fi
     printf 'Authorization: Bearer planted-bearer-7f3c\\n'
     printf 'clusters:\\n- cluster:\\n  certificate-authority-data: kubeconfig-like-planted-value\\n'
     printf 'https://secret.example.invalid/?token=planted-url-token\\n' >&2
@@ -89,8 +94,8 @@ const environment = (scenario = 'normal') => {
   }
 }
 
-const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string) => {
-  const env = environment(scenario)
+const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string, versionFixture?: string) => {
+  const env = { ...environment(scenario), CAPTURE_VERSION_FIXTURE: versionFixture ?? '' }
   const directory = join(fixtureDirectory, `artifacts-${execution}`)
   await mkdir(directory)
   const netstatBaseline =
@@ -119,6 +124,76 @@ const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string) =>
 }
 
 describe('OK-200 failure diagnostic capture', () => {
+  it.each(['1.27.4', '1.37.1'])('filters reconstructed real kubectl %s occupied-port output', async (version) => {
+    const output = join(fixtureDirectory, `occupied-${version}-${execution++}.log`)
+    await exec('bash', ['-c', 'cat "$1" | bash "$2" filter-port-forward "$3"', '_',
+      join(realFixtures, `kubectl-${version}-occupied-port.reconstructed.log`), helper, output], { env: environment() })
+    const sanitized = await readFile(output, 'utf8')
+    expect(sanitized).toBe(await readFile(join(realFixtures, `kubectl-${version}-occupied-port.expected.txt`), 'utf8'))
+    expect(sanitized).not.toMatch(/example\.invalid|current-pod|https?:|token|authorization/i)
+    const refiltered = join(fixtureDirectory, `occupied-refiltered-${version}-${execution++}.log`)
+    await exec('bash', ['-c', 'cat "$1" | bash "$2" filter-port-forward "$3"', '_', output, helper, refiltered], { env: environment() })
+    expect(await readFile(refiltered, 'utf8')).toBe(sanitized)
+  })
+
+  it.each(['1.27.4', '1.37.1'])('filters real kubectl %s unreachable-server klog output', async (version) => {
+    const output = join(fixtureDirectory, `real-${version}-${execution++}.log`)
+    await exec('bash', ['-c', 'cat "$1" | bash "$2" filter-port-forward "$3"', '_',
+      join(realFixtures, `kubectl-${version}-refused.log`), helper, output], { env: environment() })
+    const sanitized = await readFile(output, 'utf8')
+    expect(sanitized).toBe(await readFile(join(realFixtures, `kubectl-${version}-refused.expected.txt`), 'utf8'))
+    expect(sanitized).not.toMatch(/127\.0\.0\.1|https?:|timeout=|token|authorization/i)
+  })
+
+  it.each(['1.27.4', '1.37.1'])('keeps the real kubectl %s client version and separate terminated lines', async (version) => {
+    const { directory } = await capture('normal', undefined, join(realFixtures, `kubectl-${version}-version.txt`))
+    const kustomize = version === '1.27.4' ? 'v5.0.1' : 'v5.8.1'
+    expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toBe(
+      `Client Version: v${version}\nKustomize Version: ${kustomize}\nkind v0.25.0 go1.23.0 linux/amd64\ncontainerd github.com/containerd/containerd v2.0.0\n`,
+    )
+    expect(await readFile(join(directory, 'listener.txt'), 'utf8')).toBe('LISTEN 0 4096 127.0.0.1:18787 0.0.0.0:*   \n')
+  })
+
+  it.each(['abc', '0', '-1'])('rejects remaining_seconds=%s before starting any capture command', async (remaining) => {
+    const marker = join(fixtureDirectory, `guard-command-${execution++}`)
+    await expect(exec('bash', ['-c', `source "$1"
+deadline=$((SECONDS + 100))
+remaining_value="$2"
+remaining_seconds() { printf '%s\\n' "$remaining_value"; }
+run_capture_command touch "$3"
+`, '_', helper, remaining, marker], { env: environment() })).rejects.toMatchObject({ code: 124 })
+    expect(await readdir(fixtureDirectory)).not.toContain(marker.split('/').at(-1))
+  })
+
+  it.each(['v1.27.4; arbitrary payload', 'v1.27.4\u001b[31mcontrol'])('drops an unsafe legacy GitVersion: %s', async (version) => {
+    const line = `Client Version: version.Info{Major:"1", Minor:"27", GitVersion:"${version}", Platform:"linux/amd64"}`
+    const { stdout } = await exec('bash', ['-c', 'source "$1"; sanitize_command_output versions "$2"', '_', helper, line], { env: environment() })
+    expect(stdout).toBe('')
+  })
+
+  it.each([
+    ['versions', 'Client Version: v1.27.4\nKustomize Version: v5.0.1\n'],
+    ['listener', 'LISTEN 0 4096 127.0.0.1:18787 0.0.0.0:*\nLISTEN 0 128 127.0.0.1:18788 0.0.0.0:*\n'],
+  ])('keeps only complete %s lines at file and aggregate byte caps', async (kind, content) => {
+    const directory = join(fixtureDirectory, `cap-lines-${execution++}`)
+    const saved = `${directory}-saved.txt`
+    await mkdir(directory)
+    const firstLine = content.slice(0, content.indexOf('\n') + 1)
+    const limit = Buffer.byteLength(firstLine) + 5
+    const script = `source "$1"
+artifact_dir="$2"
+content="$(sanitize_command_output "$3" "$4"; printf '\\001')"
+content="\${content%$'\\001'}"
+append_file "$2/file.txt" "$content" "$5"
+mv "$2/file.txt" "$6"
+head -c "$((total_cap - $5))" /dev/zero > "$2/padding.txt"
+append_file "$2/aggregate.txt" "$content" 32768
+`
+    await exec('bash', ['-c', script, '_', helper, directory, kind, content, String(limit), saved], { env: environment() })
+    expect(await readFile(saved, 'utf8')).toBe(firstLine)
+    expect(await readFile(join(directory, 'aggregate.txt'), 'utf8')).toBe(firstLine)
+  })
+
   it('filters port-forward output to useful bounded lines and drops bearer, URL, and kubeconfig material', async () => {
     const output = join(fixtureDirectory, 'filtered-forward.log')
     const input = [
@@ -229,6 +304,8 @@ describe('OK-200 failure diagnostic capture', () => {
   })
 
   it.each([
+    ['tls-x509', 'x509: certificate signed by unknown authority'],
+    ['tls-x509', 'tls: failed to verify certificate: x509: certificate has expired'],
     ['connection-refused', 'connection refused after TLS upgrade ended with EOF'],
     ['connection-reset', 'connection reset by peer after TLS upgrade ended with EOF'],
     ['i/o-timeout', 'i/o timeout after TLS upgrade ended with EOF'],

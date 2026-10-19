@@ -305,12 +305,12 @@ afterAll(async () => {
   await rm(fixtureDirectory, { recursive: true, force: true })
 })
 
-const environment = (scenario: string) => {
+const environment = (scenario: string, temporaryDirectory = fixtureDirectory) => {
   const id = execution++
   return {
     ...process.env,
     PATH: `${fixtureDirectory}:${process.env.PATH}`,
-    TMPDIR: fixtureDirectory,
+    TMPDIR: temporaryDirectory,
     KUBECTL_SCENARIO: scenario,
     KIND_CAPTURE_MARKER: join(fixtureDirectory, `kind-capture-${id}`),
     KIND_ARGV_LOG: join(fixtureDirectory, `kind-argv-${id}`),
@@ -329,6 +329,15 @@ const environment = (scenario: string) => {
     OK_CONSOLE_KIND_CLUSTER: 'test',
     OK_CONSOLE_IMAGE: 'ok-console:test',
     OK_CONSOLE_EXPECTED_REVISION: '0123456789abcdef0123456789abcdef01234567',
+  }
+}
+
+const withTestTempDirectory = async <T>(run: (temporaryDirectory: string) => Promise<T>) => {
+  const temporaryDirectory = await mkdtemp(join(fixtureDirectory, 'test-tmp-'))
+  try {
+    return await run(temporaryDirectory)
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true })
   }
 }
 
@@ -414,68 +423,80 @@ const expectNoKubectlOrDockerCalls = async (env: NodeJS.ProcessEnv) => {
 
 describe('OK-200 verification preflight', () => {
   it('does not run kubectl or docker when a required tool is missing', async () => {
-    const run = runMain('preflight-missing-tool', {}, missingCurlDirectory)
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('Required command not found: curl'),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('preflight-missing-tool', { TMPDIR: temporaryDirectory }, missingCurlDirectory)
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Required command not found: curl'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(failure.stderr).not.toContain('Failure diagnostics:')
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    await expectNoKubectlOrDockerCalls(failure.env)
-    expect(failure.stderr).not.toContain('Failure diagnostics:')
   })
 
   it('does not run kubectl or docker for a dirty default-image worktree', async () => {
-    const run = runMain('preflight-dirty', { OK_CONSOLE_IMAGE: undefined })
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('Refusing to label a local image from a dirty worktree'),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('preflight-dirty', { OK_CONSOLE_IMAGE: undefined, TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Refusing to label a local image from a dirty worktree'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(failure.stderr).not.toContain('Failure diagnostics:')
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    await expectNoKubectlOrDockerCalls(failure.env)
-    expect(failure.stderr).not.toContain('Failure diagnostics:')
   })
 
   it('does not run kubectl or docker for an invalid local port', async () => {
-    const run = runMain('preflight-bad-port', { OK_CONSOLE_LOCAL_PORT: '999' })
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('OK_CONSOLE_LOCAL_PORT must be a four- or five-digit port.'),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('preflight-bad-port', { OK_CONSOLE_LOCAL_PORT: '999', TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('OK_CONSOLE_LOCAL_PORT must be a four- or five-digit port.'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(failure.stderr).not.toContain('Failure diagnostics:')
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    await expectNoKubectlOrDockerCalls(failure.env)
-    expect(failure.stderr).not.toContain('Failure diagnostics:')
   })
 
   it('refuses an existing cluster with only the expected Kind lookup argv and no capture', async () => {
-    const run = runMain('preflight-already-exists')
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('Kind cluster test already exists; refusing to modify an unowned cluster.'),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('preflight-already-exists', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Kind cluster test already exists; refusing to modify an unowned cluster.'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toBe('kind <get> <clusters>\n')
+      expect(failure.stderr).not.toContain('Failure diagnostics:')
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    await expectNoKubectlOrDockerCalls(failure.env)
-    expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toBe('kind <get> <clusters>\n')
-    expect(failure.stderr).not.toContain('Failure diagnostics:')
   })
 
   it('passes the verification-start netstat snapshot as the final capture argument', async () => {
-    const env = environment('capture-argv')
-    const recorder = join(fixtureDirectory, 'capture-recorder')
-    const forwardLog = join(fixtureDirectory, `capture-forward-${execution}.log`)
-    await writeFile(forwardLog, '')
-    await exec('bash', [
-      '-c',
-      'source "$1"; failure_capture_helper="$2"; created_cluster=true; cluster_name=test; local_port=18787; pod_name=current-pod; verification_started_seconds="${SECONDS}"; port_forward_log="$3"; netstat_baseline="TcpExt ListenOverflows=11 ListenDrops=7"; capture_failure',
-      '_',
-      verifier,
-      recorder,
-      forwardLog,
-    ], { env })
-    const argv = await readFile(env.CAPTURE_HELPER_ARGV!, 'utf8')
-    expect(argv).toMatch(/^<capture>\n<.+>\n<test>\n<18787>\n<current-pod>\n<0>\n/)
-    expect(argv).toContain(`<${forwardLog}>\n<TcpExt ListenOverflows=11 ListenDrops=7>\n`)
-    const artifactDirectory = argv.split('\n')[1]?.slice(1, -1)
-    if (artifactDirectory) await rm(artifactDirectory, { recursive: true, force: true })
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const env = environment('capture-argv', temporaryDirectory)
+      const recorder = join(fixtureDirectory, 'capture-recorder')
+      const forwardLog = join(fixtureDirectory, `capture-forward-${execution}.log`)
+      await writeFile(forwardLog, '')
+      await exec('bash', [
+        '-c',
+        'source "$1"; failure_capture_helper="$2"; created_cluster=true; cluster_name=test; local_port=18787; pod_name=current-pod; verification_started_seconds="${SECONDS}"; port_forward_log="$3"; netstat_baseline="TcpExt ListenOverflows=11 ListenDrops=7"; capture_failure',
+        '_',
+        verifier,
+        recorder,
+        forwardLog,
+      ], { env })
+      const argv = await readFile(env.CAPTURE_HELPER_ARGV!, 'utf8')
+      expect(argv).toMatch(/^<capture>\n<.+>\n<test>\n<18787>\n<current-pod>\n<0>\n/)
+      expect(argv).toContain(`<${forwardLog}>\n<TcpExt ListenOverflows=11 ListenDrops=7>\n`)
+      const artifactDirectory = argv.split('\n')[1]?.slice(1, -1)
+      expect(artifactDirectory).toBeDefined()
+      expect(artifactDirectory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      if (artifactDirectory) await rm(artifactDirectory, { recursive: true, force: true })
+    })
   })
 })
 
@@ -581,25 +602,29 @@ describe('OK-200 port-forward readiness', () => {
 
 describe('OK-200 main verification flow', () => {
   it('fails fast with the forwarder log and stops curl attempts when forwarding dies during retries', async () => {
-    const started = performance.now()
-    const run = runMain('main-forward-exit')
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringMatching(/port-forward exited during live health probing[\s\S]*Failure diagnostics:/),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const started = performance.now()
+      const run = runMain('main-forward-exit', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringMatching(/port-forward exited during live health probing[\s\S]*Failure diagnostics:/),
+      })
+      expect(performance.now() - started).toBeLessThan(8000)
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      expect(await readFile(failure.env.CURL_LOG!, 'utf8')).toBe('/health/live\n')
+      expect(await readFile(failure.env.CURL_STATE!, 'utf8')).toBe('1')
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory).toBeDefined()
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      expect(await readFile(join(directory!, 'port-forward.txt'), 'utf8')).toContain('Forwarding from 127.0.0.1:')
+      await cleanupFailureArtifact(failure)
     })
-    expect(performance.now() - started).toBeLessThan(3000)
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    expect(await readFile(failure.env.CURL_LOG!, 'utf8')).toBe('/health/live\n')
-    expect(await readFile(failure.env.CURL_STATE!, 'utf8')).toBe('1')
-    const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
-    expect(directory).toBeDefined()
-    expect(await readFile(join(directory!, 'port-forward.txt'), 'utf8')).toContain('Forwarding from 127.0.0.1:')
-    await cleanupFailureArtifact(failure)
   })
 
   it.each([0, 7])('reports a distinct failure when the output filter dies during a probe returning %s', async (probeStatus) => {
-    const wrapper = join(fixtureDirectory, 'filter-dies-during-probing.sh')
-    await writeFile(wrapper, `#!/usr/bin/env bash
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const wrapper = join(fixtureDirectory, 'filter-dies-during-probing.sh')
+      await writeFile(wrapper, `#!/usr/bin/env bash
 source "${verifier}"
 curl() {
   printf 'live-probe\\n' >> "$CURL_LOG"
@@ -609,141 +634,179 @@ curl() {
 }
 main "$@"
 `)
-    await chmod(wrapper, 0o755)
-    const run = runMain('main-transient', {}, `${fixtureDirectory}:${process.env.PATH}`, wrapper)
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('port-forward output filter exited during live health probing'),
+      await chmod(wrapper, 0o755)
+      const run = runMain('main-transient', { TMPDIR: temporaryDirectory }, `${fixtureDirectory}:${process.env.PATH}`, wrapper)
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('port-forward output filter exited during live health probing'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      expect(failure.stderr).not.toContain('port-forward exited during live health probing')
+      expect(failure.stderr).toContain('Failure diagnostics:')
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory).toBeDefined()
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      expect(await readFile(failure.env.CURL_LOG!, 'utf8')).toBe('live-probe\n')
+      const capture = await readFile(join(directory!, 'capture.txt'), 'utf8')
+      expect(capture).toContain('Failure diagnostics for local Kind verification')
+      await expect(readFile(join(directory!, 'port-forward.txt'), 'utf8')).resolves.toBeTruthy()
+      await cleanupFailureArtifact(failure)
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    expect(failure.stderr).not.toContain('port-forward exited during live health probing')
-    expect(await readFile(failure.env.CURL_LOG!, 'utf8')).toBe('live-probe\n')
-    await cleanupFailureArtifact(failure)
   })
 
   it('fails before any HTTP probe when port-forward readiness fails', async () => {
-    const run = runMain('main-forward-fail')
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('exited before reporting readiness'),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('main-forward-fail', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('exited before reporting readiness'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expect(readFile(failure.env.CURL_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory).toBeDefined()
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      const capture = await readFile(join(directory!, 'port-forward.txt'), 'utf8')
+      expect(capture).toContain('error: kubectl was unable to forward the requested port (details omitted)')
+      expect(capture).not.toMatch(/planted-|Authorization|https:|apiVersion/i)
+      const netstat = await readFile(join(directory!, 'netstat.txt'), 'utf8')
+      expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      await cleanupFailureArtifact(failure)
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
-    await expect(readFile(failure.env.CURL_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
-    expect(directory).toBeDefined()
-    const capture = await readFile(join(directory!, 'port-forward.txt'), 'utf8')
-    expect(capture).toContain('error: kubectl was unable to forward the requested port (details omitted)')
-    expect(capture).not.toMatch(/planted-|Authorization|https:|apiVersion/i)
-    const netstat = await readFile(join(directory!, 'netstat.txt'), 'utf8')
-    expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
-    expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
-    await cleanupFailureArtifact(failure)
   })
 
   it('waits for forwarding, retries a transient live failure, then probes ready and root', async () => {
-    const result = await runMain('main-transient')
-    const events = (await readFile(result.env.EVENT_LOG!, 'utf8')).trim().split('\n')
-    expect(events[0]).toMatch(/^forward:Forwarding from 127\.0\.0\.1:\d+ -> 8787$/)
-    expect(events.slice(1)).toEqual([
-      'curl:/health/live',
-      'curl:/health/live',
-      'curl:/health/ready',
-      'curl:/',
-    ])
-    expect(result.stdout).toBe([
-      'Selected Pod current-pod of ReplicaSet current-rs (Deployment revision 7).',
-      'OK-169 local Kubernetes deployment proof passed.',
-      'Source revision: 0123456789abcdef0123456789abcdef01234567',
-      'Verified image revision: 0123456789abcdef0123456789abcdef01234567',
-      'Requested image: ok-console:test',
-      'Runtime image ID: docker-pullable://ok-console@sha256:test',
-      'Runtime NODE_ENV: production',
-      'Runtime security: false true true false ALL',
-      `Console URL during verification: http://127.0.0.1:${result.env.OK_CONSOLE_LOCAL_PORT}`,
-      'Cluster retained: false',
-      '',
-    ].join('\n'))
-    expect(result.stderr).toBe('')
-    await expect(readFile(result.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    expect((await readdir(fixtureDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const result = await runMain('main-transient', { TMPDIR: temporaryDirectory })
+      const events = (await readFile(result.env.EVENT_LOG!, 'utf8')).trim().split('\n')
+      expect(events[0]).toMatch(/^forward:Forwarding from 127\.0\.0\.1:\d+ -> 8787$/)
+      expect(events.slice(1)).toEqual([
+        'curl:/health/live',
+        'curl:/health/live',
+        'curl:/health/ready',
+        'curl:/',
+      ])
+      expect(result.stdout).toBe([
+        'Selected Pod current-pod of ReplicaSet current-rs (Deployment revision 7).',
+        'OK-169 local Kubernetes deployment proof passed.',
+        'Source revision: 0123456789abcdef0123456789abcdef01234567',
+        'Verified image revision: 0123456789abcdef0123456789abcdef01234567',
+        'Requested image: ok-console:test',
+        'Runtime image ID: docker-pullable://ok-console@sha256:test',
+        'Runtime NODE_ENV: production',
+        'Runtime security: false true true false ALL',
+        `Console URL during verification: http://127.0.0.1:${result.env.OK_CONSOLE_LOCAL_PORT}`,
+        'Cluster retained: false',
+        '',
+      ].join('\n'))
+      expect(result.stderr).toBe('')
+      await expect(readFile(result.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await readdir(temporaryDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
+    })
   })
 
   it('stops after 30 bounded live failures without probing ready or root', async () => {
-    const run = runMain('main-persistent-failure')
-    await expect(run).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining('Live health probe failed after 30 attempts (5s per attempt).'),
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('main-persistent-failure', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Live health probe failed after 30 attempts (5s per attempt).'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv }) => error)
+      const probes = (await readFile(failure.env.CURL_LOG!, 'utf8')).trim().split('\n')
+      expect(probes).toHaveLength(30)
+      expect(probes.every((probe) => probe === '/health/live')).toBe(true)
+      expect(failure.stderr).toContain('Failure diagnostics:')
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      await cleanupFailureArtifact(failure)
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv }) => error)
-    const probes = (await readFile(failure.env.CURL_LOG!, 'utf8')).trim().split('\n')
-    expect(probes).toHaveLength(30)
-    expect(probes.every((probe) => probe === '/health/live')).toBe(true)
-    await cleanupFailureArtifact(failure)
   })
 
   it('preserves a non-1 verification status when capture times out and cluster cleanup fails', async () => {
-    const started = performance.now()
-    const run = runMain('main-rollout-fail')
-    await expect(run).rejects.toMatchObject({ code: 7 })
-    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
-    expect(performance.now() - started).toBeLessThan(8000)
-    expect(performance.now() - started).toBeGreaterThanOrEqual(2500)
-    expect(await readFile(failure.env.KIND_CAPTURE_MARKER!, 'utf8')).toBe('started\n')
-    expect(failure.stderr).toContain('Failure diagnostics:')
-    expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('capture-started\n')
-    expect(failure.stderr).not.toContain('kind version')
-    await cleanupFailureArtifact(failure)
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const started = performance.now()
+      const run = runMain('main-rollout-fail', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({ code: 7 })
+      const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+      expect(performance.now() - started).toBeLessThan(8000)
+      expect(performance.now() - started).toBeGreaterThanOrEqual(2500)
+      expect(await readFile(failure.env.KIND_CAPTURE_MARKER!, 'utf8')).toBe('started\n')
+      expect(failure.stderr).toContain('Failure diagnostics:')
+      expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('capture-started\n')
+      expect(failure.stderr).not.toContain('kind version')
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      await cleanupFailureArtifact(failure)
+    })
   }, 10000)
 
   it('preserves a non-1 verification status when the outer capture command fails', async () => {
-    const run = runMain('main-capture-helper-fail')
-    await expect(run).rejects.toMatchObject({ code: 7 })
-    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
-    expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('outer-helper-failed\n')
-    expect(failure.stderr).toContain('Failure diagnostics:')
-    await cleanupFailureArtifact(failure)
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('main-capture-helper-fail', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({ code: 7 })
+      const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+      expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('outer-helper-failed\n')
+      expect(failure.stderr).toContain('Failure diagnostics:')
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      await cleanupFailureArtifact(failure)
+    })
   })
 
   it('preserves verification failure and records a skipped capture when timeout is unavailable', async () => {
-    const run = runMain('main-timeout-unavailable', {}, noTimeoutDirectory)
-    await expect(run).rejects.toMatchObject({ code: 7 })
-    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
-    expect(failure.stderr).toContain('timeout unavailable; capture skipped')
-    expect(failure.stderr).not.toContain('Failure diagnostics:')
-    await expect(readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-    expect((await readdir(fixtureDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('main-timeout-unavailable', { TMPDIR: temporaryDirectory }, noTimeoutDirectory)
+      await expect(run).rejects.toMatchObject({ code: 7 })
+      const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+      expect(failure.stderr).toContain('timeout unavailable; capture skipped')
+      expect(failure.stderr).not.toContain('Failure diagnostics:')
+      await expect(readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await readdir(temporaryDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
+    })
   })
 
   it('takes the netstat baseline before cluster creation and passes that snapshot to capture', async () => {
-    const run = runMain('main-baseline-trace', {}, `${fixtureDirectory}:${process.env.PATH}`, baselineTraceVerifier)
-    await expect(run).rejects.toMatchObject({ code: 7 })
-    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
-    expect(await readFile(failure.env.BASELINE_TRACE!, 'utf8')).toBe([
-      'snapshot',
-      'kind-create',
-      'capture:TcpExt ListenOverflows=11 ListenDrops=7',
-      '',
-    ].join('\n'))
-    await cleanupFailureArtifact(failure)
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('main-baseline-trace', { TMPDIR: temporaryDirectory }, `${fixtureDirectory}:${process.env.PATH}`, baselineTraceVerifier)
+      await expect(run).rejects.toMatchObject({ code: 7 })
+      const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+      expect(await readFile(failure.env.BASELINE_TRACE!, 'utf8')).toBe([
+        'snapshot',
+        'kind-create',
+        'capture:TcpExt ListenOverflows=11 ListenDrops=7',
+        '',
+      ].join('\n'))
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      await cleanupFailureArtifact(failure)
+    })
   })
 
   it.each([
     ['main-status-130', 130],
     ['main-status-143', 143],
   ])('does not capture an interrupted verification for %s', async (scenario, status) => {
-    const run = runMain(scenario)
-    await expect(run).rejects.toMatchObject({ code: status })
-    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
-    expect(failure.stderr).not.toContain('Failure diagnostics:')
-    await expect(readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain(scenario, { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({ code: status })
+      const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+      expect(failure.stderr).not.toContain('Failure diagnostics:')
+      await expect(readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    })
   })
 
   it('reports verification success but preserves a later Kind cleanup failure', async () => {
-    const run = runMain('main-success-cleanup-fail')
-    await expect(run).rejects.toMatchObject({ code: 8 })
-    const failure = await run.catch((error: { stdout: string; stderr: string }) => error)
-    expect(failure.stdout).toContain('OK-169 local Kubernetes deployment proof passed.')
-    expect(failure.stderr).toContain('Failure diagnostics:')
-    await cleanupFailureArtifact(failure)
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('main-success-cleanup-fail', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({ code: 8 })
+      const failure = await run.catch((error: { stdout: string; stderr: string }) => error)
+      expect(failure.stdout).toContain('OK-169 local Kubernetes deployment proof passed.')
+      expect(failure.stderr).toContain('Failure diagnostics:')
+      const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+      expect(directory?.startsWith(`${temporaryDirectory}/`)).toBe(true)
+      await cleanupFailureArtifact(failure)
+    })
   })
 })

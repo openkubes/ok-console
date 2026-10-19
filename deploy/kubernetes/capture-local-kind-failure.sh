@@ -21,7 +21,7 @@ filter_port_forward() {
   local output_file="$1" line count=0 used=0 klog_error_re normalized_re structured_response_re
   local diagnostic_class diagnostic_stamp diagnostic_source diagnostic_line lower path_class response_url response_path
   klog_error_re='^([IWEF][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+(portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:([0-9]+)\]'
-  normalized_re='^klog [IWEF][0-9]{4} [0-9:.]+ (portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:[0-9]+ ((GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT) (path=(pod-portforward|core-api|grouped-api|version|other) status=([0-9]{3}|none|unavailable) milliseconds=[0-9]+|status=[0-9]{3} elapsed=[0-9]+(\.[0-9]+)? ?(ns|us|ms|s|m|nanoseconds?|microseconds?|milliseconds?|seconds?))|diagnostic=(other|connection-refused|connection-reset|i/o-timeout|eof|upgrade-failed|fallback-to-spdy|tls|bind-or-listen-error))$'
+  normalized_re='^klog [IWEF][0-9]{4} [0-9:.]+ (portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:[0-9]+ ((GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT) (path=(pod-portforward|core-api|grouped-api|version|other) status=([0-9]{3}|none|unavailable) milliseconds=[0-9]+|status=[0-9]{3} elapsed=[0-9]+(\.[0-9]+)? ?(ns|us|ms|s|m|nanoseconds?|microseconds?|milliseconds?|seconds?))|diagnostic=(other|connection-refused|connection-reset|i/o-timeout|eof|upgrade-failed|websocket-upgrade-start|websocket-upgrade-complete|fallback-to-spdy|tls-x509|tls|bind-or-listen-error))$'
   structured_response_re='^([IWEF][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\][[:space:]]+"Response"[[:space:]]+verb="(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT)"[[:space:]]+url="(https?://[^"[:space:]]+)"[[:space:]]+status="(([0-9]{3})([[:space:]][^"]*)?)?"[[:space:]]+milliseconds=([0-9]+)$'
   [[ ! -e "${output_file}" || ! -s "${output_file}" ]] || fail 'port-forward sanitized log already contains data'
   : >"${output_file}"
@@ -117,10 +117,23 @@ filter_port_forward() {
         diagnostic_class='connection-reset'
       elif [[ "${lower}" == *'i/o timeout'* || "${lower}" == *'timed out'* ]]; then
         diagnostic_class='i/o-timeout'
+      elif [[ "${diagnostic_source}" == tunneling_dialer && "${lower}" == *'before websocket upgrade connection'* ]]; then
+        diagnostic_class='websocket-upgrade-start'
+      elif [[ "${diagnostic_source}" == tunneling_dialer && "${lower}" == *'negotiation complete'* ]]; then
+        diagnostic_class='websocket-upgrade-complete'
+      # Kubernetes client-go v0.37.0 logs "Before WebSocket Upgrade Connection..."
+      # and "Negotiation complete" at tunneling_dialer.go:120 and :130. These mark
+      # upgrade start and successful negotiation, not fallback. See
+      # https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/tools/portforward/tunneling_dialer.go
+      # The separate fallback_dialer.go message is "fallback to secondary dialer
+      # from primary dialer err: %v" and keeps the fallback-to-spdy classification:
+      # https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go
       elif [[ "${lower}" == *'fallback to spdy'* || ( "${diagnostic_source}" == fallback_dialer && "${lower}" == *'fallback to '* ) ]]; then
         diagnostic_class='fallback-to-spdy'
       elif [[ "${lower}" == *'address already in use'* || "${lower}" == *'bind:'* ]]; then
         diagnostic_class='bind-or-listen-error'
+      elif [[ "${lower}" == *'x509:'* || "${lower}" == *'x.509'* ]]; then
+        diagnostic_class='tls-x509'
       elif [[ "${lower}" =~ (^|[^[:alnum:]_])tls([^[:alnum:]_]|$) ]]; then
         diagnostic_class='tls'
       elif [[ "${lower}" == *'upgrade'* ]]; then
@@ -237,6 +250,15 @@ append_file() {
   elif (( total + ${#content} > total_cap )); then
     content="${content:0:$((total_cap - total))}"
   fi
+  # Artifacts are line-oriented. If either byte cap cut through a line, keep
+  # only the complete LF-terminated prefix (or nothing if no full line fits).
+  if [[ -n "${content}" && "${content}" != *$'\n' ]]; then
+    if [[ "${content}" == *$'\n'* ]]; then
+      content="${content%$'\n'*}"$'\n'
+    else
+      content=''
+    fi
+  fi
   if [[ -n "${content}" ]]; then
     printf '%s' "${content}" >>"${file}"
   fi
@@ -246,6 +268,7 @@ append_file() {
 sanitize_command_output() {
   local kind="$1" input="$2" line result=''
   local version_re='^(Client Version:|Kustomize Version:|kind v|containerd[[:space:]])[A-Za-z0-9 .:_/-]{1,220}$'
+  local legacy_client_re='^Client Version:[[:space:]]+version\.Info\{[^}]*GitVersion:"(v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*)"[^}]*\}$'
   local listener_re='^LISTEN[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+(\[[0-9a-fA-F:]+\]|[0-9a-fA-F.*:%_-]+):[0-9]{1,5}[[:space:]]+(\[[0-9a-fA-F:]+\]|[0-9a-fA-F.*:%_-]+):(\*|[0-9]{1,5})[[:space:]]*$'
   while IFS= read -r line || [[ -n "${line}" ]]; do
     contains_sensitive_marker "${line}" && continue
@@ -253,6 +276,8 @@ sanitize_command_output() {
       versions)
         if [[ "${line}" =~ ${version_re} ]]; then
           result+="${line}"$'\n'
+        elif [[ "${line}" =~ ${legacy_client_re} ]]; then
+          result+="Client Version: ${BASH_REMATCH[1]}"$'\n'
         fi
         ;;
       listener)
@@ -262,6 +287,8 @@ sanitize_command_output() {
         ;;
     esac
   done <<<"${input}"
+  # Callers preserve this trailing newline across command substitution with a
+  # sentinel; otherwise Bash removes every final line ending from the value.
   printf '%s' "${result}"
 }
 
@@ -285,8 +312,10 @@ run_bounded() {
   fi
   # The command output stays in memory, is byte-bounded, and is sanitized before
   # any artifact write. stderr is discarded wholesale because it may echo config.
-  raw="$(run_capture_command "$@" 2>/dev/null | head -c 32768 || true)"
-  sanitized="$(sanitize_command_output "${kind}" "${raw}")"
+  raw="$(run_capture_command "$@" 2>/dev/null | head -c 32768 || true; printf '\001')"
+  raw="${raw%$'\001'}"
+  sanitized="$(sanitize_command_output "${kind}" "${raw}"; printf '\001')"
+  sanitized="${sanitized%$'\001'}"
   [[ -n "${sanitized}" ]] || sanitized=$'unavailable or no allowlisted diagnostic output\n'
   append_file "${file}" "${sanitized}" "${budget}"
 }
@@ -364,7 +393,8 @@ Aggregate artifact cap: ${total_cap} bytes
       printf '%s' "${content}" | filter_port_forward "${output_dir}/port-forward.filtered" >/dev/null 2>&1 || true
     fi
     if [[ -f "${output_dir}/port-forward.filtered" ]]; then
-      content="$(cat "${output_dir}/port-forward.filtered")"
+      content="$(cat "${output_dir}/port-forward.filtered"; printf '\001')"
+      content="${content%$'\001'}"
       append_file "${output_dir}/port-forward.txt" "${content}" 16384
       rm -f "${output_dir}/port-forward.filtered"
     fi

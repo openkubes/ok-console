@@ -1,0 +1,878 @@
+I1019 12:07:38.449097   21369 loader.go:373] Config loaded from file:  <kubeconfig>
+I1019 12:07:38.557025   21369 round_trippers.go:553] GET https://127.0.0.1:36667/api/v1/namespaces/openkubes-console/pods/ok-console-75c6f7cfdb-6v84g 200 OK in 96 milliseconds
+I1019 12:07:38.573616   21369 round_trippers.go:553] GET https://127.0.0.1:36667/api/v1/namespaces/openkubes-console/pods/ok-console-75c6f7cfdb-6v84g 200 OK in 4 milliseconds
+I1019 12:07:38.601649   21369 round_trippers.go:553] POST https://127.0.0.1:36667/api/v1/namespaces/openkubes-console/pods/ok-console-75c6f7cfdb-6v84g/portforward 101 Switching Protocols in 25 milliseconds
+Forwarding from 127.0.0.1:18788 -> 8787
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+E1019 12:09:20.541005   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.541089   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.561950   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.562009   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.564263   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.565077   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.564303   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.565914   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.564315   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.565119   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.565431   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.566293   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.566301   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.567131   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.568015   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.568029   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.568096   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.568972   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.568980   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.568988   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569461   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569470   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569945   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569953   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569958   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569963   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.569968   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571349   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571357   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571458   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571465   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571473   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571526   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.571534   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.572215   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.572222   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.572644   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.572975   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.572982   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.573298   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.573305   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.573310   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.573691   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.573863   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.574131   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.574150   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577597   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577604   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577673   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577680   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577685   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577690   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577694   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577702   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577712   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577782   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577845   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577851   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.577856   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.578041   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.578276   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.579392   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.579478   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.579805   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.580283   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.580584   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.580591   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.581043   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.581487   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.581496   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.581573   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.581579   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582221   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582229   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582234   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582239   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582243   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582306   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582312   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582352   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582855   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582877   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582914   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582920   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.582927   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.583224   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.583257   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.583263   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.583603   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584623   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584631   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584636   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584641   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584646   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584651   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584656   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584661   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.584675   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589175   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589195   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589360   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589644   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589650   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589655   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.589742   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590022   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590028   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590034   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590038   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590043   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590143   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590150   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590428   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590442   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590504   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.590510   21369 portforward.go:347] error creating error stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.606024   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.610266   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.613081   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.615384   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.639396   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.652777   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.653232   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654467   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654482   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654490   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654498   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654506   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654513   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654521   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654529   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654537   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654545   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654553   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.654561   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.655833   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.655866   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.664290   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.668748   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.672505   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.672528   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.672534   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.672981   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.673644   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.674955   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.674966   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:09:20.694798   21369 portforward.go:370] error creating forwarding stream for port 18788 -> 8787: Timeout occurred
+E1019 12:11:05.448113   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.448671   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.448694   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.448653   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.448989   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.449047   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.449108   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.452041   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.452071   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.452085   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.452759   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.452779   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.453064   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.462123   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.453073   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.459861   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.460385   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.460685   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.462676   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.462703   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+E1019 12:11:05.463344   21369 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27, uid : failed to execute portforward in network namespace "/var/run/netns/cni-102e8030-162c-becd-072f-1cef42302d2b": failed to connect to localhost:8787 inside namespace "45b13e210ed303cf4173b52c5324a645962763cc7192ca5ae5ac844213afcc27", IPv4: dial tcp4 127.0.0.1:8787: connect: connection timed out IPv6 dial tcp6 [::1]:8787: connect: connection refused 
+I1019 12:15:37.147132   21369 connection.go:198] SPDY Ping failed: connection closed
+error: lost connection to pod

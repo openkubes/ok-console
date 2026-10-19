@@ -1,0 +1,19 @@
+I1019 12:07:19.262066   20785 loader.go:373] Config loaded from file:  <kubeconfig>
+I1019 12:07:19.282007   20785 round_trippers.go:553] GET https://127.0.0.1:36667/api/v1/namespaces/openkubes-console/pods/ok-console-9cbfbf4b6-cqfvc 200 OK in 14 milliseconds
+I1019 12:07:19.293703   20785 round_trippers.go:553] GET https://127.0.0.1:36667/api/v1/namespaces/openkubes-console/pods/ok-console-9cbfbf4b6-cqfvc 200 OK in 3 milliseconds
+I1019 12:07:19.321113   20785 round_trippers.go:553] POST https://127.0.0.1:36667/api/v1/namespaces/openkubes-console/pods/ok-console-9cbfbf4b6-cqfvc/portforward 101 Switching Protocols in 24 milliseconds
+Forwarding from 127.0.0.1:18788 -> 8787
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+Handling connection for 18788
+E1019 12:07:28.364404   20785 portforward.go:409] an error occurred forwarding 18788 -> 8787: error forwarding port 8787 to pod 0b7251fd0740601abeed3a0e6358d527f1bb70a6e4e36846423e8acaeb4cbbb8, uid : network namespace for sandbox "0b7251fd0740601abeed3a0e6358d527f1bb70a6e4e36846423e8acaeb4cbbb8" is closed
+error: lost connection to pod

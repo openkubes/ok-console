@@ -1,0 +1,8 @@
+conntrack=194/65536
+conntrack=211/65536
+conntrack=213/65536
+conntrack=218/65536
+conntrack=253/65536
+conntrack=309/65536
+conntrack=330/65536
+iptables_lines=0

@@ -19,9 +19,9 @@ contains_sensitive_marker() {
 
 filter_port_forward() {
   local output_file="$1" line count=0 used=0 klog_error_re normalized_re structured_response_re
-  local diagnostic_class lower path_class response_url response_path
+  local diagnostic_class diagnostic_stamp diagnostic_source diagnostic_line lower path_class response_url response_path
   klog_error_re='^([IWEF][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+(portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:([0-9]+)\]'
-  normalized_re='^klog [IWEF][0-9]{4} [0-9:.]+ (portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:[0-9]+ ((GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT) (path=(pod-portforward|core-api|grouped-api|version|other) status=([0-9]{3}|unavailable) milliseconds=[0-9]+|status=[0-9]{3} elapsed=[0-9]+(\.[0-9]+)? ?(ns|us|ms|s|m|nanoseconds?|microseconds?|milliseconds?|seconds?))|diagnostic=(other|connection-refused|connection-reset|i/o-timeout|eof|upgrade-failed|fallback-to-spdy|tls|bind-or-listen-error))$'
+  normalized_re='^klog [IWEF][0-9]{4} [0-9:.]+ (portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:[0-9]+ ((GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT) (path=(pod-portforward|core-api|grouped-api|version|other) status=([0-9]{3}|none|unavailable) milliseconds=[0-9]+|status=[0-9]{3} elapsed=[0-9]+(\.[0-9]+)? ?(ns|us|ms|s|m|nanoseconds?|microseconds?|milliseconds?|seconds?))|diagnostic=(other|connection-refused|connection-reset|i/o-timeout|eof|upgrade-failed|fallback-to-spdy|tls|bind-or-listen-error))$'
   structured_response_re='^([IWEF][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\][[:space:]]+"Response"[[:space:]]+verb="(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT)"[[:space:]]+url="(https?://[^"[:space:]]+)"[[:space:]]+status="(([0-9]{3})([[:space:]][^"]*)?)?"[[:space:]]+milliseconds=([0-9]+)$'
   [[ ! -e "${output_file}" || ! -s "${output_file}" ]] || fail 'port-forward sanitized log already contains data'
   : >"${output_file}"
@@ -42,12 +42,12 @@ filter_port_forward() {
     if [[ "${line}" =~ ${structured_response_re} ]]; then
       response_url="${BASH_REMATCH[4]}"
       response_path="${response_url#*://}"
+      response_path="${response_path%%\?*}"
       if [[ "${response_path}" == */* ]]; then
         response_path="/${response_path#*/}"
       else
         response_path='/'
       fi
-      response_path="${response_path%%\?*}"
       case "${response_path}" in
         */portforward) path_class='pod-portforward' ;;
         /api|/api/*) path_class='core-api' ;;
@@ -72,6 +72,31 @@ filter_port_forward() {
       fi
       continue
     fi
+    # Older kubectl releases omit the status between the URL and "in" when no
+    # response was received. Preserve the request shape and timing without its URL.
+    if [[ "${line}" =~ ^([IWE][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\][[:space:]]+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT)[[:space:]]+(https?://[^[:space:]]+)[[:space:]]{2,}in[[:space:]]+([0-9]+)[[:space:]]+milliseconds$ ]]; then
+      response_url="${BASH_REMATCH[4]}"
+      response_path="${response_url#*://}"
+      response_path="${response_path%%\?*}"
+      if [[ "${response_path}" == */* ]]; then
+        response_path="/${response_path#*/}"
+      else
+        response_path='/'
+      fi
+      case "${response_path}" in
+        */portforward) path_class='pod-portforward' ;;
+        /api|/api/*) path_class='core-api' ;;
+        /apis|/apis/*) path_class='grouped-api' ;;
+        /version) path_class='version' ;;
+        *) path_class='other' ;;
+      esac
+      line="klog ${BASH_REMATCH[1]} round_trippers.go:${BASH_REMATCH[2]} ${BASH_REMATCH[3]} path=${path_class} status=none milliseconds=${BASH_REMATCH[5]}"
+      if (( used + ${#line} + 1 <= 16384 )); then
+        printf '%s\n' "${line}" >>"${output_file}"
+        used=$((used + ${#line} + 1))
+      fi
+      continue
+    fi
     if [[ "${line}" =~ ^([IWE][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\]\ (GET|POST|PUT|CONNECT)[[:space:]]+https?://[^[:space:]]+[[:space:]]+([0-9]{3})([[:space:]][A-Za-z][A-Za-z[:space:]]+)?[[:space:]]+in[[:space:]]+([0-9]+(\.[0-9]+)?[[:space:]]+(ns|us|ms|nanoseconds?|microseconds?|milliseconds?|seconds?|s))$ ]]; then
       line="klog ${BASH_REMATCH[1]} round_trippers.go:${BASH_REMATCH[2]} ${BASH_REMATCH[3]} status=${BASH_REMATCH[4]} elapsed=${BASH_REMATCH[6]}"
       if (( used + ${#line} + 1 <= 16384 )); then
@@ -82,16 +107,28 @@ filter_port_forward() {
     fi
     if [[ "${line}" =~ ${klog_error_re} ]]; then
       diagnostic_class='other'
+      diagnostic_stamp="${BASH_REMATCH[1]}"
+      diagnostic_source="${BASH_REMATCH[2]}"
+      diagnostic_line="${BASH_REMATCH[3]}"
       lower="${line,,}"
-      [[ "${lower}" == *'connection refused'* ]] && diagnostic_class='connection-refused'
-      [[ "${lower}" == *'connection reset'* || "${lower}" == *'reset by peer'* ]] && diagnostic_class='connection-reset'
-      [[ "${lower}" == *'i/o timeout'* || "${lower}" == *'timed out'* ]] && diagnostic_class='i/o-timeout'
-      [[ "${lower}" == *'eof'* ]] && diagnostic_class='eof'
-      [[ "${lower}" == *'upgrade'* ]] && diagnostic_class='upgrade-failed'
-      [[ "${lower}" == *'fallback to spdy'* || ( "${BASH_REMATCH[2]}" == fallback_dialer && "${lower}" == *'fallback to '* ) ]] && diagnostic_class='fallback-to-spdy'
-      [[ "${lower}" == *'tls'* ]] && diagnostic_class='tls'
-      [[ "${lower}" == *'address already in use'* || "${lower}" == *'bind:'* ]] && diagnostic_class='bind-or-listen-error'
-      line="klog ${BASH_REMATCH[1]} ${BASH_REMATCH[2]}.go:${BASH_REMATCH[3]} diagnostic=${diagnostic_class}"
+      if [[ "${lower}" == *'connection refused'* ]]; then
+        diagnostic_class='connection-refused'
+      elif [[ "${lower}" == *'connection reset'* || "${lower}" == *'reset by peer'* ]]; then
+        diagnostic_class='connection-reset'
+      elif [[ "${lower}" == *'i/o timeout'* || "${lower}" == *'timed out'* ]]; then
+        diagnostic_class='i/o-timeout'
+      elif [[ "${lower}" == *'fallback to spdy'* || ( "${diagnostic_source}" == fallback_dialer && "${lower}" == *'fallback to '* ) ]]; then
+        diagnostic_class='fallback-to-spdy'
+      elif [[ "${lower}" == *'address already in use'* || "${lower}" == *'bind:'* ]]; then
+        diagnostic_class='bind-or-listen-error'
+      elif [[ "${lower}" =~ (^|[^[:alnum:]_])tls([^[:alnum:]_]|$) ]]; then
+        diagnostic_class='tls'
+      elif [[ "${lower}" == *'upgrade'* ]]; then
+        diagnostic_class='upgrade-failed'
+      elif [[ "${lower}" =~ (^|[^[:alnum:]_])eof([^[:alnum:]_]|$) ]]; then
+        diagnostic_class='eof'
+      fi
+      line="klog ${diagnostic_stamp} ${diagnostic_source}.go:${diagnostic_line} diagnostic=${diagnostic_class}"
       if (( used + ${#line} + 1 <= 16384 )); then
         printf '%s\n' "${line}" >>"${output_file}"
         used=$((used + ${#line} + 1))
@@ -108,9 +145,9 @@ filter_port_forward() {
       fi
       continue
     fi
-    contains_sensitive_marker "${line}" && continue
     # Normalize known error classes instead of retaining arbitrary error text,
-    # which can include request headers or echoed kubeconfig content.
+    # which can include request headers or echoed kubeconfig content. Do this
+    # before the generic sensitive-marker drop so safe fixed text survives.
     if [[ "${line}" =~ ^error:\ unable\ to\ forward ]]; then
       line='error: kubectl was unable to forward the requested port (details omitted)'
     elif [[ "${line}" =~ ^error:\ an\ error\ occurred\ forwarding ]]; then
@@ -122,6 +159,9 @@ filter_port_forward() {
     elif [[ "${line}" =~ ^error:\ unable\ to\ listen ]]; then
       line='error: kubectl could not listen on the requested port (details omitted)'
     elif [[ "${line}" =~ ^unable\ to\ upgrade\ connection ]]; then
+      line='error: kubectl port-forward upgrade failed (details omitted)'
+    elif [[ "${line}" =~ ^error:[[:space:]]+(error[[:space:]]+)?upgrading[[:space:]]+connection ]] ||
+         [[ "${line}" =~ ^error[[:space:]]+upgrading[[:space:]]+connection ]]; then
       line='error: kubectl port-forward upgrade failed (details omitted)'
     elif [[ "${line}" =~ ^error\ dialing\ backend: ]]; then
       line='error: kubectl reported a backend connection failure (details omitted)'
@@ -139,6 +179,7 @@ filter_port_forward() {
         *) continue ;;
       esac
     fi
+    contains_sensitive_marker "${line}" && continue
     if [[ "${#line}" -le 160 ]]; then
       if (( used + ${#line} + 1 <= 16384 )); then
         printf '%s\n' "${line}" >>"${output_file}"
@@ -146,6 +187,10 @@ filter_port_forward() {
       fi
     fi
   done
+}
+
+remaining_seconds() {
+  printf '%s\n' "$((deadline - SECONDS))"
 }
 
 snapshot_netstat() {
@@ -223,7 +268,9 @@ sanitize_command_output() {
 run_capture_command() {
   local remaining command_limit
   (( SECONDS < deadline )) || return 124
-  remaining=$((deadline - SECONDS))
+  remaining="$(remaining_seconds)"
+  [[ "${remaining}" =~ ^[0-9]+$ ]] || return 124
+  (( remaining > 0 )) || return 124
   command_limit="${command_timeout}"
   (( remaining >= command_limit )) || command_limit="${remaining}"
   timeout --signal=TERM --kill-after=1s "${command_limit}s" "$@"

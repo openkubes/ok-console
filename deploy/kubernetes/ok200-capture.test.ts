@@ -126,6 +126,7 @@ describe('OK-200 failure diagnostic capture', () => {
       'Handling connection for 18787',
       'error: unable to forward connection: connection refused',
       'I1019 09:42:11.213456       1 round_trippers.go:553] GET https://api.internal.invalid/api/v1/pods?token=planted-trace-token 503 Service Unavailable in 12 milliseconds',
+      'I1019 09:42:11.313456       1 round_trippers.go:553] GET https://api.internal.invalid/api/v1/pods?token=planted-empty-status-token  in 13 milliseconds',
       'I1019 09:42:11.213456       1 portforward.go:406] GET https://api.internal.invalid/api/v1/pods?token=planted-portforward-trace-token (503) 12ms',
       'I1019 09:42:11.213456       1 round_trippers.go:632] "Response" verb="POST" url="https://api.internal.invalid/api/v1/namespaces/openkubes-console/pods/current-pod/portforward?token=planted-structured-token" status="101 Switching Protocols" milliseconds=17',
       'I1019 09:42:12.113456       1 round_trippers.go:632] "Response" verb="GET" url="https://api.internal.invalid/api?token=planted-refused-response-token" status="" milliseconds=150',
@@ -136,6 +137,10 @@ describe('OK-200 failure diagnostic capture', () => {
       'E1019 09:42:16.213456       1 tunneling_dialer.go:102] unable to upgrade streaming request: websocket: bad handshake',
       'E1019 09:42:17.213456       1 fallback_dialer.go:53] fallback to secondary dialer from primary dialer err: unable to upgrade streaming request',
       'F1019 09:42:18.213456       1 helpers.go:115] Unable to connect to the server: Get "https://api.internal.invalid/api?token=planted-tls-token": tls: failed to verify certificate',
+      'E1019 09:42:19.213456       1 memcache.go:265] connection refused after TLS upgrade ended with EOF',
+      'E1019 09:42:20.213456       1 portforward.go:406] connection reset by peer after TLS upgrade ended with EOF',
+      'E1019 09:42:21.213456       1 round_trippers.go:632] i/o timeout after TLS upgrade ended with EOF',
+      'E1019 09:42:22.213456       1 spdy.go:97] mtls failure thereof',
       'Authorization: Bearer planted-filter-bearer',
       'https://internal.example.invalid/path?token=planted-filter-url',
       'apiVersion: v1',
@@ -158,6 +163,7 @@ describe('OK-200 failure diagnostic capture', () => {
     expect(sanitized).toContain('Handling connection for 18787')
     expect(sanitized).toContain('error: kubectl was unable to forward the requested port (details omitted)')
     expect(sanitized).toContain('round_trippers.go:553 GET status=503 elapsed=12 milliseconds')
+    expect(sanitized).toContain('round_trippers.go:553 GET path=core-api status=none milliseconds=13')
     expect(sanitized).toContain('portforward.go:406 GET status=503 elapsed=12ms')
     expect(sanitized).toContain(
       'round_trippers.go:632 POST path=pod-portforward status=101 milliseconds=17',
@@ -172,12 +178,70 @@ describe('OK-200 failure diagnostic capture', () => {
     expect(sanitized).toContain('tunneling_dialer.go:102 diagnostic=upgrade-failed')
     expect(sanitized).toContain('fallback_dialer.go:53 diagnostic=fallback-to-spdy')
     expect(sanitized).toContain('helpers.go:115 diagnostic=tls')
+    expect(sanitized).toContain('spdy.go:97 diagnostic=other')
     expect(Buffer.byteLength(sanitized)).toBeLessThanOrEqual(16384)
     const refilteredOutput = join(fixtureDirectory, 'refiltered-forward.log')
     await exec('bash', ['-c', 'cat "$1" | bash "$2" filter-port-forward "$3"', '_', output, helper, refilteredOutput], {
       env: environment(),
     })
     expect(await readFile(refilteredOutput, 'utf8')).toBe(sanitized)
+  })
+
+  it.each([
+    'GET https://raw-host.invalid?next=/api/v1&token=planted-query-token  in 13 milliseconds',
+    '"Response" verb="GET" url="https://raw-host.invalid?next=/api/v1&token=planted-query-token" status="" milliseconds=13',
+  ])('does not classify a query-only URL as an API path: %s', async (detail) => {
+    const output = join(fixtureDirectory, `query-only-${execution++}.log`)
+    const input = `I1019 09:42:11.313456       1 round_trippers.go:553] ${detail}`
+    await exec('bash', ['-c', 'printf "%s\\n" "$1" | bash "$2" filter-port-forward "$3"', '_', input, helper, output], {
+      env: environment(),
+    })
+    const sanitized = await readFile(output, 'utf8')
+    expect(sanitized).toContain('GET path=other status=')
+    expect(sanitized).toContain('milliseconds=13')
+    expect(sanitized).not.toMatch(/raw-host|planted-|next=|https:/)
+  })
+
+  it.each([
+    {
+      name: 'forwarding error with Get URL EOF',
+      input: 'error: an error occurred forwarding 18787 -> 8787: Get "https://raw-host.invalid/api?token=planted-eof-token": EOF',
+      expected: 'error: kubectl reported a forwarding error (details omitted)\n',
+    },
+    {
+      name: 'unable-to-forward error with a token',
+      input: 'error: unable to forward port 8787 to pod: token=planted-forward-token',
+      expected: 'error: kubectl was unable to forward the requested port (details omitted)\n',
+    },
+    {
+      name: 'nested connection-upgrade error with secret URL material',
+      input: 'error: error upgrading connection: Get "https://raw-host.invalid/api?token=planted-upgrade-token": secret=planted-secret',
+      expected: 'error: kubectl port-forward upgrade failed (details omitted)\n',
+    },
+  ])('maps $name before sensitive-marker filtering', async ({ input, expected }) => {
+    const output = join(fixtureDirectory, `fixed-error-${execution++}.log`)
+    await exec('bash', ['-c', 'printf "%s\\n" "$1" | bash "$2" filter-port-forward "$3"', '_', input, helper, output], {
+      env: environment(),
+    })
+    const sanitized = await readFile(output, 'utf8')
+    expect(sanitized).toBe(expected)
+    expect(sanitized).not.toMatch(/raw-host|planted-|token=|secret=/i)
+  })
+
+  it.each([
+    ['connection-refused', 'connection refused after TLS upgrade ended with EOF'],
+    ['connection-reset', 'connection reset by peer after TLS upgrade ended with EOF'],
+    ['i/o-timeout', 'i/o timeout after TLS upgrade ended with EOF'],
+    ['other', 'mtls failure thereof'],
+  ])('uses explicit klog precedence for %s', async (diagnosticClass, detail) => {
+    const output = join(fixtureDirectory, `precedence-${execution++}.log`)
+    const input = `E1019 09:43:02.213456       1 round_trippers.go:632] ${detail}`
+    await exec('bash', ['-c', 'printf "%s\\n" "$1" | bash "$2" filter-port-forward "$3"', '_', input, helper, output], {
+      env: environment(),
+    })
+    expect(await readFile(output, 'utf8')).toBe(
+      `klog E1019 09:43:02.213456 round_trippers.go:632 diagnostic=${diagnosticClass}\n`,
+    )
   })
 
   it('keeps malformed forwarding readiness markers safe so the verifier can reject them', async () => {
@@ -247,9 +311,9 @@ printf '%s\\n' "$*" >>"$CAPTURE_TIMEOUT_LOG"
         `source "$1"
 artifact_dir="$2"
 : >"$2/version.txt"
-deadline=$((SECONDS + 1))
+deadline=$((SECONDS + 100))
+remaining_seconds() { printf '1\\n'; }
 run_bounded versions "$2/version.txt" 1024 kubectl version --client
-deadline=$((SECONDS + 1))
 capture_workloads "$2/workloads.txt" kind-test
 `,
         '_',
@@ -262,6 +326,7 @@ capture_workloads "$2/workloads.txt" kind-test
     expect(calls).toContain('--signal=TERM --kill-after=1s 1s kubectl version --client')
     expect(calls).toMatch(/--signal=TERM --kill-after=1s 1s kubectl .* get pods /)
     expect(calls).toMatch(/--signal=TERM --kill-after=1s 1s kubectl .* get replicasets /)
+    expect(calls.trim().split('\n').every((call) => call.includes('--kill-after=1s 1s '))).toBe(true)
   })
 
   it('caps a flood of valid forwarding lines by bytes', async () => {

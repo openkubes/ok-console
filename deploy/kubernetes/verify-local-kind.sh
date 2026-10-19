@@ -341,11 +341,19 @@ start_and_wait_for_port_forward
 # Bound the probe budget independently of port-forward readiness: at most 30
 # attempts of 5 seconds each, with a 1-second pause between attempts (~180s).
 for ((attempt = 1; attempt <= 30; attempt++)); do
+  if ! port_forward_filter_is_running; then
+    echo 'port-forward output filter exited during live health probing.' >&2
+    exit 1
+  fi
   if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
     echo "kubectl port-forward exited during live health probing for 127.0.0.1:${local_port}." >&2
     exit 1
   fi
   if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/live"; then
+    if ! port_forward_filter_is_running; then
+      echo 'port-forward output filter exited during live health probing.' >&2
+      exit 1
+    fi
     break
   fi
   if (( attempt == 30 )); then

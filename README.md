@@ -129,18 +129,20 @@ non-terminating. Image-ID and NODE_ENV reads use that same Pod. The IPv4-only
 port-forward must report `Forwarding from 127.0.0.1:<local-port>` for the exact
 requested port within 30 seconds before HTTP probes run. An occupied local port,
 an exited forwarder, or a missing/mismatched forwarding line fails verification
-with a printed diagnostics artifact path.
+with failure diagnostics when capture is available.
 After forwarding readiness, the first `/health/live` probe gets up to 30 attempts,
 each with a five-second timeout and a one-second pause between failures.
 
-The verifier requires Bash 4.4 or newer (dynamic file descriptors, waitable
-process substitutions, and lowercase expansion). On failure after this invocation
-created the cluster, it prints `Failure diagnostics: <directory>` before cleanup.
+The verifier requires Bash 4.4 or newer (`exec {fd}>` dynamic file descriptors,
+waitable process-substitution `$!`, and `${var,,}` lowercase expansion in the
+helper). On failure after this invocation created the cluster, when `timeout` is
+available it prints `Failure diagnostics: <directory>` as it exits.
 The private temporary directory is `${TMPDIR:-/tmp}/ok-console-ok200-failure.*`;
 retain it for diagnosis and remove it when no longer needed. Success, preflight
 refusals (including an existing unowned cluster), and exit status 130/143 skip
-capture. `timeout` is optional: without it, failure capture records
-`timeout unavailable; capture skipped` and verification behaves as before.
+capture. `timeout` is optional: without it, failure capture is skipped with
+`timeout unavailable; capture skipped` on stderr and no artifact path is printed.
+The raw port-forward log is not echoed to the terminal.
 
 The artifact contains:
 

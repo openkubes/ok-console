@@ -279,6 +279,9 @@ beforeAll(async () => {
     ['capture-recorder', captureRecorderStub],
     ['timeout', `#!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
+  printf 'capture-started\\n' >> "\${CAPTURE_OUTER_MARKER}"
+fi
 if [[ "\${KUBECTL_SCENARIO}" == main-capture-helper-fail && "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
   printf 'outer-helper-failed\\n' >"\${CAPTURE_OUTER_MARKER}"
   exit 42
@@ -314,7 +317,6 @@ const environment = (scenario: string) => {
     KUBECTL_ARGV_LOG: join(fixtureDirectory, `kubectl-argv-${id}`),
     DOCKER_ARGV_LOG: join(fixtureDirectory, `docker-argv-${id}`),
     CAPTURE_OUTER_MARKER: join(fixtureDirectory, `capture-outer-${id}`),
-    CAPTURE_ARGV_LOG: join(fixtureDirectory, `capture-calls-${id}`),
     CAPTURE_HELPER_ARGV: join(fixtureDirectory, `capture-helper-argv-${id}`),
     KUBECTL_BINDER: join(fixtureDirectory, 'binder.cjs'),
     KUBECTL_STATE: join(fixtureDirectory, `kubectl-state-${id}`),
@@ -595,6 +597,30 @@ describe('OK-200 main verification flow', () => {
     await cleanupFailureArtifact(failure)
   })
 
+  it.each([0, 7])('reports a distinct failure when the output filter dies during a probe returning %s', async (probeStatus) => {
+    const wrapper = join(fixtureDirectory, 'filter-dies-during-probing.sh')
+    await writeFile(wrapper, `#!/usr/bin/env bash
+source "${verifier}"
+curl() {
+  printf 'live-probe\\n' >> "$CURL_LOG"
+  kill "$port_forward_filter_pid"
+  wait "$port_forward_filter_pid" || true
+  return ${probeStatus}
+}
+main "$@"
+`)
+    await chmod(wrapper, 0o755)
+    const run = runMain('main-transient', {}, `${fixtureDirectory}:${process.env.PATH}`, wrapper)
+    await expect(run).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('port-forward output filter exited during live health probing'),
+    })
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+    expect(failure.stderr).not.toContain('port-forward exited during live health probing')
+    expect(await readFile(failure.env.CURL_LOG!, 'utf8')).toBe('live-probe\n')
+    await cleanupFailureArtifact(failure)
+  })
+
   it('fails before any HTTP probe when port-forward readiness fails', async () => {
     const run = runMain('main-forward-fail')
     await expect(run).rejects.toMatchObject({
@@ -638,7 +664,6 @@ describe('OK-200 main verification flow', () => {
       '',
     ].join('\n'))
     expect(result.stderr).toBe('')
-    await expect(readFile(result.env.CAPTURE_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(readFile(result.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await readdir(fixtureDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
   })
@@ -665,6 +690,7 @@ describe('OK-200 main verification flow', () => {
     expect(performance.now() - started).toBeGreaterThanOrEqual(2500)
     expect(await readFile(failure.env.KIND_CAPTURE_MARKER!, 'utf8')).toBe('started\n')
     expect(failure.stderr).toContain('Failure diagnostics:')
+    expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('capture-started\n')
     expect(failure.stderr).not.toContain('kind version')
     await cleanupFailureArtifact(failure)
   }, 10000)
@@ -684,7 +710,8 @@ describe('OK-200 main verification flow', () => {
     const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
     expect(failure.stderr).toContain('timeout unavailable; capture skipped')
     expect(failure.stderr).not.toContain('Failure diagnostics:')
-    await expect(readFile(failure.env.CAPTURE_HELPER_ARGV!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await readdir(fixtureDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
   })
 
   it('takes the netstat baseline before cluster creation and passes that snapshot to capture', async () => {
@@ -708,7 +735,7 @@ describe('OK-200 main verification flow', () => {
     await expect(run).rejects.toMatchObject({ code: status })
     const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
     expect(failure.stderr).not.toContain('Failure diagnostics:')
-    await expect(readFile(failure.env.CAPTURE_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('reports verification success but preserves a later Kind cleanup failure', async () => {

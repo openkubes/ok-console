@@ -2,21 +2,81 @@
 set -Eeuo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+failure_capture_helper="${script_dir}/capture-local-kind-failure.sh"
 rendered_manifest=""
 port_forward_log=""
+port_forward_filter_pid=""
+port_forward_filter_fd=""
+failure_artifact_dir=""
 created_cluster=false
 port_forward_pid=""
+verification_started_seconds=0
 
 cleanup() {
   if [[ -n "${port_forward_pid}" ]]; then
     kill "${port_forward_pid}" 2>/dev/null || true
     wait "${port_forward_pid}" 2>/dev/null || true
   fi
-  [[ -z "${rendered_manifest}" ]] || rm -f "${rendered_manifest}"
-  [[ -z "${port_forward_log}" ]] || rm -f "${port_forward_log}"
-  if [[ "${created_cluster}" == true && "${keep_cluster}" != true ]]; then
+  if [[ -n "${port_forward_filter_fd}" ]]; then
+    exec {port_forward_filter_fd}>&-
+    port_forward_filter_fd=""
+  fi
+  if [[ -n "${port_forward_filter_pid}" ]]; then
+    wait "${port_forward_filter_pid}" 2>/dev/null || true
+    port_forward_filter_pid=""
+  fi
+  if [[ "${created_cluster}" == true && "${keep_cluster:-false}" != true ]]; then
     kind delete cluster --name "${cluster_name}"
   fi
+}
+
+capture_failure() {
+  if [[ -x "${failure_capture_helper}" ]]; then
+    failure_artifact_dir="$(mktemp -d -t ok-console-ok200-failure.XXXXXX 2>/dev/null)"
+    if [[ -n "${failure_artifact_dir}" ]]; then
+      timeout --signal=TERM --kill-after=1s 29s "${failure_capture_helper}" capture \
+        "${failure_artifact_dir}" \
+        "${cluster_name:-unknown}" \
+        "${local_port:-0}" \
+        "${pod_name:-}" \
+        "$((SECONDS - verification_started_seconds))" \
+        "${port_forward_log:-}" \
+        >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+on_exit() {
+  local original_status="$?" cleanup_status
+  trap - EXIT
+  set +e
+  # A failed forwarder has closed its pipe; drain the sanitizer before taking
+  # the artifact snapshot. Keep a live forwarder up for the listener observation.
+  if [[ -n "${port_forward_pid}" ]] && ! kill -0 "${port_forward_pid}" 2>/dev/null; then
+    if [[ -n "${port_forward_filter_fd}" ]]; then
+      exec {port_forward_filter_fd}>&-
+      port_forward_filter_fd=""
+    fi
+    if [[ -n "${port_forward_filter_pid}" ]]; then
+      wait "${port_forward_filter_pid}" 2>/dev/null || true
+      port_forward_filter_pid=""
+    fi
+  fi
+  if (( original_status != 0 )); then
+    capture_failure
+  fi
+  cleanup
+  cleanup_status="$?"
+  if (( original_status == 0 && cleanup_status != 0 )); then
+    original_status="${cleanup_status}"
+    capture_failure
+  fi
+  [[ -z "${rendered_manifest}" ]] || rm -f "${rendered_manifest}"
+  [[ -z "${port_forward_log}" ]] || rm -f "${port_forward_log}"
+  if [[ -n "${failure_artifact_dir}" ]]; then
+    printf 'Failure diagnostics: %s\n' "${failure_artifact_dir}" >&2
+  fi
+  exit "${original_status}"
 }
 
 select_current_pod() {
@@ -107,10 +167,13 @@ select_current_pod() {
 
 start_and_wait_for_port_forward() {
   local expected_line observed_line timeout_seconds="${1:-30}" poll_interval="${2:-1}" deadline
+  : >"${port_forward_log}"
+  exec {port_forward_filter_fd}> >("${failure_capture_helper}" filter-port-forward "${port_forward_log}")
+  port_forward_filter_pid="$!"
   kubectl --context "kind-${cluster_name}" \
     --namespace openkubes-console \
-    port-forward --address 127.0.0.1 "pod/${pod_name}" "${local_port}:8787" \
-    >"${port_forward_log}" 2>&1 &
+    -v=6 port-forward --address 127.0.0.1 "pod/${pod_name}" "${local_port}:8787" \
+    >&"${port_forward_filter_fd}" 2>&1 &
   port_forward_pid="$!"
   expected_line="Forwarding from 127.0.0.1:${local_port} -> 8787"
   deadline=$((SECONDS + timeout_seconds))
@@ -120,27 +183,23 @@ start_and_wait_for_port_forward() {
       if [[ "${observed_line}" == "${expected_line}" ]]; then
         if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
           echo "kubectl port-forward exited immediately after reporting readiness for 127.0.0.1:${local_port}." >&2
-          cat "${port_forward_log}" >&2
           return 1
         fi
         return 0
       fi
       if [[ "${observed_line}" == 'Forwarding from '* ]]; then
         echo "kubectl port-forward reported an unexpected forwarding endpoint; expected: ${expected_line}" >&2
-        cat "${port_forward_log}" >&2
         return 1
       fi
     done <"${port_forward_log}"
     if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
       echo "kubectl port-forward exited before reporting readiness for 127.0.0.1:${local_port}." >&2
-      cat "${port_forward_log}" >&2
       return 1
     fi
     sleep "${poll_interval}"
   done
 
   echo "Timed out waiting for kubectl port-forward to report: ${expected_line}" >&2
-  cat "${port_forward_log}" >&2
   return 1
 }
 
@@ -149,6 +208,8 @@ main() {
   cluster_name="${OK_CONSOLE_KIND_CLUSTER:-ok-console-ok169}"
   keep_cluster="${OK_CONSOLE_KEEP_CLUSTER:-false}"
   local_port="${OK_CONSOLE_LOCAL_PORT:-18787}"
+  verification_started_seconds="${SECONDS}"
+  trap on_exit EXIT
   source_revision="$(git -C "${repository_root}" rev-parse HEAD)"
   short_revision="$(git -C "${repository_root}" rev-parse --short=12 HEAD)"
   expected_revision="${OK_CONSOLE_EXPECTED_REVISION:-${source_revision}}"
@@ -156,9 +217,12 @@ main() {
   candidate_image="${OK_CONSOLE_IMAGE:-${default_image}}"
   rendered_manifest="$(mktemp -t ok-console-ok169.XXXXXX.yaml)"
   port_forward_log="$(mktemp -t ok-console-ok169-port-forward.XXXXXX.log)"
-  trap cleanup EXIT
+[[ -x "${failure_capture_helper}" ]] || {
+  echo 'Required local Kind failure-capture helper is missing or not executable.' >&2
+  exit 1
+}
 
-for command_name in docker kind kubectl curl git; do
+for command_name in docker kind kubectl curl git timeout; do
   command -v "${command_name}" >/dev/null || {
     echo "Required command not found: ${command_name}" >&2
     exit 1
@@ -247,7 +311,6 @@ start_and_wait_for_port_forward
 for ((attempt = 1; attempt <= 30; attempt++)); do
   if ! kill -0 "${port_forward_pid}" 2>/dev/null; then
     echo "kubectl port-forward exited during live health probing for 127.0.0.1:${local_port}." >&2
-    cat "${port_forward_log}" >&2
     exit 1
   fi
   if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${local_port}/health/live"; then

@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,6 +30,7 @@ if [[ "\${3:-}" == apply ]]; then
 fi
 [[ "\${3:-}" == --namespace && "\${4:-}" == openkubes-console ]] || fail "$@"
 shift 4
+if [[ "\${1:-}" == -v=6 ]]; then shift; fi
 if [[ " $* " == *" get deployment ok-console "* ]]; then
   if [[ "$*" == *'.spec.template.spec.containers[0].image'* ]]; then
     printf '%s' "\${OK_CONSOLE_IMAGE}"
@@ -59,7 +60,7 @@ elif [[ " $* " == *" get pods "* ]]; then
         printf 'current-pod|current-uid|True||Running\\nold-pod|old-uid|True||Running\\n'
       fi
       ;;
-    valid|main-forward-fail|main-transient|main-persistent-failure|main-forward-exit) printf 'current-pod|current-uid|True||Running\\n' ;;
+    valid|main-forward-fail|main-transient|main-persistent-failure|main-forward-exit|main-success-cleanup-fail) printf 'current-pod|current-uid|True||Running\\n' ;;
     *) printf 'unknown scenario: %s\\n' "\${KUBECTL_SCENARIO}" >&2; exit 2 ;;
   esac
 elif [[ "\${1:-}" == port-forward ]]; then
@@ -67,6 +68,9 @@ elif [[ "\${1:-}" == port-forward ]]; then
   : > "\${KUBECTL_STARTED}"
   exec node "\${KUBECTL_BINDER}" "$@"
 elif [[ "\${1:-}" == rollout && ( "\${2:-}" == status || "\${2:-}" == restart ) && "\${3:-}" == deployment/ok-console ]]; then
+  if [[ "\${KUBECTL_SCENARIO}" == main-rollout-fail || "\${KUBECTL_SCENARIO}" == main-capture-helper-fail ]]; then
+    [[ "\${2:-}" != status ]] || exit 7
+  fi
   :
 elif [[ "\${1:-}" == get && "\${2:-}" == pod && "\${3:-}" == current-pod ]]; then
   printf 'docker-pullable://ok-console@sha256:test'
@@ -83,13 +87,16 @@ const args = process.argv.slice(2)
 const mapping = args.find((argument) => /^\\d+:8787$/.test(argument))
 const port = Number(mapping?.split(':')[0])
 if (process.env.KUBECTL_SCENARIO === 'process-exit' || process.env.KUBECTL_SCENARIO === 'main-forward-fail') {
-  console.error('unable to upgrade connection: pod not found')
+  console.error('error: unable to forward connection: pod not found')
+  console.error('Authorization: Bearer planted-main-port-forward-bearer')
+  console.error('https://internal.example.invalid/?token=planted-main-url-token')
+  console.error('apiVersion: v1')
   process.exit(42)
 }
 if (process.env.KUBECTL_SCENARIO === 'main-forward-exit') fs.writeFileSync(process.env.KUBECTL_PID, String(process.pid))
 const server = net.createServer()
 server.once('error', (error) => {
-  console.error('Unable to listen on port ' + port + ': ' + error.message)
+  console.error('unable to listen on port ' + port + ': ' + error.message)
   process.exit(1)
 })
 server.listen(port, '127.0.0.1', () => {
@@ -132,7 +139,22 @@ const kindStub = `#!/usr/bin/env bash
 set -Eeuo pipefail
 case "\${1:-} \${2:-}" in
   'get clusters') : ;;
-  'create cluster'|'load docker-image'|'delete cluster') : ;;
+  'create cluster'|'load docker-image') : ;;
+  'delete cluster')
+    [[ "\${KUBECTL_SCENARIO}" != main-rollout-fail ]] || exit 9
+    [[ "\${KUBECTL_SCENARIO}" != main-success-cleanup-fail ]] || exit 8
+    : ;;
+  'version ')
+    if [[ "\${KUBECTL_SCENARIO}" == main-rollout-fail ]]; then
+      printf 'started\\n' >"\${KIND_CAPTURE_MARKER}"
+      trap '' TERM
+      exec /bin/sleep 8
+    fi
+    if [[ "\${KUBECTL_SCENARIO}" == main-capture-helper-fail ]]; then
+      printf 'started\\n' >"\${KIND_CAPTURE_MARKER}"
+      exit 9
+    fi
+    printf 'kind v0.25.0 go1.23.0 linux/amd64\\n' ;;
   *) printf 'unexpected kind invocation: %s\\n' "$*" >&2; exit 2 ;;
 esac
 `
@@ -187,6 +209,14 @@ beforeAll(async () => {
     ['kind', kindStub],
     ['git', gitStub],
     ['curl', curlStub],
+    ['timeout', `#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "\${KUBECTL_SCENARIO}" == main-capture-helper-fail && "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
+  printf 'outer-helper-failed\\n' >"\${CAPTURE_OUTER_MARKER}"
+  exit 42
+fi
+exec /usr/bin/timeout "$@"
+`],
     ['sleep', '#!/usr/bin/env bash\nif [[ "${KUBECTL_SCENARIO}" == main-forward-exit ]]; then /bin/sleep 0.1; fi\n'],
   ])
   await Promise.all([...files].map(([name, contents]) => writeFile(join(fixtureDirectory, name), contents)))
@@ -202,7 +232,11 @@ const environment = (scenario: string) => {
   return {
     ...process.env,
     PATH: `${fixtureDirectory}:${process.env.PATH}`,
+    TMPDIR: fixtureDirectory,
     KUBECTL_SCENARIO: scenario,
+    KIND_CAPTURE_MARKER: join(fixtureDirectory, `kind-capture-${id}`),
+    CAPTURE_OUTER_MARKER: join(fixtureDirectory, `capture-outer-${id}`),
+    CAPTURE_ARGV_LOG: join(fixtureDirectory, `capture-calls-${id}`),
     KUBECTL_BINDER: join(fixtureDirectory, 'binder.cjs'),
     KUBECTL_STATE: join(fixtureDirectory, `kubectl-state-${id}`),
     KUBECTL_PID: join(fixtureDirectory, `kubectl-pid-${id}`),
@@ -275,6 +309,11 @@ const runMain = async (scenario: string) => {
   }
 }
 
+const cleanupFailureArtifact = async (failure: { stderr?: string }) => {
+  const directory = failure.stderr?.match(/^Failure diagnostics: (.+)$/m)?.[1]
+  if (directory) await rm(directory, { recursive: true, force: true })
+}
+
 describe('OK-200 current ReplicaSet Pod selection', () => {
   it('rejects an unknown kubectl scenario instead of selecting a valid Pod', async () => {
     await expect(exec('kubectl', ['--context', 'kind-test', '--namespace', 'openkubes-console', 'get', 'pods'], {
@@ -328,10 +367,14 @@ describe('OK-200 port-forward readiness', () => {
       .rejects.toMatchObject({ stderr: expect.stringContaining(cause) })
   }, 5000)
 
-  it('reports the captured kubectl diagnostic when the process exits', async () => {
-    await expect(waitForForward('process-exit', await unusedPort(), 2)).rejects.toMatchObject({
-      stderr: expect.stringMatching(/exited before reporting readiness[\s\S]*unable to upgrade connection: pod not found/),
+  it('keeps a sanitized diagnostic when the forwarder exits before readiness', async () => {
+    const port = await unusedPort()
+    await expect(waitForForward('process-exit', port, 2)).rejects.toMatchObject({
+      stderr: expect.stringContaining('exited before reporting readiness'),
     })
+    const log = await readFile(join(fixtureDirectory, `port-forward-process-exit-${port}.log`), 'utf8')
+    expect(log).toContain('error: kubectl was unable to forward the requested port (details omitted)')
+    expect(log).not.toMatch(/planted-|Authorization|https:/i)
   })
 
   it('rejects a forwarder that exits immediately after its readiness line', async () => {
@@ -353,8 +396,10 @@ describe('OK-200 port-forward readiness', () => {
     if (!address || typeof address === 'string') throw new Error('Could not bind the occupied test port.')
     try {
       await expect(waitForForward('ready', address.port)).rejects.toMatchObject({
-        stderr: expect.stringMatching(/exited before reporting readiness[\s\S]*EADDRINUSE/),
+        stderr: expect.stringContaining('exited before reporting readiness'),
       })
+      const log = await readFile(join(fixtureDirectory, `port-forward-ready-${address.port}.log`), 'utf8')
+      expect(log).toContain('error: kubectl could not listen on the requested port (details omitted)')
     } finally {
       await new Promise<void>((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()))
     }
@@ -367,12 +412,16 @@ describe('OK-200 main verification flow', () => {
     const run = runMain('main-forward-exit')
     await expect(run).rejects.toMatchObject({
       code: 1,
-      stderr: expect.stringMatching(/port-forward exited during live health probing[\s\S]*Forwarding from 127\.0\.0\.1:\d+ -> 8787[\s\S]*forwarder terminated after first live probe/),
+      stderr: expect.stringMatching(/port-forward exited during live health probing[\s\S]*Failure diagnostics:/),
     })
     expect(performance.now() - started).toBeLessThan(3000)
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv }) => error)
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
     expect(await readFile(failure.env.CURL_LOG!, 'utf8')).toBe('/health/live\n')
     expect(await readFile(failure.env.CURL_STATE!, 'utf8')).toBe('1')
+    const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+    expect(directory).toBeDefined()
+    expect(await readFile(join(directory!, 'port-forward.txt'), 'utf8')).toContain('Forwarding from 127.0.0.1:')
+    await cleanupFailureArtifact(failure)
   })
 
   it('fails before any HTTP probe when port-forward readiness fails', async () => {
@@ -381,8 +430,14 @@ describe('OK-200 main verification flow', () => {
       code: 1,
       stderr: expect.stringContaining('exited before reporting readiness'),
     })
-    const failure = await run.catch((error: { env: NodeJS.ProcessEnv }) => error)
+    const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
     await expect(readFile(failure.env.CURL_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    const directory = failure.stderr.match(/^Failure diagnostics: (.+)$/m)?.[1]
+    expect(directory).toBeDefined()
+    const capture = await readFile(join(directory!, 'port-forward.txt'), 'utf8')
+    expect(capture).toContain('error: kubectl was unable to forward the requested port (details omitted)')
+    expect(capture).not.toMatch(/planted-|Authorization|https:|apiVersion/i)
+    await cleanupFailureArtifact(failure)
   })
 
   it('waits for forwarding, retries a transient live failure, then probes ready and root', async () => {
@@ -395,7 +450,23 @@ describe('OK-200 main verification flow', () => {
       'curl:/health/ready',
       'curl:/',
     ])
-    expect(result.stdout).toContain('OK-169 local Kubernetes deployment proof passed.')
+    expect(result.stdout).toBe([
+      'Selected Pod current-pod of ReplicaSet current-rs (Deployment revision 7).',
+      'OK-169 local Kubernetes deployment proof passed.',
+      'Source revision: 0123456789abcdef0123456789abcdef01234567',
+      'Verified image revision: 0123456789abcdef0123456789abcdef01234567',
+      'Requested image: ok-console:test',
+      'Runtime image ID: docker-pullable://ok-console@sha256:test',
+      'Runtime NODE_ENV: production',
+      'Runtime security: false true true false ALL',
+      `Console URL during verification: http://127.0.0.1:${result.env.OK_CONSOLE_LOCAL_PORT}`,
+      'Cluster retained: false',
+      '',
+    ].join('\n'))
+    expect(result.stderr).toBe('')
+    await expect(readFile(result.env.CAPTURE_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(result.env.CAPTURE_OUTER_MARKER!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await readdir(fixtureDirectory)).filter((name) => name.startsWith('ok-console-ok200-failure.'))).toEqual([])
   })
 
   it('stops after 30 bounded live failures without probing ready or root', async () => {
@@ -408,5 +479,37 @@ describe('OK-200 main verification flow', () => {
     const probes = (await readFile(failure.env.CURL_LOG!, 'utf8')).trim().split('\n')
     expect(probes).toHaveLength(30)
     expect(probes.every((probe) => probe === '/health/live')).toBe(true)
+    await cleanupFailureArtifact(failure)
+  })
+
+  it('preserves a non-1 verification status when capture times out and cluster cleanup fails', async () => {
+    const started = performance.now()
+    const run = runMain('main-rollout-fail')
+    await expect(run).rejects.toMatchObject({ code: 7 })
+    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+    expect(performance.now() - started).toBeLessThan(8000)
+    expect(performance.now() - started).toBeGreaterThanOrEqual(2500)
+    expect(await readFile(failure.env.KIND_CAPTURE_MARKER!, 'utf8')).toBe('started\n')
+    expect(failure.stderr).toContain('Failure diagnostics:')
+    expect(failure.stderr).not.toContain('kind version')
+    await cleanupFailureArtifact(failure)
+  }, 10000)
+
+  it('preserves a non-1 verification status when the outer capture command fails', async () => {
+    const run = runMain('main-capture-helper-fail')
+    await expect(run).rejects.toMatchObject({ code: 7 })
+    const failure = await run.catch((error: { stderr: string; env: NodeJS.ProcessEnv }) => error)
+    expect(await readFile(failure.env.CAPTURE_OUTER_MARKER!, 'utf8')).toBe('outer-helper-failed\n')
+    expect(failure.stderr).toContain('Failure diagnostics:')
+    await cleanupFailureArtifact(failure)
+  })
+
+  it('reports verification success but preserves a later Kind cleanup failure', async () => {
+    const run = runMain('main-success-cleanup-fail')
+    await expect(run).rejects.toMatchObject({ code: 8 })
+    const failure = await run.catch((error: { stdout: string; stderr: string }) => error)
+    expect(failure.stdout).toContain('OK-169 local Kubernetes deployment proof passed.')
+    expect(failure.stderr).toContain('Failure diagnostics:')
+    await cleanupFailureArtifact(failure)
   })
 })

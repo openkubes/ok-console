@@ -5,10 +5,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { BffConsoleAdapter } from '../src/data/bffAdapter'
 import { FixtureConsoleAdapter } from '../src/data/fixtureAdapter'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
-import { createConsoleBffHandler } from './app.mjs'
+import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 
 const server = createServer(createConsoleBffHandler({
   source: new FixtureObservedStateAdapter(),
+  authorizer: prototypeAuthorizer,
   correlationId: () => 'corr-vertical-slice',
 }))
 let adapter: BffConsoleAdapter

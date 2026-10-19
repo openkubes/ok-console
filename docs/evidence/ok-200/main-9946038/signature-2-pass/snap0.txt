@@ -1,0 +1,9 @@
+--- snap pid=2317
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 00000000:2253 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 178058 1 ffff896d0178e5c0 100 0 0 10 0                    
+ListenOverflows 0
+ListenDrops 0
+net/core/somaxconn=4096
+net/ipv4/tcp_syn_retries=6
+conntrack=194/65536
+iptables_lines=0

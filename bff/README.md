@@ -9,8 +9,8 @@ Console slice. It is a separate Node.js process behind the browser's same-origin
 Use two terminals:
 
 ```bash
-# Terminal 1: read-only BFF
-pnpm start:bff
+# Terminal 1: read-only BFF with explicit local prototype authorization
+OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true pnpm start:bff
 
 # Terminal 2: Console configured for the BFF adapter
 VITE_CONSOLE_DATA_MODE=bff pnpm dev
@@ -106,11 +106,19 @@ session authorization reads.
 ### Secure runtime selection
 
 `server.mjs` selects the store only through
-`OK_CONSOLE_SESSION_STORE_MODE=disabled|postgres`. The default `disabled` mode
-preserves the local fixture prototype and returns `503 SESSION_UNAVAILABLE` on
-session routes. It never creates a hidden in-memory store. A non-fixture
-observed-state source is rejected in this mode so real observations cannot be
-exposed through the prototype authorizer.
+`OK_CONSOLE_SESSION_STORE_MODE=disabled|postgres`. Disabled sessions require
+the explicit server-side `OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true` opt-in. The
+server rejects the mode without that setting and only permits it on a loopback
+bind (`127.0.0.1`, `::1`, or `localhost`) outside `NODE_ENV=production`.
+`OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED=true` is a separate
+acknowledgement for disposable local clusters that need a Pod bind or production
+Node runtime; it is set by the local-kind overlay and disposable CI smoke
+container. These settings control
+BFF authorization and are independent of browser `VITE_CONSOLE_AUTH_MODE`.
+Disabled sessions return `503 SESSION_UNAVAILABLE` on session routes and never
+create a hidden in-memory store. A non-fixture observed-state source is rejected
+in this mode so real observations cannot be exposed through the prototype
+authorizer.
 
 The `postgres` mode is atomic: process startup creates the PostgreSQL store,
 installs session-backed point-of-use authorization, and configures exact-Origin
@@ -267,6 +275,7 @@ never point this variable at a non-disposable database.
 Failure injection is disabled by default. For local verification only:
 
 ```bash
+OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true \
 OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION=true pnpm start:bff
 ```
 

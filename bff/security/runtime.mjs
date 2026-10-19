@@ -22,6 +22,21 @@ export class SessionRuntimeConfigurationError extends Error {
   }
 }
 
+const validatePrototypeRuntime = (env) => {
+  if (env.OK_CONSOLE_DEV_PROTOTYPE_ENABLED !== 'true') {
+    throw new SessionRuntimeConfigurationError('A disabled session runtime requires OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true.')
+  }
+
+  const host = env.OK_CONSOLE_BFF_HOST ?? '127.0.0.1'
+  const disposableLocalClusterAcknowledged = env.OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED === 'true'
+  if (!['127.0.0.1', '::1', 'localhost'].includes(host) && !disposableLocalClusterAcknowledged) {
+    throw new SessionRuntimeConfigurationError('The prototype BFF host must be 127.0.0.1, ::1, or localhost.')
+  }
+  if (env.NODE_ENV === 'production' && !disposableLocalClusterAcknowledged) {
+    throw new SessionRuntimeConfigurationError('The prototype runtime cannot use NODE_ENV=production without OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED=true.')
+  }
+}
+
 const required = (env, name) => {
   const value = env[name]
   if (typeof value !== 'string' || value.trim() === '') {
@@ -221,7 +236,8 @@ export const createSessionRuntime = async ({
     if ((env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture') !== 'fixture') {
       throw new SessionRuntimeConfigurationError('A non-fixture observed-state source requires the PostgreSQL session runtime.')
     }
-    return { mode, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, localAccessHandler: null, ready: async () => true, close: async () => {} }
+    validatePrototypeRuntime(env)
+    return { mode, prototypeEnabled: true, sessionStore: null, expectedOrigin: undefined, authorizer: undefined, oidcHandler: null, localAccessHandler: null, ready: async () => true, close: async () => {} }
   }
   if (mode !== 'postgres') {
     throw new SessionRuntimeConfigurationError('OK_CONSOLE_SESSION_STORE_MODE must be disabled or postgres.')
@@ -368,6 +384,7 @@ export const createSessionRuntime = async ({
 
   return {
     mode,
+    prototypeEnabled: false,
     sessionStore,
     expectedOrigin,
     authorizer,

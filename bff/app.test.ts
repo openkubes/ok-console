@@ -4,7 +4,7 @@ import { createServer, type Server } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { validateConsoleResponse } from '../src/domain/presentationContract'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
-import { createConsoleBffHandler } from './app.mjs'
+import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 
 type JsonRecord = Record<string, unknown>
 
@@ -12,7 +12,7 @@ const fixtureSource = new FixtureObservedStateAdapter()
 let server: Server
 let baseUrl: string
 
-const startBff = async (options: Parameters<typeof createConsoleBffHandler>[0] = { source: fixtureSource }) => {
+const startBff = async (options: Parameters<typeof createConsoleBffHandler>[0] = { source: fixtureSource, authorizer: prototypeAuthorizer }) => {
   server = createServer(createConsoleBffHandler(options))
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
@@ -33,6 +33,7 @@ const getJson = async (path: string, init?: RequestInit) => {
 beforeEach(async () => {
   await startBff({
     source: fixtureSource,
+    authorizer: prototypeAuthorizer,
     enableFailureInjection: true,
     now: () => new Date('2026-08-21T18:00:00Z'),
     correlationId: () => 'corr-provider-test',
@@ -44,6 +45,13 @@ afterEach(async () => {
 })
 
 describe('read-only Console BFF provider', () => {
+  it('requires an explicit callable authorizer at handler construction', () => {
+    expect(() => createConsoleBffHandler({ source: fixtureSource } as Parameters<typeof createConsoleBffHandler>[0]))
+      .toThrow('requires an explicit callable authorizer')
+    expect(() => createConsoleBffHandler({ source: fixtureSource, authorizer: null } as unknown as Parameters<typeof createConsoleBffHandler>[0]))
+      .toThrow('requires an explicit callable authorizer')
+  })
+
   it.each([
     ['/api/console/v0/session', 'SessionContext'],
     ['/api/console/v0/overview', 'PlatformOverview'],
@@ -84,7 +92,7 @@ describe('read-only Console BFF provider', () => {
       }),
     }
     await stopBff()
-    await startBff({ source, correlationId: () => 'corr-redaction-test' })
+    await startBff({ source, authorizer: prototypeAuthorizer, correlationId: () => 'corr-redaction-test' })
 
     const { body } = await getJson('/api/console/v0/clusters/cluster-ok-mgmt')
     const serialized = JSON.stringify(body)
@@ -174,6 +182,7 @@ describe('read-only Console BFF provider', () => {
     await stopBff()
     await startBff({
       source: fixtureSource,
+      authorizer: prototypeAuthorizer,
       dryRunExecutor: async ({ contract, identity, correlationId }) => ({
         format: 'ok147-create-plan/v1',
         operation: 'CreateCluster',
@@ -208,6 +217,7 @@ describe('read-only Console BFF provider', () => {
     await stopBff()
     await startBff({
       source: { readSnapshot: async () => { throw new Error('backend details must stay private') } },
+      authorizer: prototypeAuthorizer,
       correlationId: () => 'corr-source-test',
     })
 

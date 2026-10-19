@@ -5,6 +5,10 @@ production bundle. Every resource is JSON, which is also valid Kubernetes input
 and allows the repository tests to inspect the complete object without a YAML
 parser ambiguity.
 
+The deployment authorization guard is part of `pnpm test:deployment`. It renders
+every target overlay with `kubectl kustomize` and parses the result with Python 3
+and PyYAML; both commands must be available when running that focused check.
+
 ## Deliberate safety stops
 
 - The Deployment image uses an all-zero, syntactically valid digest. Replace it
@@ -60,8 +64,14 @@ Apply only the completed overlay, not this fail-closed base directory.
 The `overlays/local-kind` path is an intentionally separate, development-only
 projection of the secure base. It runs one replica with the deterministic
 fixture source and disables session persistence, OIDC, and exceptional local
-accounts. It neither needs nor creates application Secrets. The base directory
-retains every production safety stop described above.
+accounts. Because the BFF prototype authorizer is otherwise disabled, this
+overlay explicitly sets `OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true` and
+`OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED=true`. The second setting
+acknowledges the disposable Kind Pod's non-loopback bind; the verifier targets
+`kind-${OK_CONSOLE_KIND_CLUSTER:-ok-console-ok169}`. These BFF server settings are independent
+of browser `VITE_CONSOLE_AUTH_MODE`. It neither needs nor creates application
+Secrets. The base directory retains every production safety stop described
+above.
 
 Run the complete local proof from the repository root:
 
@@ -106,32 +116,6 @@ dropped capabilities, disabled ServiceAccount token mounting, resource bounds,
 probes, and default-deny policy. Kind's default CNI does not itself prove target
 cluster NetworkPolicy enforcement; that remains an explicit later environment
 gate.
-
-## OK-170 ok-shared preview
-
-The `overlays/ok-shared-preview` path is the first target-specific deployment
-step for the shared OpenKubes development cluster. It pins the accepted rc.3
-image digest and keeps the Console in fixture-backed, read-only preview mode.
-OIDC, PostgreSQL, exceptional local access and the observed-state producer are
-disabled until their real ok-shared dependencies and secret custody are
-reviewed. It does not expose an unauthenticated Ingress.
-
-Render and validate without changing the cluster:
-
-```bash
-./deploy/kubernetes/verify-ok-shared-preview.sh
-```
-
-After review, deployment requires an explicit apply gate:
-
-```bash
-OK_CONSOLE_APPLY=true ./deploy/kubernetes/verify-ok-shared-preview.sh
-```
-
-The verifier requires the exact `ok-shared-admin@ok-shared` context and refuses
-to modify a pre-existing `openkubes-console` namespace unless it carries the
-`openkubes.io/managed-by=ok-170` ownership label. The Phase A inventory and the
-remaining live-integration gates are recorded in `docs/evidence/ok-170`.
 
 ## OK-172 ok-shared live slice
 

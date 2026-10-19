@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { validateConsoleResponse } from '../src/domain/presentationContract'
 import { OpenKubesObservedStateAdapter } from './adapters/openKubesObservedState.mjs'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
-import { createConsoleBffHandler } from './app.mjs'
+import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 import { createObservedStateSource } from './source.mjs'
 
 type JsonRecord = Record<string, unknown>
@@ -58,6 +58,7 @@ const startQuery = async (payload: unknown, { status = 200, contentType = 'appli
 
 const startBff = async (source: OpenKubesObservedStateAdapter) => listen(createServer(createConsoleBffHandler({
   source,
+  authorizer: prototypeAuthorizer,
   now: () => new Date('2026-08-21T18:01:00Z'),
   correlationId: () => 'corr-openkubes-integration',
 })))

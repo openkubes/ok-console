@@ -81,9 +81,16 @@ The OK-158 read-only BFF now runs as a separate local process. Start it in one
 terminal and the BFF-backed Console in another:
 
 ```bash
-pnpm start:bff
+OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true pnpm start:bff
 VITE_CONSOLE_DATA_MODE=bff pnpm dev
 ```
+
+Disabled BFF sessions require `OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true` and a
+loopback bind (`127.0.0.1`, `::1`, or `localhost`) outside `NODE_ENV=production`.
+Only disposable local clusters may additionally set
+`OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED=true` to permit a Pod bind
+and a production Node runtime. Browser `VITE_CONSOLE_AUTH_MODE` does not enable
+BFF authorization.
 
 Vite proxies `/api/console/v0` to the local BFF. Endpoints, security boundaries,
 failure injection, and production evolution are documented in
@@ -105,10 +112,13 @@ and narrowly permit its real dependencies.
 
 ```bash
 docker build --build-arg VCS_REF="$(git rev-parse HEAD)" --tag ok-console:local .
-docker run --read-only --publish 127.0.0.1:8787:8787 ok-console:local
+# Startup requires a configured PostgreSQL session runtime; see bff/README.md.
+docker run --read-only --env-file /path/to/session-runtime.env \
+  --publish 127.0.0.1:8787:8787 ok-console:local
 ```
 
-Local container builds retain the explicit `fixture` + `prototype` defaults.
+Local container builds retain the browser `fixture` + `prototype` defaults.
+The BFF refuses to start without explicit server authorization configuration.
 The trusted development-tag workflow builds a separate `bff` + `bootstrap`
 candidate and records those profiles in immutable OCI labels. That live browser
 profile still fails closed unless PostgreSQL, mounted session/bootstrap files,

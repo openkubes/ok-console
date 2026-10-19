@@ -1,0 +1,6 @@
+2026-10-19T06:38:01.935 curl: (28) Operation timed out after 20000 milliseconds with 0 bytes received
+2026-10-19T06:38:01.943 E2a curl 1 rc=28
+2026-10-19T06:38:21.954 curl: (28) Operation timed out after 20002 milliseconds with 0 bytes received
+2026-10-19T06:38:21.963 E2a curl 2 rc=28
+2026-10-19T06:38:42.005 curl: (28) Operation timed out after 20002 milliseconds with 0 bytes received
+2026-10-19T06:38:42.011 E2a curl 3 rc=28

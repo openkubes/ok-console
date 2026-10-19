@@ -86,7 +86,7 @@
             { "name": "OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE", "value": "/run/secrets/ok-console/local/accounts.json" },
             { "name": "OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE", "value": "/run/secrets/ok-console/local/pepper" },
             { "name": "OK_CONSOLE_OBSERVED_STATE_MODE", "value": "openkubes" },
-            { "name": "OK_CONSOLE_OBSERVED_STATE_URL", "value": "https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha1" },
+            { "name": "OK_CONSOLE_OBSERVED_STATE_URL", "value": "https://observed-state-producer.openkubes-console.svc:8443/api/console-observed-state/v0alpha2" },
             { "name": "OK_CONSOLE_OBSERVED_STATE_CA_FILE", "value": "/run/secrets/ok-console/observed-state/ca.crt" },
             { "name": "OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE", "value": "/run/secrets/ok-console/observed-state/tls.crt" },
             { "name": "OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE", "value": "/run/secrets/ok-console/observed-state/tls.key" }

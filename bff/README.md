@@ -294,12 +294,20 @@ Do not enable this switch in a shared or production environment.
 ## OpenKubes observed-state mode
 
 The real-source path consumes the versioned read-only query envelope
-`observed.openkubes.io/v0alpha1` / `ConsoleObservedState`. Configure the BFF
+`observed.openkubes.io/v0alpha2` / `ConsoleObservedState`. Every cluster,
+capability, placement and evidence object carries `ownership`
+(`environmentId`, `tenantId`), and metrics arrive as one bucket per owner.
+The BFF rejects an envelope with missing or inconsistent ownership, duplicate
+ids or unresolved or cross-owner references, then filters every object to the
+tenants the session may see (its tenants intersected with
+`OK_CONSOLE_TENANT_ID`) before any projection. An object of another tenant
+returns the same 404 as an unknown id. Ownership-free `v0alpha1` envelopes are
+rejected. Configure the BFF
 process—not the browser—with:
 
 ```bash
 OK_CONSOLE_OBSERVED_STATE_MODE=openkubes \
-OK_CONSOLE_OBSERVED_STATE_URL=https://platform.example/api/console-observed-state/v0alpha1 \
+OK_CONSOLE_OBSERVED_STATE_URL=https://platform.example/api/console-observed-state/v0alpha2 \
 OK_CONSOLE_OBSERVED_STATE_CA_FILE=/run/secrets/ok-console/observed-state/ca.crt \
 OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE=/run/secrets/ok-console/observed-state/tls.crt \
 OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE=/run/secrets/ok-console/observed-state/tls.key \

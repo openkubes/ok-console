@@ -17,6 +17,8 @@ import {
 import { handleSessionHttp } from './security/httpSession.mjs'
 import { ObservedStateContractError } from './adapters/openKubesObservedState.mjs'
 
+import { authorizedSnapshot } from './authorizedSnapshot.mjs'
+
 const ROUTE_PREFIX = '/api/console/v0'
 const DEFAULT_IDENTITY = {
   id: 'user-arash',
@@ -51,6 +53,7 @@ const readJsonBody = async (request, maxBytes = 256 * 1024) => {
 export const prototypeAuthorizer = async ({ permission }) => ({
   allowed: DEFAULT_IDENTITY.permissions.includes(permission),
   identity: DEFAULT_IDENTITY,
+  scope: { environmentId: 'community-preview', tenantIds: ['platform'] },
 })
 
 const sendJson = (response, status, payload, correlationId) => {
@@ -230,7 +233,7 @@ export const createConsoleBffHandler = ({
       const failure = enableFailureInjection ? url.searchParams.get('failure') : null
       failureResponse(failure)
 
-      const snapshot = await source.readSnapshot()
+      const snapshot = authorizedSnapshot(await source.readSnapshot(), authorization.scope)
       const payload = routeResponse({
         pathname: url.pathname,
         snapshot,

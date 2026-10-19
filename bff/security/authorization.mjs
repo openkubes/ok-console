@@ -38,9 +38,17 @@ export const authorizeSecurityContext = (context, request, now = () => new Date(
   if (!context.permissions.includes(request.permission)) return deny('PERMISSION_DENIED')
   if (request.requiredAssurance?.some((item) => !context.subject.assurance.includes(item))) return deny('ASSURANCE_INSUFFICIENT')
 
+  const visibleTenantIds = request.tenantId
+    ? context.scope.tenantIds.filter((tenantId) => tenantId === request.tenantId)
+    : [...context.scope.tenantIds]
+
   return {
     allowed: true,
     reason: 'AUTHORIZED',
+    scope: {
+      environmentId: context.scope.environmentId,
+      tenantIds: visibleTenantIds,
+    },
     identity: {
       id: context.subject.id,
       displayName: context.subject.displayName,

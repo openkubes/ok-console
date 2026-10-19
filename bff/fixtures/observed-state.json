@@ -5,11 +5,14 @@
     "id": "community-preview",
     "displayName": "Community preview"
   },
-  "metrics": {
-    "capabilities": { "total": 7, "ready": 5, "pending": 2, "failed": 0, "unknown": 0 },
-    "workloadClaims": { "total": 3, "ready": 1, "pending": 2, "failed": 0, "unknown": 0 },
-    "openFindings": { "total": 2, "critical": 0 }
-  },
+  "metrics": [
+    {
+      "ownership": { "environmentId": "community-preview", "tenantId": "platform" },
+      "capabilities": { "total": 7, "ready": 5, "pending": 2, "failed": 0, "unknown": 0 },
+      "workloadClaims": { "total": 3, "ready": 1, "pending": 2, "failed": 0, "unknown": 0 },
+      "openFindings": { "total": 2, "critical": 0 }
+    }
+  ],
   "clusters": [
     {
       "id": "cluster-ok-mgmt",
@@ -24,11 +27,12 @@
       "contractVersion": "platform.openkubes.io/v1alpha1",
       "revision": "rev-7d2a9c",
       "evidenceId": "ev-mgmt-ready",
+      "ownership": { "environmentId": "community-preview", "tenantId": "platform" },
       "capabilities": [
-        { "id": "cap-identity", "name": "Identity", "readiness": "Ready", "evidenceId": "ev-mgmt-ready" },
-        { "id": "cap-gitops", "name": "GitOps", "readiness": "Ready", "evidenceId": "ev-mgmt-ready" },
-        { "id": "cap-observability", "name": "Observability", "readiness": "Ready", "evidenceId": "ev-mgmt-ready" },
-        { "id": "cap-registry", "name": "Artifact Registry", "readiness": "Ready", "evidenceId": "ev-mgmt-ready" }
+        { "id": "cap-identity", "name": "Identity", "readiness": "Ready", "evidenceId": "ev-mgmt-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-gitops", "name": "GitOps", "readiness": "Ready", "evidenceId": "ev-mgmt-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-observability", "name": "Observability", "readiness": "Ready", "evidenceId": "ev-mgmt-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-registry", "name": "Artifact Registry", "readiness": "Ready", "evidenceId": "ev-mgmt-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } }
       ],
       "lifecycle": [
         { "label": "Declared", "state": "Ready", "detail": "Contract accepted · generation 14" },
@@ -50,10 +54,11 @@
       "contractVersion": "platform.openkubes.io/v1alpha1",
       "revision": "rev-a812ef",
       "evidenceId": "ev-ai-ready",
+      "ownership": { "environmentId": "community-preview", "tenantId": "platform" },
       "capabilities": [
-        { "id": "cap-storage", "name": "Persistent Storage", "readiness": "Ready", "evidenceId": "ev-ai-ready" },
-        { "id": "cap-observability", "name": "Observability", "readiness": "Ready", "evidenceId": "ev-ai-ready" },
-        { "id": "cap-ingress", "name": "Ingress", "readiness": "Ready", "evidenceId": "ev-ai-ready" }
+        { "id": "cap-storage", "name": "Persistent Storage", "readiness": "Ready", "evidenceId": "ev-ai-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-observability", "name": "Observability", "readiness": "Ready", "evidenceId": "ev-ai-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-ingress", "name": "Ingress", "readiness": "Ready", "evidenceId": "ev-ai-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } }
       ],
       "lifecycle": [
         { "label": "Declared", "state": "Ready", "detail": "Contract accepted · generation 8" },
@@ -75,10 +80,11 @@
       "contractVersion": "platform.openkubes.io/v1alpha1",
       "revision": "rev-1c490d",
       "evidenceId": "ev-shared-pending",
+      "ownership": { "environmentId": "community-preview", "tenantId": "platform" },
       "capabilities": [
-        { "id": "cap-identity", "name": "Identity", "readiness": "Ready", "evidenceId": "ev-shared-pending" },
-        { "id": "cap-registry", "name": "Artifact Registry", "readiness": "Pending", "evidenceId": "ev-shared-pending" },
-        { "id": "cap-messaging", "name": "Messaging", "readiness": "Pending", "evidenceId": "ev-shared-pending" }
+        { "id": "cap-identity", "name": "Identity", "readiness": "Ready", "evidenceId": "ev-shared-pending", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-registry", "name": "Artifact Registry", "readiness": "Pending", "evidenceId": "ev-shared-pending", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-messaging", "name": "Messaging", "readiness": "Pending", "evidenceId": "ev-shared-pending", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } }
       ],
       "lifecycle": [
         { "label": "Declared", "state": "Ready", "detail": "Contract accepted · generation 3" },
@@ -100,9 +106,10 @@
       "contractVersion": "platform.openkubes.io/v1alpha0",
       "revision": "rev-88e913",
       "evidenceId": "ev-edge-unknown",
+      "ownership": { "environmentId": "community-preview", "tenantId": "platform" },
       "capabilities": [
-        { "id": "cap-storage", "name": "Persistent Storage", "readiness": "Unknown", "evidenceId": "ev-edge-unknown" },
-        { "id": "cap-observability", "name": "Observability", "readiness": "Unknown", "evidenceId": "ev-edge-unknown" }
+        { "id": "cap-storage", "name": "Persistent Storage", "readiness": "Unknown", "evidenceId": "ev-edge-unknown", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+        { "id": "cap-observability", "name": "Observability", "readiness": "Unknown", "evidenceId": "ev-edge-unknown", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } }
       ],
       "lifecycle": [
         { "label": "Declared", "state": "Ready", "detail": "Legacy contract recognized" },
@@ -113,14 +120,14 @@
     }
   ],
   "placements": [
-    { "id": "claim-private-ai", "name": "private-ai-workspace", "targetCluster": "ok-ai", "readiness": "Ready", "evidenceId": "ev-ai-ready" },
-    { "id": "claim-event-bus", "name": "factory-event-bus", "targetCluster": "ok-shared", "readiness": "Pending", "evidenceId": "ev-shared-pending" },
-    { "id": "claim-registry", "name": "sovereign-registry", "targetCluster": "ok-shared", "readiness": "Pending", "evidenceId": "ev-shared-pending" }
+    { "id": "claim-private-ai", "name": "private-ai-workspace", "targetCluster": "ok-ai", "targetClusterId": "cluster-ok-ai", "readiness": "Ready", "evidenceId": "ev-ai-ready", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+    { "id": "claim-event-bus", "name": "factory-event-bus", "targetCluster": "ok-shared", "targetClusterId": "cluster-ok-shared", "readiness": "Pending", "evidenceId": "ev-shared-pending", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+    { "id": "claim-registry", "name": "sovereign-registry", "targetCluster": "ok-shared", "targetClusterId": "cluster-ok-shared", "readiness": "Pending", "evidenceId": "ev-shared-pending", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } }
   ],
   "evidence": [
-    { "id": "ev-mgmt-ready", "title": "Management plane readiness receipt", "type": "Transition", "outcome": "Ready", "clusterId": "cluster-ok-mgmt", "contract": "OpenKubesCluster/v1alpha1", "revision": "sha256:71d4…9ab2", "observedAt": "2026-08-21T17:59:30Z", "source": "ok-mgmt observer", "summary": "All management-plane invariants are satisfied for generation 14.", "classification": "Immutable" },
-    { "id": "ev-ai-ready", "title": "AI cluster capability conformance", "type": "Observation", "outcome": "Ready", "clusterId": "cluster-ok-ai", "contract": "CapabilitySet/v1alpha1", "revision": "sha256:e503…14cf", "observedAt": "2026-08-21T17:59:30Z", "source": "capability observer", "summary": "Storage, ingress and observability contracts are currently conformant.", "classification": "Current" },
-    { "id": "ev-shared-pending", "title": "Shared services convergence", "type": "Observation", "outcome": "Pending", "clusterId": "cluster-ok-shared", "contract": "CapabilitySet/v1alpha1", "revision": "sha256:103a…81de", "observedAt": "2026-08-21T17:58:51Z", "source": "capability observer", "summary": "Messaging endpoint evidence has not entered the required freshness window.", "classification": "Current" },
-    { "id": "ev-edge-unknown", "title": "Edge observation freshness exceeded", "type": "Observation", "outcome": "Unknown", "clusterId": "cluster-edge-07", "contract": "OpenKubesCluster/v1alpha0", "revision": "sha256:c11a…067f", "observedAt": "2026-08-21T13:03:17Z", "source": "edge observer", "summary": "Last observation is outside the contract freshness window; no failure is inferred.", "classification": "Current" }
+    { "id": "ev-mgmt-ready", "title": "Management plane readiness receipt", "type": "Transition", "outcome": "Ready", "clusterId": "cluster-ok-mgmt", "contract": "OpenKubesCluster/v1alpha1", "revision": "sha256:71d4…9ab2", "observedAt": "2026-08-21T17:59:30Z", "source": "ok-mgmt observer", "summary": "All management-plane invariants are satisfied for generation 14.", "classification": "Immutable", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+    { "id": "ev-ai-ready", "title": "AI cluster capability conformance", "type": "Observation", "outcome": "Ready", "clusterId": "cluster-ok-ai", "contract": "CapabilitySet/v1alpha1", "revision": "sha256:e503…14cf", "observedAt": "2026-08-21T17:59:30Z", "source": "capability observer", "summary": "Storage, ingress and observability contracts are currently conformant.", "classification": "Current", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+    { "id": "ev-shared-pending", "title": "Shared services convergence", "type": "Observation", "outcome": "Pending", "clusterId": "cluster-ok-shared", "contract": "CapabilitySet/v1alpha1", "revision": "sha256:103a…81de", "observedAt": "2026-08-21T17:58:51Z", "source": "capability observer", "summary": "Messaging endpoint evidence has not entered the required freshness window.", "classification": "Current", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } },
+    { "id": "ev-edge-unknown", "title": "Edge observation freshness exceeded", "type": "Observation", "outcome": "Unknown", "clusterId": "cluster-edge-07", "contract": "OpenKubesCluster/v1alpha0", "revision": "sha256:c11a…067f", "observedAt": "2026-08-21T13:03:17Z", "source": "edge observer", "summary": "Last observation is outside the contract freshness window; no failure is inferred.", "classification": "Current", "ownership": { "environmentId": "community-preview", "tenantId": "platform" } }
   ]
 }

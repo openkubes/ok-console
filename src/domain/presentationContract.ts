@@ -87,6 +87,8 @@ export interface StatusCount {
   unknown: number
 }
 
+export type ObservedMetricCount = { [Field in keyof StatusCount]: number | null }
+
 export interface ClusterSummaryData {
   id: string
   name: string
@@ -105,13 +107,13 @@ export interface ClusterSummaryData {
 
 export interface PlatformOverviewData {
   clusters: StatusCount
-  capabilities: StatusCount
-  workloadClaims: StatusCount
+  capabilities: ObservedMetricCount
+  workloadClaims: ObservedMetricCount
   openFindings: {
-    total: number
-    critical: number
+    total: number | null
+    critical: number | null
   }
-  managementPlane: ClusterSummaryData
+  managementPlane: ClusterSummaryData | null
   recentPlacements: Array<{
     id: string
     name: string
@@ -259,13 +261,13 @@ const validateClusterSummary = (value: unknown, errors: string[], path = 'data')
   }
 }
 
-const validateStatusCount = (value: unknown, errors: string[], path: string) => {
+const validateStatusCount = (value: unknown, errors: string[], path: string, nullable = false) => {
   if (!isRecord(value)) {
     errors.push(`${path} must be an object`)
     return
   }
   for (const field of ['total', 'ready', 'pending', 'failed', 'unknown']) {
-    if (!Number.isInteger(value[field]) || Number(value[field]) < 0) {
+    if (!(nullable && value[field] === null) && (!Number.isInteger(value[field]) || Number(value[field]) < 0)) {
       errors.push(`${path}.${field} must be a non-negative integer`)
     }
   }
@@ -303,14 +305,17 @@ const validateData = (kind: PresentationKind, value: unknown, errors: string[]) 
     }
     case 'PlatformOverview': {
       validateStatusCount(value.clusters, errors, 'data.clusters')
-      validateStatusCount(value.capabilities, errors, 'data.capabilities')
-      validateStatusCount(value.workloadClaims, errors, 'data.workloadClaims')
+      validateStatusCount(value.capabilities, errors, 'data.capabilities', true)
+      validateStatusCount(value.workloadClaims, errors, 'data.workloadClaims', true)
       if (!isRecord(value.openFindings)) {
         errors.push('data.openFindings must be an object')
-      } else if (!Number.isInteger(value.openFindings.total) || !Number.isInteger(value.openFindings.critical)) {
+      } else if (['total', 'critical'].some((field) => {
+        const metric = (value.openFindings as Record<string, unknown>)[field]
+        return metric !== null && (!Number.isInteger(metric) || Number(metric) < 0)
+      })) {
         errors.push('data.openFindings values must be integers')
       }
-      validateClusterSummary(value.managementPlane, errors, 'data.managementPlane')
+      if (value.managementPlane !== null) validateClusterSummary(value.managementPlane, errors, 'data.managementPlane')
       if (!Array.isArray(value.recentPlacements)) {
         errors.push('data.recentPlacements must be an array')
       } else {

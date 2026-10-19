@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { consoleData } from './data/consoleData'
+import overviewExample from '../contracts/presentation/v0alpha1/examples/platform-overview.json'
+import type { PlatformOverviewData } from './domain/presentationContract'
 import type { ConsoleAuthClient } from './auth/authClient'
 
 const renderSignedIn = async () => {
@@ -217,4 +220,32 @@ describe('OpenKubes Console', () => {
     expect(await screen.findByRole('heading', { name: /Registration journey validated/i })).toBeInTheDocument()
     expect(screen.getByText(/Simulated only · no resource created/i)).toBeInTheDocument()
   })
+})
+
+
+it('shows unavailable observed metrics and no invented management plane for a tenant-only fleet', async () => {
+  window.location.hash = '#/overview'
+  const snapshot = await consoleData.getSnapshot()
+  snapshot.clusters = snapshot.clusters.filter((cluster) => cluster.id === 'cluster-ok-ai')
+  snapshot.overview = {
+    ...overviewExample.data as PlatformOverviewData,
+    managementPlane: null,
+    capabilities: { total: null, ready: null, pending: null, failed: null, unknown: null },
+    workloadClaims: { total: null, ready: null, pending: null, failed: null, unknown: null },
+    openFindings: { total: null, critical: null },
+  }
+  const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot)
+  try {
+    await renderSignedIn()
+    expect(await screen.findAllByText('Unavailable')).toHaveLength(3)
+    expect(screen.getByText(/0 management plane/)).toBeInTheDocument()
+    expect(document.querySelector('.management-ribbon')).toBeNull()
+    window.location.hash = '#/clusters'
+    fireEvent(window, new Event('hashchange'))
+    expect(await screen.findByRole('button', { name: 'Ready · 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Attention · 0' })).toBeInTheDocument()
+    expect(document.querySelector('.management-row')).toBeNull()
+  } finally {
+    observation.mockRestore()
+  }
 })

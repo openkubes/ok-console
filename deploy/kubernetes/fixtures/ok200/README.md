@@ -21,9 +21,26 @@ raw URLs, PIDs, object names and full bind errors were discarded at capture;
 these fixtures use fixed non-secret placeholders for those unrecoverable fields.
 They are not byte-for-byte original raw logs.
 
-The two tunnel messages come from Kubernetes v1.37.0
-[`tunneling_dialer.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/tools/portforward/tunneling_dialer.go#L120):
+The two tunnel messages come from Kubernetes v1.37.1 (the fixture binary)
+[`tunneling_dialer.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/staging/src/k8s.io/client-go/tools/portforward/tunneling_dialer.go#L120):
 `Before WebSocket Upgrade Connection...` and `Negotiation complete`.
 These indicate WebSocket tunnel negotiation, including its successful completion.
 Actual fallback uses the separate primary-to-secondary message in
-[`fallback_dialer.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go#L74).
+[`fallback_dialer.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go#L74).
+
+Both cited dialer files are byte-identical at v1.37.0.
+
+The reconstructed bind errors follow the upstream `portforward.go` format strings
+at [v1.27.4](https://github.com/kubernetes/kubernetes/blob/v1.27.4/staging/src/k8s.io/client-go/tools/portforward/portforward.go#L214-L282)
+and [v1.37.1](https://github.com/kubernetes/kubernetes/blob/v1.37.1/staging/src/k8s.io/client-go/tools/portforward/portforward.go#L343-L411):
+
+- `Unable to listen on port %d: %v\n` (per-port stderr).
+- `fmt.Errorf("%s: %v", "Listeners failed to create with the following errors", errors)`
+  (the listener errors slice renders inside square brackets).
+- `unable to create listener: Error %s` (the Go network error wrapper).
+- `unable to listen on any of the requested ports: %v` (the returned error;
+  kubectl prefixes `error: `, and the port slice renders as `[{18787 8787}]`).
+
+These fixed placeholders model an occupied IPv4-only listener. The expected
+sanitized output retains only the helper's generic listen-error class, with no
+bind address or requested-port list.

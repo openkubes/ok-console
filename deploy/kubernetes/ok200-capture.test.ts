@@ -165,6 +165,22 @@ run_capture_command touch "$3"
     expect(await readdir(fixtureDirectory)).not.toContain(marker.split('/').at(-1))
   })
 
+  it.each([
+    ['/api/v1/pods', 'core-api'],
+    ['/api/v1/namespaces/private/pods/private/portforward', 'pod-portforward'],
+    ['/apis/apps/v1', 'grouped-api'],
+    ['/version', 'version'],
+    ['/private', 'other'],
+    ['', 'other'],
+  ])('classifies legacy status-bearing path %s without retaining its URL', async (path, pathClass) => {
+    const output = join(fixtureDirectory, `legacy-path-${execution++}.log`)
+    const input = `I1019 09:42:11.213456       1 round_trippers.go:553] POST https://api.internal.invalid${path}?token=planted-legacy-token 101 Switching Protocols in 12 milliseconds`
+    await exec('bash', ['-c', 'printf "%s" "$1" | bash "$2" filter-port-forward "$3"', '_', input, helper, output], { env: environment() })
+    expect(await readFile(output, 'utf8')).toBe(
+      `klog I1019 09:42:11.213456 round_trippers.go:553 POST path=${pathClass} status=101 elapsed=12 milliseconds\n`,
+    )
+  })
+
   it.each(['v1.27.4; arbitrary payload', 'v1.27.4\u001b[31mcontrol'])('drops an unsafe legacy GitVersion: %s', async (version) => {
     const line = `Client Version: version.Info{Major:"1", Minor:"27", GitVersion:"${version}", Platform:"linux/amd64"}`
     const { stdout } = await exec('bash', ['-c', 'source "$1"; sanitize_command_output versions "$2"', '_', helper, line], { env: environment() })
@@ -237,7 +253,7 @@ append_file "$2/aggregate.txt" "$content" 32768
     expect(sanitized).toContain('Forwarding from 127.0.0.1:18787 -> 8787')
     expect(sanitized).toContain('Handling connection for 18787')
     expect(sanitized).toContain('error: kubectl was unable to forward the requested port (details omitted)')
-    expect(sanitized).toContain('round_trippers.go:553 GET status=503 elapsed=12 milliseconds')
+    expect(sanitized).toContain('round_trippers.go:553 GET path=core-api status=503 elapsed=12 milliseconds')
     expect(sanitized).toContain('round_trippers.go:553 GET path=core-api status=none milliseconds=13')
     expect(sanitized).toContain('portforward.go:406 GET status=503 elapsed=12ms')
     expect(sanitized).toContain(
@@ -429,7 +445,7 @@ capture_workloads "$2/workloads.txt" kind-test
     expect(sanitized).toContain('Forwarding from 127.0.0.1:18787 -> 8787')
     expect(sanitized).toContain('Handling connection for 18787')
     expect(sanitized).toContain('error: kubectl was unable to forward the requested port (details omitted)')
-    expect(sanitized).toContain('round_trippers.go:553 GET status=503 elapsed=12 milliseconds')
+    expect(sanitized).toContain('round_trippers.go:553 GET path=core-api status=503 elapsed=12 milliseconds')
     expect(sanitized).not.toContain('planted-')
   })
 

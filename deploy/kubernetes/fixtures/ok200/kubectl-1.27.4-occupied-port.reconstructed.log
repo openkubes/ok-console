@@ -1,4 +1,5 @@
 I1019 18:37:03.022618       1 round_trippers.go:553] GET https://api.example.invalid/api/v1/namespaces/openkubes-console/pods/current-pod 200 OK in 16 milliseconds
 I1019 18:37:03.032430       1 round_trippers.go:553] GET https://api.example.invalid/api/v1/namespaces/openkubes-console/pods/current-pod 200 OK in 4 milliseconds
 I1019 18:37:03.082506       1 round_trippers.go:553] POST https://api.example.invalid/api/v1/namespaces/openkubes-console/pods/current-pod/portforward 101 Switching Protocols in 46 milliseconds
-unable to listen on port 18787: Listeners failed to create with the following errors: unable to create listener: Error listen tcp4 127.0.0.1:18787: bind: address already in use
+Unable to listen on port 18787: Listeners failed to create with the following errors: [unable to create listener: Error listen tcp4 127.0.0.1:18787: bind: address already in use]
+error: unable to listen on any of the requested ports: [{18787 8787}]

@@ -140,7 +140,8 @@ available it prints `Failure diagnostics: <directory>` as it exits.
 The private temporary directory is `${TMPDIR:-/tmp}/ok-console-ok200-failure.*`;
 retain it for diagnosis and remove it when no longer needed. Successful
 verification skips capture unless the subsequent Kind cluster deletion fails;
-that teardown failure captures diagnostics even though verification passed.
+that teardown failure captures diagnostics even though verification passed, and
+the overall exit status is the cleanup failure's non-zero status.
 Preflight refusals (including an existing unowned cluster) and exit status
 130/143 skip capture. `timeout` is optional: without it, failure capture is skipped with
 `timeout unavailable; capture skipped` on stderr and no artifact path is printed.

@@ -21,7 +21,7 @@ filter_port_forward() {
   local output_file="$1" line count=0 used=0 klog_error_re normalized_re structured_response_re
   local diagnostic_class diagnostic_stamp diagnostic_source diagnostic_line lower path_class response_url response_path
   klog_error_re='^([IWEF][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+(portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:([0-9]+)\]'
-  normalized_re='^klog [IWEF][0-9]{4} [0-9:.]+ (portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:[0-9]+ ((GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT) (path=(pod-portforward|core-api|grouped-api|version|other) status=([0-9]{3}|none|unavailable) milliseconds=[0-9]+|status=[0-9]{3} elapsed=[0-9]+(\.[0-9]+)? ?(ns|us|ms|s|m|nanoseconds?|microseconds?|milliseconds?|seconds?))|diagnostic=(other|connection-refused|connection-reset|i/o-timeout|eof|upgrade-failed|websocket-upgrade-start|websocket-upgrade-complete|fallback-to-spdy|tls-x509|tls|bind-or-listen-error))$'
+  normalized_re='^klog [IWEF][0-9]{4} [0-9:.]+ (portforward|round_trippers|httpstream|spdy|fallback_dialer|tunneling_dialer|helpers|memcache)\.go:[0-9]+ ((GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT) (path=(pod-portforward|core-api|grouped-api|version|other) status=([0-9]{3}|none|unavailable) milliseconds=[0-9]+|(path=(pod-portforward|core-api|grouped-api|version|other) )?status=[0-9]{3} elapsed=[0-9]+(\.[0-9]+)? ?(ns|us|ms|s|m|nanoseconds?|microseconds?|milliseconds?|seconds?))|diagnostic=(other|connection-refused|connection-reset|i/o-timeout|eof|upgrade-failed|websocket-upgrade-start|websocket-upgrade-complete|fallback-to-spdy|tls-x509|tls|bind-or-listen-error))$'
   structured_response_re='^([IWEF][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\][[:space:]]+"Response"[[:space:]]+verb="(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT)"[[:space:]]+url="(https?://[^"[:space:]]+)"[[:space:]]+status="(([0-9]{3})([[:space:]][^"]*)?)?"[[:space:]]+milliseconds=([0-9]+)$'
   [[ ! -e "${output_file}" || ! -s "${output_file}" ]] || fail 'port-forward sanitized log already contains data'
   : >"${output_file}"
@@ -97,8 +97,23 @@ filter_port_forward() {
       fi
       continue
     fi
-    if [[ "${line}" =~ ^([IWE][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\]\ (GET|POST|PUT|CONNECT)[[:space:]]+https?://[^[:space:]]+[[:space:]]+([0-9]{3})([[:space:]][A-Za-z][A-Za-z[:space:]]+)?[[:space:]]+in[[:space:]]+([0-9]+(\.[0-9]+)?[[:space:]]+(ns|us|ms|nanoseconds?|microseconds?|milliseconds?|seconds?|s))$ ]]; then
-      line="klog ${BASH_REMATCH[1]} round_trippers.go:${BASH_REMATCH[2]} ${BASH_REMATCH[3]} status=${BASH_REMATCH[4]} elapsed=${BASH_REMATCH[6]}"
+    if [[ "${line}" =~ ^([IWE][0-9]{4}[[:space:]][0-9:.]+)[[:space:]]+[0-9]+[[:space:]]+round_trippers\.go:([0-9]+)\]\ (GET|POST|PUT|CONNECT)[[:space:]]+(https?://[^[:space:]]+)[[:space:]]+([0-9]{3})([[:space:]][A-Za-z][A-Za-z[:space:]]+)?[[:space:]]+in[[:space:]]+([0-9]+(\.[0-9]+)?[[:space:]]+(ns|us|ms|nanoseconds?|microseconds?|milliseconds?|seconds?|s))$ ]]; then
+      response_url="${BASH_REMATCH[4]}"
+      response_path="${response_url#*://}"
+      response_path="${response_path%%\?*}"
+      if [[ "${response_path}" == */* ]]; then
+        response_path="/${response_path#*/}"
+      else
+        response_path='/'
+      fi
+      case "${response_path}" in
+        */portforward) path_class='pod-portforward' ;;
+        /api|/api/*) path_class='core-api' ;;
+        /apis|/apis/*) path_class='grouped-api' ;;
+        /version) path_class='version' ;;
+        *) path_class='other' ;;
+      esac
+      line="klog ${BASH_REMATCH[1]} round_trippers.go:${BASH_REMATCH[2]} ${BASH_REMATCH[3]} path=${path_class} status=${BASH_REMATCH[5]} elapsed=${BASH_REMATCH[7]}"
       if (( used + ${#line} + 1 <= 16384 )); then
         printf '%s\n' "${line}" >>"${output_file}"
         used=$((used + ${#line} + 1))
@@ -121,13 +136,14 @@ filter_port_forward() {
         diagnostic_class='websocket-upgrade-start'
       elif [[ "${diagnostic_source}" == tunneling_dialer && "${lower}" == *'negotiation complete'* ]]; then
         diagnostic_class='websocket-upgrade-complete'
-      # Kubernetes client-go v0.37.0 logs "Before WebSocket Upgrade Connection..."
+      # Kubernetes v1.37.1 (the fixture binary) logs "Before WebSocket Upgrade Connection..."
       # and "Negotiation complete" at tunneling_dialer.go:120 and :130. These mark
-      # upgrade start and successful negotiation, not fallback. See
-      # https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/tools/portforward/tunneling_dialer.go
+      # upgrade start and successful negotiation, not fallback. Both cited files are
+      # byte-identical at v1.37.0. See
+      # https://github.com/kubernetes/kubernetes/blob/v1.37.1/staging/src/k8s.io/client-go/tools/portforward/tunneling_dialer.go
       # The separate fallback_dialer.go message is "fallback to secondary dialer
       # from primary dialer err: %v" and keeps the fallback-to-spdy classification:
-      # https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go
+      # https://github.com/kubernetes/kubernetes/blob/v1.37.1/staging/src/k8s.io/client-go/tools/portforward/fallback_dialer.go
       elif [[ "${lower}" == *'fallback to spdy'* || ( "${diagnostic_source}" == fallback_dialer && "${lower}" == *'fallback to '* ) ]]; then
         diagnostic_class='fallback-to-spdy'
       elif [[ "${lower}" == *'address already in use'* || "${lower}" == *'bind:'* ]]; then

@@ -76,6 +76,9 @@ const ownershipString = (value, path) => {
 
 const normalizeOwnership = (value, path, environmentId) => {
   const item = record(value, path)
+  if (Object.keys(item).some((key) => key !== 'environmentId' && key !== 'tenantId')) {
+    throw new Error(`${path} must contain only environmentId and tenantId.`)
+  }
   const ownership = {
     environmentId: ownershipString(item.environmentId, `${path}.environmentId`),
     tenantId: ownershipString(item.tenantId, `${path}.tenantId`),

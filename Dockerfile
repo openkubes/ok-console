@@ -18,7 +18,7 @@ RUN pnpm build \
     && pnpm prune --prod \
     && test -z "$(find node_modules -type f -name '*.node' -print -quit)"
 
-FROM --platform=${TARGETPLATFORM} gcr.io/distroless/nodejs22-debian13:nonroot@sha256:4e4fb0ce55fd73901600796ef079a9490369d2515d7da31633a91608c82ca13b AS runtime
+FROM --platform=${TARGETPLATFORM} gcr.io/distroless/nodejs22-debian13:nonroot@sha256:668bb45274f097b5b8b41e9825a9bbd3b5e5c44cec5c50c61fe2a1b6ce5f6ba6 AS runtime
 
 ARG VCS_REF=unknown
 ARG VITE_CONSOLE_DATA_MODE=fixture

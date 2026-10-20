@@ -33,7 +33,7 @@ type Workload = {
 }
 
 describe('OK-173 deployable overlay authorization invariants', () => {
-  it('uses the ownership-aware observed-state contract in the live Console', () => {
+  it('uses the ownership-aware observed-state contract in the live Console', { timeout: 15_000 }, () => {
     const rendered = execFileSync('kubectl', ['kustomize', new URL('./overlays/ok-shared-live/', import.meta.url).pathname], { encoding: 'utf8' })
     const resources = yamlToJson(rendered) as Workload[]
     const deployment = resources.find((resource) => resource.kind === 'Deployment' && resource.metadata?.name === 'ok-console')

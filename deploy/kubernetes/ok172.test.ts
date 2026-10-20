@@ -107,6 +107,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(migrations).toContain('GRANT INSERT ON TABLE ok_console.local_access_audit TO ok_console')
     expect(migrations).not.toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.local_access_audit')
     expect(migrations).toContain('GRANT INSERT ON TABLE ok_console.authentication_audit TO ok_console')
+    expect(migrations).toContain('006_live_authentication_audit.sql')
   })
 
   it('runs the pinned idempotent migrations before the console starts', () => {

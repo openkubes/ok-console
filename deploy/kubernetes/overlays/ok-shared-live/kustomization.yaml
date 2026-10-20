@@ -102,7 +102,7 @@ patches:
                 drop: ["ALL"]
             args:
               - |
-                for migration in /migrations/*.sql; do
+                for migration in /migrations/006_*.sql; do
                   psql "$PGURI" -v ON_ERROR_STOP=1 -f "$migration"
                 done
             env:

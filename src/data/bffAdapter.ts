@@ -11,6 +11,7 @@ import {
   validateConsoleResponse,
 } from '../domain/presentationContract'
 import type { Cluster, ConsoleDataPort, EvidenceRef, PlatformSnapshot } from '../domain/contracts'
+import { curatedAgents } from './agentCatalog'
 
 type FetchLike = typeof fetch
 
@@ -172,7 +173,7 @@ export class BffConsoleAdapter implements ConsoleDataPort {
         decision: `Observed placement on ${placement.targetCluster}`,
         evidenceId: placement.evidenceId,
       })),
-      agents: [],
+      agents: curatedAgents,
       agentDeployments: [],
       evidence: evidence.filter((item): item is EvidenceRef => item !== undefined),
     }

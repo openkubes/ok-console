@@ -362,7 +362,7 @@ export const createSessionRuntime = async ({
       const pepper = Buffer.from(pepperValue, 'base64')
       const throttle = throttleFactory({ pool, pepper })
       const auditStore = auditFactory({ pool, pepper })
-      authenticationAudit = auditStore
+      if (!authenticationAudit) authenticationAudit = authenticationAuditFactory({ pool, pepper })
       const verifier = createLocalAccessVerifier({
         mode: method, accounts, throttle, sessionStore, authorizationRevision,
         audit: async (event) => {

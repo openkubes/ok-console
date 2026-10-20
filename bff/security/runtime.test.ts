@@ -198,16 +198,18 @@ describe('session runtime configuration', () => {
   it('wires bootstrap only from mounted verifier mappings with durable throttle and audit ports', async () => {
     const throttleFactory = vi.fn(() => ({ blocked: vi.fn(), failure: vi.fn(), success: vi.fn() }))
     const auditFactory = vi.fn(() => ({ record: vi.fn() }))
+    const authenticationAuditFactory = vi.fn(() => ({ record: vi.fn() }))
     const runtime = await createSessionRuntime({
       env: { ...baseEnv, OK_CONSOLE_LOCAL_ACCESS_MODE: 'bootstrap',
         OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE: '/run/secrets/local-accounts',
         OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper' },
       fileReader, poolFactory: () => ({ end: async () => {} }),
       storeFactory: () => ({ authorize: vi.fn(), create: vi.fn(), revoke: vi.fn() }),
-      throttleFactory, auditFactory,
+      throttleFactory, auditFactory, authenticationAuditFactory,
     })
     expect(throttleFactory).toHaveBeenCalled()
     expect(auditFactory).toHaveBeenCalled()
+    expect(authenticationAuditFactory).toHaveBeenCalled()
     expect(runtime.localAccessHandler).toEqual(expect.any(Function))
   })
 

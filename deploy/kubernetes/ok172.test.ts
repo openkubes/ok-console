@@ -108,6 +108,38 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(migrations).toContain('GRANT INSERT ON TABLE ok_console.authentication_audit TO ok_console')
   })
 
+  it('runs the pinned idempotent migrations before the console starts', () => {
+    const rendered = execFileSync('kubectl', ['kustomize', new URL(overlay, import.meta.url).pathname], { encoding: 'utf8' })
+    const resources = yamlToJson(rendered) as Array<{
+      kind?: string
+      metadata?: { name?: string }
+      spec?: { template?: { spec?: {
+        initContainers?: Array<{
+          name?: string
+          image?: string
+          command?: string[]
+          args?: string[]
+          env?: Array<{ name?: string, valueFrom?: { secretKeyRef?: { name?: string, key?: string } } }>
+          volumeMounts?: Array<{ name?: string, mountPath?: string, readOnly?: boolean }>
+        }>
+        volumes?: Array<{ name?: string, configMap?: { name?: string } }>
+      } } }
+    }>
+    const deployment = resources.find((resource) => resource.kind === 'Deployment' && resource.metadata?.name === 'ok-console')
+    const spec = deployment?.spec?.template?.spec
+    const migration = spec?.initContainers?.find((container) => container.name === 'postgres-migrations')
+
+    expect(migration?.image).toBe('ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie@sha256:26e146bc71ebfc2a3937f729a15161a7fb6cd7c8a0b0007ad60cb53d2371b3fc')
+    expect(migration?.command).toEqual(['/bin/sh', '-ec'])
+    expect(migration?.args?.[0]).toContain('psql "$PGURI" -v ON_ERROR_STOP=1 -f "$migration"')
+    expect(migration?.env).toContainEqual({
+      name: 'PGURI',
+      valueFrom: { secretKeyRef: { name: 'ok-console-db-app', key: 'uri' } },
+    })
+    expect(migration?.volumeMounts).toContainEqual({ name: 'migrations', mountPath: '/migrations', readOnly: true })
+    expect(spec?.volumes).toContainEqual({ name: 'migrations', configMap: { name: 'ok-console-postgres-migrations' } })
+  })
+
   it('permits only reviewed ingress, DNS, database, producer and API-server flows', async () => {
     const policies = await read(`${overlay}/network-policies.yaml`)
     expect(policies).toContain('name: ok-console-preview-ingress')

@@ -99,6 +99,7 @@ describe('OK-173 deployable overlay authorization invariants', () => {
         for (const container of containers) {
           const context = `${overlay.name}/${workload.name}/${container.name}`
           expect(container.envFrom ?? [], `${context} cannot import unreviewed environment`).toHaveLength(0)
+          if (container.name === 'postgres-migrations') continue
           const sessionMode = (container.env ?? []).filter((item) => item.name === 'OK_CONSOLE_SESSION_STORE_MODE')
           expect(sessionMode, `${context} must select PostgreSQL sessions explicitly`).toEqual([
             { name: 'OK_CONSOLE_SESSION_STORE_MODE', value: 'postgres' },

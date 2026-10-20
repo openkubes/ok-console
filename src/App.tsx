@@ -88,20 +88,21 @@ function EmptyState({ title, description }: { title: string; description: string
 function Overview({ data, identity, openCluster, openEvidence }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   const overview = data.overview
+  const observedMetric = (value: number | null) => value ?? 'Unavailable'
   return <>
     <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
     {(data.freshness === 'Stale' || (data.warnings?.length ?? 0) > 0) && <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{data.freshness === 'Stale' ? 'Some observations are stale' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>}
     <section className="metrics-grid" aria-label="Platform metrics">
-      <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · 1 management plane`} tone="blue"/>
-      <Metric label="Capabilities" value={overview?.capabilities.total ?? data.capabilities.length} note={`${overview?.capabilities.ready ?? 5} conformant · ${overview?.capabilities.pending ?? 2} converging`} tone="green"/>
-      <Metric label="Workload claims" value={overview?.workloadClaims.total ?? data.claims.length} note={`${overview?.workloadClaims.ready ?? 1} ready · ${overview?.workloadClaims.pending ?? 2} in progress`} tone="orange"/>
-      <Metric label="Open findings" value={overview?.openFindings.total ?? 2} note={`${overview?.openFindings.critical ?? 0} critical policy violations`} tone="red"/>
+      <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
+      <Metric label="Capabilities" value={overview ? observedMetric(overview.capabilities.total) : data.capabilities.length} note={`${overview ? observedMetric(overview.capabilities.ready) : 5} conformant · ${overview ? observedMetric(overview.capabilities.pending) : 2} converging`} tone="green"/>
+      <Metric label="Workload claims" value={overview ? observedMetric(overview.workloadClaims.total) : data.claims.length} note={`${overview ? observedMetric(overview.workloadClaims.ready) : 1} ready · ${overview ? observedMetric(overview.workloadClaims.pending) : 2} in progress`} tone="orange"/>
+      <Metric label="Open findings" value={overview ? observedMetric(overview.openFindings.total) : 2} note={`${overview ? observedMetric(overview.openFindings.critical) : 0} critical policy violations`} tone="red"/>
     </section>
     <section className="section-block">
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
       {data.clusters.length === 0 ? <EmptyState title="No clusters observed" description="The Console BFF returned a valid empty fleet. No readiness is inferred."/> : <div className="cluster-grid">
-        {data.clusters.slice(0, 3).map((cluster, index) => <article key={cluster.id} className={`cluster-card ${index === 0 ? 'management' : ''}`}>
-          {index === 0 && <div className="management-ribbon"><Icon name="shield" size={13}/> Management plane</div>}
+        {data.clusters.slice(0, 3).map((cluster) => <article key={cluster.id} className={`cluster-card ${cluster.role === 'Management plane' ? 'management' : ''}`}>
+          {cluster.role === 'Management plane' && <div className="management-ribbon"><Icon name="shield" size={13}/> Management plane</div>}
           <button className="card-main" onClick={() => openCluster(cluster)}>
             <div className="cluster-card-head"><div className="cluster-symbol"><Icon name="cube" size={21}/></div><StatusBadge status={cluster.readiness}/></div>
             <h3>{cluster.name}</h3><p>{cluster.profile}</p>
@@ -119,13 +120,14 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
 }
 
 function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
+  const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   return <>
     <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div>}/>
-    <div className="filter-bar"><label className="search-field"><Icon name="search"/><span className="sr-only">Search clusters</span><input placeholder="Search clusters"/></label><button className="filter-chip active">All · {data.clusters.length}</button><button className="filter-chip">Ready · 2</button><button className="filter-chip">Attention · 2</button></div>
+    <div className="filter-bar"><label className="search-field"><Icon name="search"/><span className="sr-only">Search clusters</span><input placeholder="Search clusters"/></label><button className="filter-chip active">All · {data.clusters.length}</button><button className="filter-chip">Ready · {ready}</button><button className="filter-chip">Attention · {data.clusters.length - ready}</button></div>
     <section className="table-panel">
       <div className="table-head cluster-columns"><span>Cluster</span><span>Role & profile</span><span>Provider</span><span>Readiness</span><span>Evidence</span><span/></div>
-      {data.clusters.length === 0 ? <EmptyState title="No clusters found" description="This is a valid empty contract response. Register and Create flows remain separate, guarded prototypes."/> : data.clusters.map((cluster, index) => <div className={`table-row cluster-columns ${index === 0 ? 'management-row' : ''}`} key={cluster.id}>
-        <button className="cluster-name-cell" onClick={() => openCluster(cluster)}><span className="cluster-symbol small"><Icon name={index === 0 ? 'shield' : 'cube'} size={18}/></span><span><strong>{cluster.name}</strong><small>{cluster.version} · {cluster.region}</small></span></button>
+      {data.clusters.length === 0 ? <EmptyState title="No clusters found" description="This is a valid empty contract response. Register and Create flows remain separate, guarded prototypes."/> : data.clusters.map((cluster) => <div className={`table-row cluster-columns ${cluster.role === 'Management plane' ? 'management-row' : ''}`} key={cluster.id}>
+        <button className="cluster-name-cell" onClick={() => openCluster(cluster)}><span className="cluster-symbol small"><Icon name={cluster.role === 'Management plane' ? 'shield' : 'cube'} size={18}/></span><span><strong>{cluster.name}</strong><small>{cluster.version} · {cluster.region}</small></span></button>
         <span><strong>{cluster.role}</strong><small>{cluster.profile}</small></span><span>{cluster.provider}</span><span><StatusBadge status={cluster.readiness}/></span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/><button className="icon-button" aria-label={`Open ${cluster.name}`} onClick={() => openCluster(cluster)}><Icon name="chevron"/></button>
       </div>)}
     </section>

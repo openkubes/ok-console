@@ -32,7 +32,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: producer
-          image: ghcr.io/openkubes/observed-state-producer@sha256:2af5f7fe9612a4fe006fbb931f47356d0e797339542d9012752a9208e8cd359c
+          image: ghcr.io/openkubes/observed-state-producer@sha256:9f239237c4f5b51815e61a537b24d2da7aa7b3b6092d84b1422362d2a1fe6297
           imagePullPolicy: IfNotPresent
           ports:
             - name: https
@@ -65,9 +65,14 @@ spec:
               value: /var/run/secrets/openkubes/producer/client-ca.crt
             - name: OK_OBSERVER_TLS_CLIENT_IDENTITY
               value: spiffe://openkubes.io/ns/openkubes-console/sa/ok-console
+            - name: OK_OBSERVER_OWNERSHIP_FILE
+              value: /var/run/config/openkubes/ownership/ownership.json
           volumeMounts:
             - name: producer-tls
               mountPath: /var/run/secrets/openkubes/producer
+              readOnly: true
+            - name: ownership
+              mountPath: /var/run/config/openkubes/ownership
               readOnly: true
           startupProbe:
             httpGet:
@@ -106,6 +111,10 @@ spec:
               cpu: 200m
               memory: 128Mi
       volumes:
+        - name: ownership
+          configMap:
+            name: observed-state-producer-ownership
+            defaultMode: 288
         - name: producer-tls
           projected:
             defaultMode: 288

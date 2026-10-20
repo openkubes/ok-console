@@ -1,4 +1,4 @@
-const QUERY_VERSION = 'observed.openkubes.io/v0alpha1'
+const QUERY_VERSION = 'observed.openkubes.io/v0alpha2'
 const QUERY_KIND = 'ConsoleObservedState'
 const DEFAULT_TIMEOUT_MS = 5_000
 const DEFAULT_STALE_AFTER_MS = 5 * 60 * 1_000
@@ -50,8 +50,50 @@ const enumeration = (value, allowed, path) => {
 }
 
 const count = (value, path) => {
+  if (value === null) return null
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${path} must be a non-negative integer.`)
   return value
+}
+
+const containsControlCharacter = (value) => (
+  typeof value === 'string'
+  && [...value].some((character) => {
+    const codePoint = character.codePointAt(0)
+    return codePoint <= 31 || codePoint === 127
+  })
+)
+
+const ownershipString = (value, path) => {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > 256
+    || value !== value.trim()
+    || containsControlCharacter(value)
+  ) throw new Error(`${path} must be a valid non-empty bounded string.`)
+  return value
+}
+
+const normalizeOwnership = (value, path, environmentId) => {
+  const item = record(value, path)
+  const ownership = {
+    environmentId: ownershipString(item.environmentId, `${path}.environmentId`),
+    tenantId: ownershipString(item.tenantId, `${path}.tenantId`),
+  }
+  if (ownership.environmentId !== environmentId) throw new Error(`${path}.environmentId must match $.data.environment.id.`)
+  return ownership
+}
+
+const sameOwnership = (left, right) => (
+  left.environmentId === right.environmentId && left.tenantId === right.tenantId
+)
+
+const assertUniqueIds = (items, label) => {
+  const ids = new Set()
+  for (const item of items) {
+    if (ids.has(item.id)) throw new Error(`Observed state contains a duplicate ${label} ID.`)
+    ids.add(item.id)
+  }
 }
 
 const metricSet = (value, path) => {
@@ -65,17 +107,18 @@ const metricSet = (value, path) => {
   }
 }
 
-const normalizeCapability = (value, path) => {
+const normalizeCapability = (value, path, environmentId) => {
   const item = record(value, path)
   return {
     id: string(item.id, `${path}.id`),
     name: string(item.name, `${path}.name`),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     evidenceId: string(item.evidenceId, `${path}.evidenceId`),
+    ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
   }
 }
 
-const normalizeCluster = (value, path) => {
+const normalizeCluster = (value, path, environmentId) => {
   const item = record(value, path)
   return {
     id: string(item.id, `${path}.id`),
@@ -90,7 +133,8 @@ const normalizeCluster = (value, path) => {
     contractVersion: redactText(string(item.contractVersion, `${path}.contractVersion`)),
     revision: redactText(string(item.revision, `${path}.revision`)),
     evidenceId: string(item.evidenceId, `${path}.evidenceId`),
-    capabilities: list(item.capabilities, `${path}.capabilities`).map((capability, index) => normalizeCapability(capability, `${path}.capabilities[${index}]`)),
+    ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
+    capabilities: list(item.capabilities, `${path}.capabilities`).map((capability, index) => normalizeCapability(capability, `${path}.capabilities[${index}]`, environmentId)),
     lifecycle: list(item.lifecycle, `${path}.lifecycle`).map((stage, index) => {
       const stagePath = `${path}.lifecycle[${index}]`
       const stageRecord = record(stage, stagePath)
@@ -103,18 +147,20 @@ const normalizeCluster = (value, path) => {
   }
 }
 
-const normalizePlacement = (value, path) => {
+const normalizePlacement = (value, path, environmentId) => {
   const item = record(value, path)
   return {
     id: string(item.id, `${path}.id`),
     name: redactText(string(item.name, `${path}.name`)),
     targetCluster: redactText(string(item.targetCluster, `${path}.targetCluster`)),
+    targetClusterId: string(item.targetClusterId, `${path}.targetClusterId`),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     evidenceId: string(item.evidenceId, `${path}.evidenceId`),
+    ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
   }
 }
 
-const normalizeEvidence = (value, path) => {
+const normalizeEvidence = (value, path, environmentId) => {
   const item = record(value, path)
   string(item.summary, `${path}.summary`)
   const summary = redactSummary()
@@ -131,6 +177,21 @@ const normalizeEvidence = (value, path) => {
     summary: summary.summary,
     classification: enumeration(item.classification, CLASSIFICATION, `${path}.classification`),
     redacted: summary.redacted,
+    ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
+  }
+}
+
+const normalizeMetricBucket = (value, path, environmentId) => {
+  const item = record(value, path)
+  const findings = record(item.openFindings, `${path}.openFindings`)
+  return {
+    ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
+    capabilities: metricSet(item.capabilities, `${path}.capabilities`),
+    workloadClaims: metricSet(item.workloadClaims, `${path}.workloadClaims`),
+    openFindings: {
+      total: count(findings.total, `${path}.openFindings.total`),
+      critical: count(findings.critical, `${path}.openFindings.critical`),
+    },
   }
 }
 
@@ -161,19 +222,45 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   const observedTime = Date.parse(observedAt)
   if (!Number.isFinite(observedTime)) throw new Error('$.metadata.observedAt must be an ISO timestamp.')
   const environment = record(data.environment, '$.data.environment')
-  const metrics = record(data.metrics, '$.data.metrics')
-  const clusters = list(data.clusters, '$.data.clusters').map((cluster, index) => normalizeCluster(cluster, `$.data.clusters[${index}]`))
-  const placements = list(data.placements, '$.data.placements').map((placement, index) => normalizePlacement(placement, `$.data.placements[${index}]`))
-  const evidence = list(data.evidence, '$.data.evidence').map((item, index) => normalizeEvidence(item, `$.data.evidence[${index}]`))
+  const environmentId = ownershipString(environment.id, '$.data.environment.id')
+  const metrics = list(data.metrics, '$.data.metrics').map((bucket, index) => normalizeMetricBucket(bucket, `$.data.metrics[${index}]`, environmentId))
+  const clusters = list(data.clusters, '$.data.clusters').map((cluster, index) => normalizeCluster(cluster, `$.data.clusters[${index}]`, environmentId))
+  const placements = list(data.placements, '$.data.placements').map((placement, index) => normalizePlacement(placement, `$.data.placements[${index}]`, environmentId))
+  const evidence = list(data.evidence, '$.data.evidence').map((item, index) => normalizeEvidence(item, `$.data.evidence[${index}]`, environmentId))
 
   if (clusters.filter((cluster) => cluster.role === 'Management plane').length !== 1) throw new Error('Observed state must contain exactly one management plane.')
-  const evidenceIds = new Set(evidence.map((item) => item.id))
-  const referencedEvidence = [
-    ...clusters.map((cluster) => cluster.evidenceId),
-    ...clusters.flatMap((cluster) => cluster.capabilities.map((capability) => capability.evidenceId)),
-    ...placements.map((placement) => placement.evidenceId),
+  assertUniqueIds(clusters, 'cluster')
+  assertUniqueIds(evidence, 'Evidence')
+  assertUniqueIds(placements, 'placement')
+  for (const cluster of clusters) {
+    assertUniqueIds(cluster.capabilities, `capability within cluster ${cluster.id}`)
+    if (cluster.capabilities.some((capability) => !sameOwnership(capability.ownership, cluster.ownership))) {
+      throw new Error('A capability ownership must match its parent cluster ownership.')
+    }
+  }
+
+  const clustersById = new Map(clusters.map((cluster) => [cluster.id, cluster]))
+  const evidenceById = new Map(evidence.map((item) => [item.id, item]))
+  for (const item of evidence) {
+    const cluster = clustersById.get(item.clusterId)
+    if (!cluster) throw new Error('Observed state contains an unresolved Evidence cluster reference.')
+    if (!sameOwnership(item.ownership, cluster.ownership)) throw new Error('Evidence ownership must match its cluster ownership.')
+  }
+  for (const placement of placements) {
+    const cluster = clustersById.get(placement.targetClusterId)
+    if (!cluster) throw new Error('Observed state contains an unresolved placement target cluster reference.')
+    if (!sameOwnership(placement.ownership, cluster.ownership)) throw new Error('Placement ownership must match its target cluster ownership.')
+  }
+  const evidenceReferences = [
+    ...clusters.map((cluster) => ({ evidenceId: cluster.evidenceId, ownership: cluster.ownership })),
+    ...clusters.flatMap((cluster) => cluster.capabilities.map((capability) => ({ evidenceId: capability.evidenceId, ownership: capability.ownership }))),
+    ...placements.map((placement) => ({ evidenceId: placement.evidenceId, ownership: placement.ownership })),
   ]
-  if (referencedEvidence.some((id) => !evidenceIds.has(id))) throw new Error('Observed state contains an unresolved Evidence reference.')
+  for (const reference of evidenceReferences) {
+    const item = evidenceById.get(reference.evidenceId)
+    if (!item) throw new Error('Observed state contains an unresolved Evidence reference.')
+    if (!sameOwnership(reference.ownership, item.ownership)) throw new Error('Observed state contains a cross-owner Evidence reference.')
+  }
 
   const ageMs = now().getTime() - observedTime
   if (ageMs < -MAX_FUTURE_SKEW_MS) throw new Error('Observed-state timestamp is too far in the future.')
@@ -186,17 +273,10 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
     observedAt,
     sourceRevision: string(metadata.sourceRevision, '$.metadata.sourceRevision'),
     environment: {
-      id: string(environment.id, '$.data.environment.id'),
+      id: environmentId,
       displayName: string(environment.displayName, '$.data.environment.displayName'),
     },
-    metrics: {
-      capabilities: metricSet(metrics.capabilities, '$.data.metrics.capabilities'),
-      workloadClaims: metricSet(metrics.workloadClaims, '$.data.metrics.workloadClaims'),
-      openFindings: (() => {
-        const findings = record(metrics.openFindings, '$.data.metrics.openFindings')
-        return { total: count(findings.total, '$.data.metrics.openFindings.total'), critical: count(findings.critical, '$.data.metrics.openFindings.critical') }
-      })(),
-    },
+    metrics,
     clusters,
     placements,
     evidence,
@@ -238,7 +318,11 @@ export class OpenKubesObservedStateAdapter {
       })
       if (!response.ok) throw new Error(`OpenKubes observed-state query returned HTTP ${response.status}.`)
       const contentType = response.headers.get('content-type') ?? ''
-      if (!contentType.toLowerCase().includes('application/json')) throw new Error('OpenKubes observed-state query did not return JSON.')
+      const mediaType = contentType.split(';', 1)[0].trim().toLowerCase()
+      const responseProfile = contentType.match(/(?:^|;)\s*profile\s*=\s*"([^"]+)"/i)?.[1]
+      if (mediaType !== 'application/json' || responseProfile !== QUERY_VERSION) {
+        throw new ObservedStateContractError('Observed-state query response profile is incompatible.')
+      }
       const declaredLength = Number.parseInt(response.headers.get('content-length') ?? '0', 10)
       if (declaredLength > MAX_RESPONSE_BYTES) throw new Error('OpenKubes observed-state response exceeds the size limit.')
       const body = await readBoundedBody(response)

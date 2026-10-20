@@ -28,6 +28,8 @@ spec:
             key: 003_local_access_throttle.sql
           - name: ok-console-postgres-migrations
             key: 004_local_access_audit.sql
+          - name: ok-console-postgres-migrations
+            key: 005_authentication_audit.sql
   storage:
     storageClass: local-path
     size: 5Gi

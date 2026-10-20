@@ -95,14 +95,17 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(cluster).toContain('002_oidc_transactions.sql')
     expect(cluster).toContain('003_local_access_throttle.sql')
     expect(cluster).toContain('004_local_access_audit.sql')
+    expect(cluster).toContain('005_authentication_audit.sql')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.sessions')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.oidc_transactions')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.local_access_throttle')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.local_access_audit')
+    expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.authentication_audit')
     expect(migrations).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.sessions TO ok_console')
     expect(migrations).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.local_access_throttle TO ok_console')
     expect(migrations).toContain('GRANT INSERT ON TABLE ok_console.local_access_audit TO ok_console')
     expect(migrations).not.toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.local_access_audit')
+    expect(migrations).toContain('GRANT INSERT ON TABLE ok_console.authentication_audit TO ok_console')
   })
 
   it('permits only reviewed ingress, DNS, database, producer and API-server flows', async () => {

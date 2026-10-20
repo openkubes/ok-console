@@ -33,6 +33,7 @@ export const createConsoleServer = async ({
     expectedOrigin: sessionRuntime.expectedOrigin,
     oidcHandler: sessionRuntime.oidcHandler,
     localAccessHandler: sessionRuntime.localAccessHandler,
+    authenticationAudit: sessionRuntime.authenticationAudit,
     enableFailureInjection: env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true',
     dryRunExecutor,
     requestObserver: ({ method, pathname, correlationId }) => {

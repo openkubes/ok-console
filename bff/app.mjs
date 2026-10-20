@@ -171,6 +171,7 @@ export const createConsoleBffHandler = ({
   expectedOrigin,
   oidcHandler = null,
   localAccessHandler = null,
+  authenticationAudit = null,
   dryRunExecutor = null,
 }) => {
   if (typeof authorizer !== 'function') {
@@ -191,6 +192,7 @@ export const createConsoleBffHandler = ({
         correlationId: requestCorrelationId,
         sessionStore,
         expectedOrigin,
+        audit: authenticationAudit ? (event) => authenticationAudit.record(event) : undefined,
       })) return
 
       const dryRunPath = `${ROUTE_PREFIX}/operations/create-cluster/dry-run`

@@ -177,6 +177,7 @@ describe('session runtime configuration', () => {
         OK_CONSOLE_OIDC_CLIENT_ID: 'ok-console',
         OK_CONSOLE_OIDC_CLIENT_SECRET_FILE: '/run/secrets/oidc-client-secret',
         OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE: '/run/secrets/oidc-subjects',
+        OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper',
         OK_CONSOLE_OIDC_SUCCESS_REDIRECT: '/#/overview',
       },
       fileReader,
@@ -184,6 +185,7 @@ describe('session runtime configuration', () => {
       storeFactory: () => ({ authorize: vi.fn(), create: vi.fn() }),
       transactionStoreFactory,
       oidcProtocolFactory,
+      authenticationAuditFactory: () => ({ record: vi.fn() }),
     })
 
     expect(oidcProtocolFactory).toHaveBeenCalledWith({

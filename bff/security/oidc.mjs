@@ -78,6 +78,7 @@ export const createOidcHttpHandler = ({
   identityMapper,
   redirectUri,
   successRedirect = '/',
+  audit = async () => {},
 }) => async ({ request, response, pathname }) => {
   if (pathname !== START_PATH && pathname !== CALLBACK_PATH) return false
   if (request.method !== 'GET') {
@@ -101,6 +102,7 @@ export const createOidcHttpHandler = ({
         state,
         nonce,
       })
+      await audit({ method: 'OIDC', outcome: 'Started', cause: 'REQUESTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-start', reason: 'OIDC authorization requested' })
       response.writeHead(302, headers({ Location: location.href, 'Set-Cookie': transaction.cookie }))
       response.end()
     } catch {
@@ -113,6 +115,7 @@ export const createOidcHttpHandler = ({
   try {
     transaction = await transactionStore.consume(request.headers.cookie)
     if (!transaction) {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'TRANSACTION_INVALID', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC transaction was missing or already consumed' })
       boundedError(response, 401, 'OIDC_TRANSACTION_INVALID')
       return true
     }
@@ -126,16 +129,24 @@ export const createOidcHttpHandler = ({
     })
     const authorization = await identityMapper(claims)
     if (!authorization) {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'UNMAPPED_SUBJECT', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC subject is not mapped' })
       boundedError(response, 403, 'OIDC_SUBJECT_UNMAPPED')
       return true
     }
     const issued = await sessionStore.create(authorization)
+    await audit({ method: 'OIDC', outcome: 'Granted', cause: 'VERIFIED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC session established' })
     response.writeHead(303, headers({
       Location: successRedirect,
       'Set-Cookie': [clearOidcTransactionCookie(), issued.cookie, issued.csrfCookie],
     }))
     response.end()
   } catch {
+    try {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'CALLBACK_REJECTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC callback validation failed' })
+    } catch {
+      boundedError(response, 503, 'OIDC_UNAVAILABLE')
+      return true
+    }
     boundedError(response, 401, 'OIDC_CALLBACK_REJECTED')
   }
   return true

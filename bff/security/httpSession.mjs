@@ -55,6 +55,7 @@ export const handleSessionHttp = async ({
   correlationId,
   sessionStore,
   expectedOrigin,
+  audit = async () => {},
 }) => {
   if (pathname !== SESSION_PATH && pathname !== ROTATE_PATH) return false
 
@@ -73,7 +74,12 @@ export const handleSessionHttp = async ({
   if (pathname === SESSION_PATH && request.method === 'GET') {
     const context = await sessionStore.resolve(cookieHeader)
     if (!context) {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session restore rejected' }).catch(() => {})
       rejectUnauthenticated(response, correlationId)
+      return true
+    }
+    try { await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Restored', cause: 'VERIFIED', correlationId, reason: 'Session restored' }) } catch {
+      sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }
     sendJson(response, 200, consoleSessionProjection(context), correlationId)
@@ -83,16 +89,23 @@ export const handleSessionHttp = async ({
   if (pathname === ROTATE_PATH && request.method === 'POST') {
     const context = await sessionStore.resolve(cookieHeader, { touch: false })
     if (!context) {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session rotation rejected' }).catch(() => {})
       rejectUnauthenticated(response, correlationId)
       return true
     }
     if (!validateCsrf(csrfRequest(request, context, expectedOrigin))) {
+      await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Denied', cause: 'CSRF_REJECTED', correlationId, reason: 'Session rotation CSRF validation failed' }).catch(() => {})
       sendJson(response, 403, securityError('CSRF_REJECTED', 'The session rotation request was rejected.', correlationId), correlationId)
       return true
     }
     const rotated = await sessionStore.rotate(cookieHeader)
     if (!rotated) {
       rejectUnauthenticated(response, correlationId)
+      return true
+    }
+    try { await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Rotated', cause: 'VERIFIED', correlationId, reason: 'Session rotated' }) } catch {
+      await sessionStore.revoke?.(rotated.cookie, 'AUDIT_FAILED').catch(() => {})
+      sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }
     sendJson(response, 200, rotated.session, correlationId, { 'Set-Cookie': [rotated.cookie, rotated.csrfCookie] })
@@ -102,16 +115,22 @@ export const handleSessionHttp = async ({
   if (pathname === SESSION_PATH && request.method === 'DELETE') {
     const context = await sessionStore.resolve(cookieHeader, { touch: false })
     if (!context) {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session logout rejected' }).catch(() => {})
       rejectUnauthenticated(response, correlationId)
       return true
     }
     if (!validateCsrf(csrfRequest(request, context, expectedOrigin))) {
+      await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Denied', cause: 'CSRF_REJECTED', correlationId, reason: 'Session logout CSRF validation failed' }).catch(() => {})
       sendJson(response, 403, securityError('CSRF_REJECTED', 'The session logout request was rejected.', correlationId), correlationId)
       return true
     }
     const revoked = await sessionStore.revoke(cookieHeader)
     if (!revoked) {
       rejectUnauthenticated(response, correlationId)
+      return true
+    }
+    try { await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Revoked', cause: 'VERIFIED', correlationId, reason: 'Session revoked by logout' }) } catch {
+      sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }
     response.writeHead(204, responseHeaders(correlationId, { 'Set-Cookie': clearCookies }))

@@ -4,6 +4,7 @@ import path from 'node:path'
 import pg from 'pg'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 import { createLocalAccessVerifier, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
+import { PostgresAuthenticationAudit } from './authenticationAudit.mjs'
 import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
 import { createOidcHttpHandler, createOidcProtocolClient, createStaticOidcIdentityMapper } from './oidc.mjs'
 import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
@@ -227,6 +228,7 @@ export const createSessionRuntime = async ({
   oidcProtocolFactory = createOidcProtocolClient,
   throttleFactory = (configuration) => new PostgresLocalAccessThrottle(configuration),
   auditFactory = (configuration) => new PostgresLocalAccessAudit(configuration),
+  authenticationAuditFactory = (configuration) => new PostgresAuthenticationAudit(configuration),
 } = {}) => {
   const mode = env.OK_CONSOLE_SESSION_STORE_MODE ?? 'disabled'
   if (mode === 'disabled') {
@@ -294,6 +296,7 @@ export const createSessionRuntime = async ({
     tenantId,
   })
   let oidcHandler = null
+  let authenticationAudit = null
   if (env.OK_CONSOLE_OIDC_ENABLED === 'true') {
     try {
       const providerId = required(env, 'OK_CONSOLE_OIDC_PROVIDER_ID')
@@ -313,6 +316,9 @@ export const createSessionRuntime = async ({
         clientSecret,
         timeoutSeconds: boundedInteger(env, 'OK_CONSOLE_OIDC_TIMEOUT_SECONDS', 5, 1, 30),
       })
+      const auditPepper = await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', fileReader)
+      if (!BASE64_32_BYTE_KEY_PATTERN.test(auditPepper)) throw new SessionRuntimeConfigurationError('The authentication audit pepper file is invalid.')
+      authenticationAudit = authenticationAuditFactory({ pool, pepper: Buffer.from(auditPepper, 'base64') })
       const transactionStore = transactionStoreFactory({ pool, codec, deploymentEpoch })
       const identityMapper = createStaticOidcIdentityMapper({
         providerId,
@@ -327,6 +333,7 @@ export const createSessionRuntime = async ({
         identityMapper,
         redirectUri,
         successRedirect,
+        audit: (event) => authenticationAudit.record(event),
       })
     } catch (error) {
       await pool.end().catch(() => {})
@@ -355,9 +362,13 @@ export const createSessionRuntime = async ({
       const pepper = Buffer.from(pepperValue, 'base64')
       const throttle = throttleFactory({ pool, pepper })
       const auditStore = auditFactory({ pool, pepper })
+      authenticationAudit = auditStore
       const verifier = createLocalAccessVerifier({
         mode: method, accounts, throttle, sessionStore, authorizationRevision,
-        audit: (event) => auditStore.record(event),
+        audit: async (event) => {
+          await auditStore.record(event)
+          await authenticationAudit.record(event)
+        },
       })
       localAccessHandler = createLocalAccessHttpHandler({ verifier, expectedOrigin })
     } catch (error) {
@@ -370,6 +381,7 @@ export const createSessionRuntime = async ({
     'ok_console.sessions',
     ...(env.OK_CONSOLE_OIDC_ENABLED === 'true' ? ['ok_console.oidc_transactions'] : []),
     ...(localAccessMode !== 'disabled' ? ['ok_console.local_access_throttle', 'ok_console.local_access_audit'] : []),
+    ...((env.OK_CONSOLE_OIDC_ENABLED === 'true' || localAccessMode !== 'disabled') ? ['ok_console.authentication_audit'] : []),
   ]
   const ready = async () => {
     try {
@@ -390,6 +402,7 @@ export const createSessionRuntime = async ({
     authorizer,
     oidcHandler,
     localAccessHandler,
+    authenticationAudit,
     ready,
     close: async () => {
       if (closed) return

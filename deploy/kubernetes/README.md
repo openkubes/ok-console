@@ -120,7 +120,7 @@ gate.
 ## OK-172 ok-shared live slice
 
 The `overlays/ok-shared-live` path is the render-first Phase B1 candidate. It
-pins the accepted Console `dev-v0.1.0-rc.4` and observed-state producer
+pins the accepted Console `dev-v0.1.0-rc.8` and observed-state producer
 `console-observer-dev-v0.1.0-rc.3` digests. The Console uses PostgreSQL-backed
 bootstrap sessions and the producer's explicit `hosting-cluster` source. The
 source reads Kubernetes version, a bounded Node list, and the exact

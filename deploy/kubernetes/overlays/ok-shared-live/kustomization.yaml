@@ -14,7 +14,7 @@ resources:
 images:
   - name: ghcr.io/openkubes/ok-console
     newName: ghcr.io/openkubes/ok-console
-    digest: sha256:10cfb281bc5d0d14aaea34ca072ea4b92d69183df617c1a2d19c1d3a5d6aac6b
+    digest: sha256:e54efd5e3901160309709d49eb7c99f8a34f82208f70ff7addf54500b2f6b2d4
 patches:
   - target:
       group: apps

@@ -96,6 +96,10 @@ patches:
           - name: postgres-migrations
             image: ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie@sha256:26e146bc71ebfc2a3937f729a15161a7fb6cd7c8a0b0007ad60cb53d2371b3fc
             command: ["/bin/sh", "-ec"]
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
             args:
               - |
                 for migration in /migrations/*.sql; do

@@ -119,6 +119,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
           image?: string
           command?: string[]
           args?: string[]
+          securityContext?: { allowPrivilegeEscalation?: boolean, capabilities?: { drop?: string[] } }
           env?: Array<{ name?: string, valueFrom?: { secretKeyRef?: { name?: string, key?: string } } }>
           volumeMounts?: Array<{ name?: string, mountPath?: string, readOnly?: boolean }>
         }>
@@ -131,6 +132,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
 
     expect(migration?.image).toBe('ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie@sha256:26e146bc71ebfc2a3937f729a15161a7fb6cd7c8a0b0007ad60cb53d2371b3fc')
     expect(migration?.command).toEqual(['/bin/sh', '-ec'])
+    expect(migration?.securityContext).toEqual({ allowPrivilegeEscalation: false, capabilities: { drop: ['ALL'] } })
     expect(migration?.args?.[0]).toContain('psql "$PGURI" -v ON_ERROR_STOP=1 -f "$migration"')
     expect(migration?.env).toContainEqual({
       name: 'PGURI',

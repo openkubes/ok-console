@@ -126,7 +126,3 @@ data:
       operational_reason text NOT NULL CHECK (length(operational_reason) BETWEEN 1 AND 512),
       occurred_at timestamptz NOT NULL DEFAULT clock_timestamp()
     );
-    CREATE INDEX IF NOT EXISTS authentication_audit_occurred_idx
-      ON ok_console.authentication_audit (occurred_at);
-    GRANT INSERT ON TABLE ok_console.authentication_audit TO ok_console;
-    GRANT USAGE, SELECT ON SEQUENCE ok_console.authentication_audit_event_id_seq TO ok_console;

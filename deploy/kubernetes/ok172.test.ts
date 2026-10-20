@@ -101,6 +101,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.local_access_throttle')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.local_access_audit')
     expect(migrations).toContain('CREATE TABLE IF NOT EXISTS ok_console.authentication_audit')
+    expect(migrations).toContain('GRANT USAGE, CREATE ON SCHEMA ok_console TO ok_console')
     expect(migrations).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.sessions TO ok_console')
     expect(migrations).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ok_console.local_access_throttle TO ok_console')
     expect(migrations).toContain('GRANT INSERT ON TABLE ok_console.local_access_audit TO ok_console')

@@ -7,7 +7,7 @@ data:
   001_console_sessions.sql: |
     CREATE SCHEMA IF NOT EXISTS ok_console;
     REVOKE ALL ON SCHEMA ok_console FROM PUBLIC;
-    GRANT USAGE ON SCHEMA ok_console TO ok_console;
+    GRANT USAGE, CREATE ON SCHEMA ok_console TO ok_console;
 
     CREATE TABLE IF NOT EXISTS ok_console.sessions (
       session_digest text PRIMARY KEY CHECK (session_digest ~ '^[A-Za-z0-9_-]{43}$'),

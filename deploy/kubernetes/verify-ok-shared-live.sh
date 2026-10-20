@@ -4,7 +4,7 @@ set -euo pipefail
 readonly expected_context="${OK_CONSOLE_KUBE_CONTEXT:-ok-shared-admin@ok-shared}"
 readonly namespace="openkubes-console"
 readonly overlay="deploy/kubernetes/overlays/ok-shared-live"
-readonly expected_console_image="ghcr.io/openkubes/ok-console@sha256:e54efd5e3901160309709d49eb7c99f8a34f82208f70ff7addf54500b2f6b2d4"
+readonly expected_console_image="ghcr.io/openkubes/ok-console@sha256:b3bfcb844f8175933e92b3e33bf9c92ee412e91d6fa72cf1589bd302a2b8e2a3"
 readonly expected_producer_image="ghcr.io/openkubes/observed-state-producer@sha256:9f239237c4f5b51815e61a537b24d2da7aa7b3b6092d84b1422362d2a1fe6297"
 
 actual_context="$(kubectl config current-context)"

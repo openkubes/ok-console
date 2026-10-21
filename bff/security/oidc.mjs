@@ -102,7 +102,7 @@ export const createOidcHttpHandler = ({
         state,
         nonce,
       })
-      await audit({ method: 'OIDC', outcome: 'Started', cause: 'REQUESTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-start', reason: 'OIDC authorization requested' })
+      await audit({ method: 'OIDC', outcome: 'Started', cause: 'REQUESTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-start', reason: 'Federated sign-in requested' })
       response.writeHead(302, headers({ Location: location.href, 'Set-Cookie': transaction.cookie }))
       response.end()
     } catch (error) {

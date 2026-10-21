@@ -11,6 +11,16 @@ data:
     {
       "clusters": [
         {
+          "name": "ok-mgmt",
+          "provider": "Kubernetes",
+          "profile": "Management plane infrastructure",
+          "kubernetesVersion": "v1.34.1",
+          "region": "management",
+          "readiness": "Ready",
+          "revision": "nodes:3-ready",
+          "observedAt": "2026-10-21T20:10:00Z"
+        },
+        {
           "name": "ok-ai",
           "provider": "Kubernetes",
           "profile": "AI workload cluster",

@@ -5,7 +5,7 @@ readonly expected_context="${OK_CONSOLE_KUBE_CONTEXT:-ok-shared-admin@ok-shared}
 readonly namespace="openkubes-console"
 readonly overlay="deploy/kubernetes/overlays/ok-shared-live"
 readonly expected_console_image="ghcr.io/openkubes/ok-console@sha256:b2632c9dda78ab05586dff1dd32f4294c8e829db7f7af8370ef5ebd874befc4c"
-readonly expected_producer_image="ghcr.io/openkubes/observed-state-producer@sha256:48d63ac56379e8e752ad7850f617a41db0b963b0596c26bdfc7bfaaceedd2df0"
+readonly expected_producer_image="ghcr.io/openkubes/observed-state-producer@sha256:c07a82619dd14e97c57bf2c94b7024ad6128136e26325ddb099c837033821f15"
 
 actual_context="$(kubectl config current-context)"
 if [[ "${actual_context}" != "${expected_context}" ]]; then

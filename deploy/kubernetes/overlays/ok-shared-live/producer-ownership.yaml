@@ -9,4 +9,4 @@ metadata:
 data:
   # This allocation reproduces today's single-tenant visibility exactly.
   ownership.json: |
-    {"tenants":{"management/ok-mgmt":"platform","hosting/ok-shared":"platform"}}
+    {"tenants":{"management/ok-mgmt":"platform","hosting/ok-shared":"platform","external/ok-ai":"platform"}}

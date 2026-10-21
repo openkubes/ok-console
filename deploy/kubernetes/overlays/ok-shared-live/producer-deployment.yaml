@@ -67,12 +67,17 @@ spec:
               value: spiffe://openkubes.io/ns/openkubes-console/sa/ok-console
             - name: OK_OBSERVER_OWNERSHIP_FILE
               value: /var/run/config/openkubes/ownership/ownership.json
+            - name: OK_OBSERVER_CLUSTER_OBSERVATIONS_FILE
+              value: /var/run/config/openkubes/observations/observations.json
           volumeMounts:
             - name: producer-tls
               mountPath: /var/run/secrets/openkubes/producer
               readOnly: true
             - name: ownership
               mountPath: /var/run/config/openkubes/ownership
+              readOnly: true
+            - name: cluster-observations
+              mountPath: /var/run/config/openkubes/observations
               readOnly: true
           startupProbe:
             httpGet:
@@ -131,6 +136,12 @@ spec:
                   items:
                     - key: ca.crt
                       path: client-ca.crt
+        - name: cluster-observations
+          configMap:
+            name: observed-state-producer-cluster-observations
+            items:
+              - key: observations.json
+                path: observations.json
 ---
 apiVersion: v1
 kind: Service

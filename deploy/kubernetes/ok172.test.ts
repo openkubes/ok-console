@@ -68,7 +68,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
     const deployment = resources.find((resource) => resource.kind === 'Deployment' && resource.metadata?.name === 'observed-state-producer')
     const producer = deployment?.spec?.template?.spec?.containers?.find((container) => container.name === 'producer')
 
-    expect(ownership?.data?.['ownership.json']).toBe('{"tenants":{"management/ok-mgmt":"platform","hosting/ok-shared":"platform"}}\n')
+    expect(ownership?.data?.['ownership.json']).toBe('{"tenants":{"management/ok-mgmt":"platform","hosting/ok-shared":"platform","external/ok-ai":"platform"}}\n')
     expect(producer?.env).toContainEqual({
       name: 'OK_OBSERVER_OWNERSHIP_FILE',
       value: '/var/run/config/openkubes/ownership/ownership.json',

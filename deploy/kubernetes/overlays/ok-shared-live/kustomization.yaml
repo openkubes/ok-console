@@ -8,6 +8,7 @@ resources:
   - postgres-cluster.yaml
   - producer-rbac.yaml
   - producer-ownership.yaml
+  - producer-cluster-observations.yaml
   - producer-deployment.yaml
   - network-policies.yaml
   - ingress.yaml

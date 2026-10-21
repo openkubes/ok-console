@@ -32,7 +32,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: producer
-          image: ghcr.io/openkubes/observed-state-producer@sha256:c07a82619dd14e97c57bf2c94b7024ad6128136e26325ddb099c837033821f15
+          image: ghcr.io/openkubes/observed-state-producer@sha256:5f30faa40a12c9716f4721b23c32f691175590854d8fb08ecb8905af505db378
           imagePullPolicy: IfNotPresent
           ports:
             - name: https

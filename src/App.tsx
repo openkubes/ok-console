@@ -167,7 +167,8 @@ function AgentDeployWizard({ agent, data, close }: { agent: AgentDefinition; dat
   const [confirmed, setConfirmed] = useState(false)
   const target = workerClusters.find((cluster) => cluster.id === targetId)
   const requiredNames = agent.requiredCapabilities.map((id) => data.capabilities.find((capability) => capability.id === id)?.name ?? id)
-  const claim = `apiVersion: agents.openkubes.io/v1alpha1\nkind: AgentDeploymentClaim\nmetadata:\n  name: ${agent.id.replace('agent-', '')}\n  namespace: openkubes-agents\nspec:\n  agentRef:\n    name: ${agent.id}\n    version: ${agent.version}\n    digest: ${agent.artifactDigest}\n  placement:\n    clusterRef: ${target?.name ?? '<required>'}\n  tools:\n${enabledTools.map((tool) => `    - ${tool}`).join('\n') || '    []'}\n  authority:\n    default: diagnostics.read`
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString()
+  const claim = `apiVersion: agents.openkubes.io/v1alpha1\nkind: AgentDeploymentClaim\nmetadata:\n  name: ${agent.id.replace('agent-', '')}\n  namespace: openkubes-agents\nspec:\n  agentRef:\n    name: ${agent.id}\n    version: ${agent.version}\n    digest: ${agent.artifactDigest}\n  clusterRef: ${target?.name ?? '<required>'}\n  tools:\n${enabledTools.map((tool) => `    - ${tool}`).join('\n') || '    []'}\n  authority: read-only\n  expiresAt: ${expiresAt}`
   const steps = ['Target', 'Permissions', 'Review', 'Evidence']
 
   return <div className="agent-deploy-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>

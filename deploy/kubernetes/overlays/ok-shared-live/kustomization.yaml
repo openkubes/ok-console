@@ -38,7 +38,7 @@ patches:
           - name: OK_CONSOLE_SESSION_STORE_MODE
             value: postgres
           - name: OK_CONSOLE_ORIGIN
-            value: https://console.ok-shared.internal:30443
+            value: https://console.ok-shared.internal
           - name: OK_CONSOLE_ENVIRONMENT_ID
             value: ok-shared
           - name: OK_CONSOLE_TENANT_ID

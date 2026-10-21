@@ -18,4 +18,14 @@ describe('Agent Contract v1alpha1', () => {
     expect(validateAgentContract({ apiVersion: 'agents.openkubes.io/v1alpha1', kind: 'AgentDeployment', spec: { agentRef: { digest } }, status: {} }).valid).toBe(false)
     expect(validateAgentContract({ apiVersion: 'agents.openkubes.io/v1alpha1', kind: 'AgentDeployment', spec: { agentRef: { digest } }, status: { evidenceRef: 'ev-agent-1' } })).toEqual({ valid: true, errors: [] })
   })
+
+  it('validates a future, digest-bound deployment claim', () => {
+    expect(validateAgentContract({ apiVersion: 'agents.openkubes.io/v1alpha1', kind: 'AgentDeploymentClaim', spec: { agentRef: { digest }, clusterRef: 'ok-shared', tools: ['documents.search'], authority: 'Read only', expiresAt: '2099-01-01T00:00:00Z' } })).toEqual({ valid: true, errors: [] })
+  })
+
+  it('rejects expired or incomplete deployment claims', () => {
+    const result = validateAgentContract({ apiVersion: 'agents.openkubes.io/v1alpha1', kind: 'AgentDeploymentClaim', spec: { agentRef: { digest }, expiresAt: '2020-01-01T00:00:00Z', tools: [] } })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toEqual(expect.arrayContaining(['claim clusterRef is required', 'claim tools must be non-empty strings', 'claim authority is required', 'claim expiresAt must be a future date-time']))
+  })
 })

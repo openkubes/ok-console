@@ -19,6 +19,16 @@ data:
           "readiness": "Ready",
           "revision": "nodes:4-ready",
           "observedAt": "2026-10-21T19:12:00Z"
+        },
+        {
+          "name": "ok-infra",
+          "provider": "Kubernetes",
+          "profile": "Infrastructure host cluster",
+          "kubernetesVersion": "v1.35.5+rke2r1",
+          "region": "infrastructure",
+          "readiness": "Ready",
+          "revision": "nodes:2-ready",
+          "observedAt": "2026-10-21T19:12:00Z"
         }
       ]
     }

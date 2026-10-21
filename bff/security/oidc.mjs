@@ -105,7 +105,12 @@ export const createOidcHttpHandler = ({
       await audit({ method: 'OIDC', outcome: 'Started', cause: 'REQUESTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-start', reason: 'OIDC authorization requested' })
       response.writeHead(302, headers({ Location: location.href, 'Set-Cookie': transaction.cookie }))
       response.end()
-    } catch {
+    } catch (error) {
+      console.error('OIDC start failed', {
+        name: error instanceof Error ? error.name : 'UnknownError',
+        code: error && typeof error === 'object' && 'code' in error ? error.code : undefined,
+        causeCode: error instanceof Error && error.cause && typeof error.cause === 'object' && 'code' in error.cause ? error.cause.code : undefined,
+      })
       boundedError(response, 503, 'OIDC_UNAVAILABLE')
     }
     return true

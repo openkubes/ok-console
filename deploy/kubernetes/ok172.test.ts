@@ -22,7 +22,8 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(stdout).not.toMatch(/REPLACE_|\.invalid|sha256:0{64}|image: .+:latest/)
     expect(stdout).not.toMatch(/^kind: Secret$/m)
     expect(stdout).toContain('value: hosting-cluster')
-    expect(stdout).toContain('value: bootstrap')
+    expect(stdout).toContain('value: breakglass')
+    expect(stdout).toContain('value: "true"')
     expect(stdout).toContain('value: openkubes')
   }, 15_000)
 

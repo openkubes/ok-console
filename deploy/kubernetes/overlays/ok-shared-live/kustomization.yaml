@@ -28,6 +28,12 @@ patches:
       - op: add
         path: /spec/template/metadata/labels/openkubes.io~1environment
         value: ok-shared-live
+      - op: add
+        path: /spec/template/spec/hostAliases
+        value:
+          - ip: 192.168.100.207
+            hostnames:
+              - keycloak.ok-shared.internal
       - op: replace
         path: /spec/template/spec/containers/0/env
         value:
@@ -56,9 +62,21 @@ patches:
           - name: OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE
             value: /run/secrets/ok-console/session/keys.json
           - name: OK_CONSOLE_OIDC_ENABLED
-            value: "false"
+            value: "true"
+          - name: NODE_EXTRA_CA_CERTS
+            value: /run/secrets/ok-console/oidc-ca/ca.crt
+          - name: OK_CONSOLE_OIDC_PROVIDER_ID
+            value: keycloak-openkubes
+          - name: OK_CONSOLE_OIDC_ISSUER
+            value: https://keycloak.ok-shared.internal/realms/openkubes
+          - name: OK_CONSOLE_OIDC_CLIENT_ID
+            value: ok-console
+          - name: OK_CONSOLE_OIDC_CLIENT_SECRET_FILE
+            value: /run/secrets/ok-console/oidc/client-secret
+          - name: OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE
+            value: /run/secrets/ok-console/oidc/subjects.json
           - name: OK_CONSOLE_LOCAL_ACCESS_MODE
-            value: bootstrap
+            value: breakglass
           - name: OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE
             value: /run/secrets/ok-console/local/accounts.json
           - name: OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE
@@ -86,6 +104,12 @@ patches:
             readOnly: true
           - name: local-access
             mountPath: /run/secrets/ok-console/local
+            readOnly: true
+          - name: oidc
+            mountPath: /run/secrets/ok-console/oidc
+            readOnly: true
+          - name: oidc-ca
+            mountPath: /run/secrets/ok-console/oidc-ca
             readOnly: true
           - name: observed-state
             mountPath: /run/secrets/ok-console/observed-state
@@ -148,6 +172,22 @@ patches:
                   path: accounts.json
                 - key: pepper
                   path: pepper
+          - name: oidc
+            secret:
+              secretName: ok-console-oidc
+              defaultMode: 288
+              items:
+                - key: client-secret
+                  path: client-secret
+                - key: subjects.json
+                  path: subjects.json
+          - name: oidc-ca
+            secret:
+              secretName: ok-console-oidc-ca
+              defaultMode: 288
+              items:
+                - key: ca.crt
+                  path: ca.crt
           - name: observed-state
             secret:
               secretName: ok-console-observed-state-client-tls

@@ -106,6 +106,7 @@ h3 { font-size: 17px; }
 .cluster-card { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: 0 5px 16px rgba(32,45,65,.045); }
 .cluster-card.management { border-color: #9abcef; box-shadow: 0 7px 20px rgba(6,79,200,.09); }
 .management-ribbon { display: flex; align-items: center; gap: 5px; padding: 6px 16px; background: linear-gradient(90deg, var(--blue-dark), var(--blue)); color: white; font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.plane-ribbon { display: flex; align-items: center; gap: 5px; padding: 6px 16px; background: #eef4ff; color: var(--blue-dark); font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .card-main { width: 100%; padding: 17px 18px 12px; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .cluster-card-head { display: flex; align-items: center; justify-content: space-between; }
 .cluster-symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; background: var(--blue-soft); color: var(--blue); }

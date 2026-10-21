@@ -108,7 +108,9 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
       {data.clusters.length === 0 ? <EmptyState title="No clusters observed" description="The Console BFF returned a valid empty fleet. No readiness is inferred."/> : <div className="cluster-grid">
         {data.clusters.map((cluster) => <article key={cluster.id} className={`cluster-card ${cluster.role === 'Management plane' ? 'management' : ''}`}>
-          <div className={`management-ribbon ${cluster.role === 'Management plane' ? '' : 'workload-ribbon'}`}><Icon name={cluster.role === 'Management plane' ? 'shield' : 'cube'} size={13}/> {clusterPlaneLabel(cluster)}</div>
+          {cluster.role === 'Management plane'
+            ? <div className="management-ribbon"><Icon name="shield" size={13}/> {clusterPlaneLabel(cluster)}</div>
+            : <div className="plane-ribbon"><Icon name="cube" size={13}/> {clusterPlaneLabel(cluster)}</div>}
           <button className="card-main" onClick={() => openCluster(cluster)}>
             <div className="cluster-card-head"><div className="cluster-symbol"><Icon name="cube" size={21}/></div><StatusBadge status={cluster.readiness}/></div>
             <h3>{cluster.name}</h3><p>{cluster.profile}</p>

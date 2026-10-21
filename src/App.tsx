@@ -101,7 +101,7 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
     <section className="section-block">
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
       {data.clusters.length === 0 ? <EmptyState title="No clusters observed" description="The Console BFF returned a valid empty fleet. No readiness is inferred."/> : <div className="cluster-grid">
-        {data.clusters.slice(0, 3).map((cluster) => <article key={cluster.id} className={`cluster-card ${cluster.role === 'Management plane' ? 'management' : ''}`}>
+        {data.clusters.map((cluster) => <article key={cluster.id} className={`cluster-card ${cluster.role === 'Management plane' ? 'management' : ''}`}>
           {cluster.role === 'Management plane' && <div className="management-ribbon"><Icon name="shield" size={13}/> Management plane</div>}
           <button className="card-main" onClick={() => openCluster(cluster)}>
             <div className="cluster-card-head"><div className="cluster-symbol"><Icon name="cube" size={21}/></div><StatusBadge status={cluster.readiness}/></div>

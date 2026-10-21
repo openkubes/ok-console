@@ -85,6 +85,12 @@ function EmptyState({ title, description }: { title: string; description: string
   return <div className="empty-state" role="status"><span className="cluster-symbol"><Icon name="cube"/></span><h2>{title}</h2><p>{description}</p></div>
 }
 
+function clusterPlaneLabel(cluster: Cluster): string {
+  if (cluster.role === 'Management plane') return 'Management plane'
+  if (cluster.profile.toLowerCase().includes('infrastructure host')) return 'Infra plane'
+  return 'Worker power'
+}
+
 function Overview({ data, identity, openCluster, openEvidence }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   const overview = data.overview
@@ -102,7 +108,7 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
       {data.clusters.length === 0 ? <EmptyState title="No clusters observed" description="The Console BFF returned a valid empty fleet. No readiness is inferred."/> : <div className="cluster-grid">
         {data.clusters.map((cluster) => <article key={cluster.id} className={`cluster-card ${cluster.role === 'Management plane' ? 'management' : ''}`}>
-          {cluster.role === 'Management plane' && <div className="management-ribbon"><Icon name="shield" size={13}/> Management plane</div>}
+          <div className={`management-ribbon ${cluster.role === 'Management plane' ? '' : 'workload-ribbon'}`}><Icon name={cluster.role === 'Management plane' ? 'shield' : 'cube'} size={13}/> {clusterPlaneLabel(cluster)}</div>
           <button className="card-main" onClick={() => openCluster(cluster)}>
             <div className="cluster-card-head"><div className="cluster-symbol"><Icon name="cube" size={21}/></div><StatusBadge status={cluster.readiness}/></div>
             <h3>{cluster.name}</h3><p>{cluster.profile}</p>

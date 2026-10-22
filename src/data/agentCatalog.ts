@@ -3,6 +3,25 @@ import type { AgentDefinition } from '../domain/contracts'
 /** Curated catalog entries are not runtime observations or deployment evidence. */
 export const curatedAgents: AgentDefinition[] = [
   {
+    id: 'agent-ok-ai-diagnostic-preview',
+    name: 'OK AI Diagnostic Agent',
+    category: 'Platform Operations',
+    description: 'Demo preview that summarizes observed cluster health and links to supporting evidence. Read-only; it does not change clusters or workloads.',
+    version: 'Demo preview',
+    publisher: 'OpenKubes',
+    verified: false,
+    demoOnly: true,
+    artifactDigest: 'demo-only',
+    requiredCapabilities: ['cap-observability'],
+    resourceProfile: 'Read-only preview · no runtime',
+    deployments: 0,
+    recommendedCluster: 'Preview only · not deployed',
+    tools: [
+      { id: 'diagnostics.read', label: 'Observed cluster diagnostics', authority: 'Read only' },
+      { id: 'evidence.read', label: 'Source evidence lookup', authority: 'Read only' },
+    ],
+  },
+  {
     id: 'agent-kagent-platform-operator',
     name: 'Kagent Platform Operator',
     category: 'Platform Operations',

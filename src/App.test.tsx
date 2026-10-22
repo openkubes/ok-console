@@ -474,6 +474,17 @@ describe('OpenKubes Console', () => {
     expect(screen.getByText(/No Agent, namespace, credential, workload, or backend resource was created/i)).toBeInTheDocument()
   })
 
+  it('shows the OK AI diagnostic preview without presenting it as verified or deployable', async () => {
+    window.location.hash = '#/agents'
+    await renderSignedIn()
+
+    expect(await screen.findByRole('heading', { name: 'OK AI Diagnostic Agent' })).toBeInTheDocument()
+    expect(screen.getByText('Demo Preview')).toBeInTheDocument()
+    expect(screen.getByText(/Read-only; it does not change clusters or workloads/i)).toBeInTheDocument()
+    expect(screen.getByText('Preview only · not deployed')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Preview only/i })).toBeDisabled()
+  })
+
   it('registers an existing cluster with external ownership and least authority', async () => {
     window.location.hash = '#/register'
     await renderSignedIn()

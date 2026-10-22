@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { consoleData } from './data/consoleData'
 import { BffConsoleAdapter } from './data/bffAdapter'
+import { platformFixture } from './data/fixtures'
 import clusterListExample from '../contracts/presentation/v0alpha1/examples/cluster-list.json'
 import evidenceExample from '../contracts/presentation/v0alpha1/examples/evidence-reference.json'
 import detailExample from '../contracts/presentation/v0alpha1/examples/cluster-detail.json'
@@ -160,6 +161,26 @@ describe('OpenKubes Console', () => {
     const managementMarkers = screen.getAllByText('Management plane')
     expect(managementMarkers.length).toBeGreaterThan(0)
     expect(screen.getAllByText('ok-mgmt').length).toBeGreaterThan(0)
+  })
+
+  it('labels illustrative capability fixtures separately from empty live observations', async () => {
+    const getSnapshot = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue({
+      ...structuredClone(platformFixture),
+      source: 'bff',
+      capabilities: [],
+    })
+    dataMode.value = 'bff'
+    window.location.hash = '#/capabilities'
+    try {
+      await renderSignedIn()
+      expect(screen.getByText('Demo catalog')).toBeInTheDocument()
+      expect(screen.getByText(/These seven entries are demo fixtures, not observations from ok-shared/i)).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Identity' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Messaging' })).toBeInTheDocument()
+    } finally {
+      getSnapshot.mockRestore()
+      dataMode.value = 'fixture'
+    }
   })
 
   it('exposes all curated product areas in navigation', async () => {

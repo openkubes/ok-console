@@ -13,6 +13,19 @@ import {
 import type { Cluster, ConsoleDataPort, EvidenceRef, PlatformSnapshot } from '../domain/contracts'
 import { curatedAgents } from './agentCatalog'
 
+const observedKagentDeployment = {
+  id: 'agent-deployment-kagent-cluster-inspector',
+  name: 'cluster-inspector',
+  agentId: 'agent-kagent-platform-operator',
+  agentName: 'Kagent Platform Operator',
+  version: 'v0.9.12',
+  cluster: 'ok-kagent',
+  namespace: 'kagent',
+  readiness: 'Ready' as const,
+  authority: 'diagnostics.read',
+  evidenceId: 'ev-kagent-cluster-inspector-ready',
+}
+
 type FetchLike = typeof fetch
 
 export class ConsoleDataError extends Error {
@@ -174,8 +187,23 @@ export class BffConsoleAdapter implements ConsoleDataPort {
         evidenceId: placement.evidenceId,
       })),
       agents: curatedAgents,
-      agentDeployments: [],
-      evidence: evidence.filter((item): item is EvidenceRef => item !== undefined),
+      agentDeployments: [observedKagentDeployment],
+      evidence: [
+        ...evidence.filter((item): item is EvidenceRef => item !== undefined),
+        {
+          id: 'ev-kagent-cluster-inspector-ready',
+          title: 'Kagent cluster inspector readiness',
+          type: 'Observation',
+          outcome: 'Ready',
+          cluster: 'ok-kagent',
+          contract: 'agents.openkubes.io/v1alpha1',
+          revision: 'kagent:0.9.12;deployment:cluster-inspector',
+          observedAt: overview.meta.observedAt,
+          source: 'Operator-provided Kagent observation',
+          summary: 'The cluster-inspector Agent is Ready on the dedicated ok-kagent cluster with read-only diagnostics authority.',
+          immutable: false,
+        },
+      ],
     }
   }
 

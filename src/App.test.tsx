@@ -485,6 +485,18 @@ describe('OpenKubes Console', () => {
     expect(screen.getByRole('button', { name: /Preview only/i })).toBeDisabled()
   })
 
+  it('opens a persistent read-only OK AI Diagnostic widget and links answers to observed evidence', async () => {
+    await renderSignedIn()
+
+    fireEvent.click(screen.getByRole('button', { name: /Ask OK AI/i }))
+    expect(screen.getByRole('dialog', { name: 'OK AI Diagnostic preview' })).toBeInTheDocument()
+    expect(screen.getByText(/no live AI service or cluster actions are connected/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
+    expect(await screen.findByText(/ok-shared is currently shown as Pending/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /View evidence · Shared services convergence/i }))
+    expect(await screen.findByRole('heading', { name: 'Shared services convergence' })).toBeInTheDocument()
+  })
+
   it('registers an existing cluster with external ownership and least authority', async () => {
     window.location.hash = '#/register'
     await renderSignedIn()

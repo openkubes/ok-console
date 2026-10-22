@@ -41,7 +41,7 @@ export interface Capability {
 export interface Cluster {
   id: string
   name: string
-  role: 'Management plane' | 'Workload cluster'
+  role: 'Management plane' | 'Infrastructure plane' | 'Workload cluster'
   provider: string
   profile: string
   version: string

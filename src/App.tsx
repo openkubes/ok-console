@@ -161,9 +161,22 @@ function ClusterDetail({ cluster, data, detailError, close, openEvidence, openSh
 }
 
 function Workloads({ claims, data, openEvidence }: { claims: WorkloadClaim[]; data: PlatformSnapshot; openEvidence: (e: EvidenceRef) => void }) {
+  const [clusterFilter, setClusterFilter] = useState('all')
+  const clusterNames = [...new Set([...data.clusters.map((cluster) => cluster.name), ...claims.map((claim) => claim.targetCluster)])]
+  const counts = new Map<string, number>()
+  for (const claim of claims) counts.set(claim.targetCluster, (counts.get(claim.targetCluster) ?? 0) + 1)
+  const visibleClaims = clusterFilter === 'all' ? claims : claims.filter((claim) => claim.targetCluster === clusterFilter)
+
   return <><PageTitle eyebrow="Intent & observation" title="Workloads" description="Inspect observed workloads, their placement, readiness, and evidence."/>
-    {claims.length === 0 && <EmptyState title="No workloads observed" description="Workloads appear when the configured source provides placement observations."/>}
-    <section className="claims-grid">{claims.map((claim) => {
+    <div className="workload-toolbar">
+      <label className="workload-filter"><span>Cluster</span><select aria-label="Filter workloads by cluster" value={clusterFilter} onChange={(event) => setClusterFilter(event.target.value)}>
+        <option value="all">All clusters ({claims.length})</option>
+        {clusterNames.map((name) => <option key={name} value={name}>{name} ({counts.get(name) ?? 0})</option>)}
+      </select></label>
+      <span className="workload-count" aria-live="polite">{visibleClaims.length} {visibleClaims.length === 1 ? 'workload' : 'workloads'}</span>
+    </div>
+    {visibleClaims.length === 0 && <EmptyState title={clusterFilter === 'all' ? 'No workloads observed' : `No workloads on ${clusterFilter}`} description={clusterFilter === 'all' ? 'Workloads appear when the configured source provides placement observations.' : 'No observed workload placements are available for this cluster yet.'}/>}
+    <section className="claims-grid">{visibleClaims.map((claim) => {
       const observed = claim.kind === 'Observed Deployment'
       const evidence = data.evidence.find((item) => item.id === claim.evidenceId)
       const replicas = observed ? evidence?.revision.match(/;replicas:([^;]+)/)?.[1] : undefined

@@ -92,7 +92,7 @@ export type ObservedMetricCount = { [Field in keyof StatusCount]: number | null 
 export interface ClusterSummaryData {
   id: string
   name: string
-  role: 'Management plane' | 'Workload cluster'
+  role: 'Management plane' | 'Infrastructure plane' | 'Workload cluster'
   provider: string
   profile: string
   kubernetesVersion: string
@@ -247,7 +247,7 @@ const validateClusterSummary = (value: unknown, errors: string[], path = 'data')
   for (const field of ['id', 'name', 'provider', 'profile', 'kubernetesVersion', 'region', 'contractVersion', 'revision', 'evidenceId']) {
     if (!isNonEmptyString(value[field])) errors.push(`${path}.${field} must be a non-empty string`)
   }
-  if (!['Management plane', 'Workload cluster'].includes(String(value.role))) {
+  if (!['Management plane', 'Infrastructure plane', 'Workload cluster'].includes(String(value.role))) {
     errors.push(`${path}.role is not supported`)
   }
   if (!['Ready', 'Pending', 'Failed', 'Unknown'].includes(String(value.readiness))) {

@@ -17,9 +17,43 @@ const redactSummary = () => ({
   redacted: true,
 })
 
-const SENSITIVE_TEXT = /(?:password|passphrase|token|secret|private[_ -]?key|kubeconfig)\s*[:=]|authorization\s*:\s*bearer\b/i
+// Match normalized text, but preserve the original scalar unless withholding it.
+// Credential value shapes apply to every field, including identifiers and ownership.
+const CREDENTIAL_SHAPES = new RegExp([
+  /-----\s*BEGIN\b[\s\S]*?-----/, // PEM armor
+  /PuTTY-User-Key-File-/,
+  /authorization(?:[\W_]|%[0-9a-f]{2}|\\[trn])+(?:bearer|basic|negotiate|ntlm|digest)(?!-)(?:[\W_]|%[0-9a-f]{2}|\\[trn])+\S{8,}/,
+  /bearer\s+(?=[a-z0-9._~+/-]*[0-9._~+/=])[a-z0-9._~+/-]{16,}=*/,
+  /(?<![a-z0-9+.-])[a-z0-9+.-]+:(?:\\?\/){2}[^\s/@?#]+@/, // URL userinfo
+].map((pattern) => pattern.source).join('|'), 'i')
+// Base64 of `-----BEGIN` at each byte alignment, and the OpenSSH key header; case-sensitive.
+const ENCODED_KEY_MARKERS = /LS0tLS1CRUdJT|tLS0tQkVHSU4|LS0tLUJFR0lO|b3BlbnNzaC1rZXktdjE/
+// One candidate per base64url run (the lookbehind keeps the scan linear); a JWT has an `eyJ` header.
+const DOTTED_TOKEN = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]+(?:=*\.[A-Za-z0-9_-]+){1,2}=*\.?/g
+const hasJwt = (text) => [...text.matchAll(DOTTED_TOKEN)].some(([token]) => {
+  const header = token.indexOf('eyJ')
+  return header !== -1 && token.indexOf('.', header) !== -1
+})
+// Keywords and assignment forms apply to display fields only.
+const DISPLAY_ONLY_PATTERN = new RegExp([
+  /(?:password|passphrase|token|secret|private[_\s-]*key|api[_\s-]*key|kubeconfig|client[_\s-]*(?:key|certificate)[_\s-]*data|auth[_\s-]*provider|passwd|pwd|credential|access[_\s-]*key|cookie|auth(?=["'\s]*[:=]))/,
+  /authorization["'\s]*[:=]/,
+  /authorization[\s\S]{0,40}(?:bearer|basic|negotiate|ntlm|digest)/,
+  /bearer\W*\S+/,
+  /(?:pass|key|sig|session(?:id)?)["'\s]*[:=]/,
+].map((pattern) => pattern.source).join('|'), 'i')
 const REDACTED_TEXT = 'Value withheld by the Console redaction boundary.'
-const redactText = (value) => SENSITIVE_TEXT.test(value) ? REDACTED_TEXT : value
+const matchingText = (value) => /^[\x20-\x7e]*$/.test(value)
+  ? value : value.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '')
+const hasCredentialShape = (text) => CREDENTIAL_SHAPES.test(text)
+  || ENCODED_KEY_MARKERS.test(text)
+  || (text.includes('.') && hasJwt(text))
+const hasCredentialValue = (value) => hasCredentialShape(matchingText(value))
+const redactText = (value) => {
+  const text = matchingText(value)
+  return hasCredentialShape(text) || DISPLAY_ONLY_PATTERN.test(text)
+    ? REDACTED_TEXT : value
+}
 
 export class ObservedStateContractError extends Error {
   constructor(message) {
@@ -41,6 +75,14 @@ const list = (value, path) => {
 const string = (value, path) => {
   if (typeof value !== 'string' || value.length === 0 || value.length > 512) throw new Error(`${path} must be a non-empty bounded string.`)
   return value
+}
+
+const displayString = (value, path) => redactText(string(value, path))
+
+const identifierString = (value, path) => {
+  const item = string(value, path)
+  if (hasCredentialValue(item)) throw new Error(`${path} must not contain a credential value.`)
+  return item
 }
 
 const enumeration = (value, allowed, path) => {
@@ -70,6 +112,8 @@ const ownershipString = (value, path) => {
     || value.length > 256
     || value !== value.trim()
     || containsControlCharacter(value)
+    // Ownership is authorization data: reject rather than collapse distinct identities.
+    || hasCredentialValue(value)
   ) throw new Error(`${path} must be a valid non-empty bounded string.`)
   return value
 }
@@ -110,10 +154,10 @@ const metricSet = (value, path) => {
 const normalizeCapability = (value, path, environmentId) => {
   const item = record(value, path)
   return {
-    id: string(item.id, `${path}.id`),
-    name: string(item.name, `${path}.name`),
+    id: identifierString(item.id, `${path}.id`),
+    name: displayString(item.name, `${path}.name`),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
-    evidenceId: string(item.evidenceId, `${path}.evidenceId`),
+    evidenceId: identifierString(item.evidenceId, `${path}.evidenceId`),
     ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
   }
 }
@@ -121,27 +165,27 @@ const normalizeCapability = (value, path, environmentId) => {
 const normalizeCluster = (value, path, environmentId) => {
   const item = record(value, path)
   return {
-    id: string(item.id, `${path}.id`),
-    name: string(item.name, `${path}.name`),
+    id: identifierString(item.id, `${path}.id`),
+    name: displayString(item.name, `${path}.name`),
     role: enumeration(item.role, ROLES, `${path}.role`),
-    provider: redactText(string(item.provider, `${path}.provider`)),
-    profile: redactText(string(item.profile, `${path}.profile`)),
-    kubernetesVersion: redactText(string(item.kubernetesVersion, `${path}.kubernetesVersion`)),
-    region: redactText(string(item.region, `${path}.region`)),
+    provider: displayString(item.provider, `${path}.provider`),
+    profile: displayString(item.profile, `${path}.profile`),
+    kubernetesVersion: displayString(item.kubernetesVersion, `${path}.kubernetesVersion`),
+    region: displayString(item.region, `${path}.region`),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     compatibility: enumeration(item.compatibility, COMPATIBILITY, `${path}.compatibility`),
-    contractVersion: redactText(string(item.contractVersion, `${path}.contractVersion`)),
-    revision: redactText(string(item.revision, `${path}.revision`)),
-    evidenceId: string(item.evidenceId, `${path}.evidenceId`),
+    contractVersion: displayString(item.contractVersion, `${path}.contractVersion`),
+    revision: displayString(item.revision, `${path}.revision`),
+    evidenceId: identifierString(item.evidenceId, `${path}.evidenceId`),
     ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
     capabilities: list(item.capabilities, `${path}.capabilities`).map((capability, index) => normalizeCapability(capability, `${path}.capabilities[${index}]`, environmentId)),
     lifecycle: list(item.lifecycle, `${path}.lifecycle`).map((stage, index) => {
       const stagePath = `${path}.lifecycle[${index}]`
       const stageRecord = record(stage, stagePath)
       return {
-        label: string(stageRecord.label, `${stagePath}.label`),
+        label: displayString(stageRecord.label, `${stagePath}.label`),
         state: enumeration(stageRecord.state, READINESS, `${stagePath}.state`),
-        detail: redactText(string(stageRecord.detail, `${stagePath}.detail`)),
+        detail: displayString(stageRecord.detail, `${stagePath}.detail`),
       }
     }),
   }
@@ -150,30 +194,30 @@ const normalizeCluster = (value, path, environmentId) => {
 const normalizePlacement = (value, path, environmentId) => {
   const item = record(value, path)
   return {
-    id: string(item.id, `${path}.id`),
-    name: redactText(string(item.name, `${path}.name`)),
-    targetCluster: redactText(string(item.targetCluster, `${path}.targetCluster`)),
-    targetClusterId: string(item.targetClusterId, `${path}.targetClusterId`),
+    id: identifierString(item.id, `${path}.id`),
+    name: displayString(item.name, `${path}.name`),
+    targetCluster: displayString(item.targetCluster, `${path}.targetCluster`),
+    targetClusterId: identifierString(item.targetClusterId, `${path}.targetClusterId`),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
-    evidenceId: string(item.evidenceId, `${path}.evidenceId`),
+    evidenceId: identifierString(item.evidenceId, `${path}.evidenceId`),
     ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
   }
 }
 
 const normalizeEvidence = (value, path, environmentId) => {
   const item = record(value, path)
-  string(item.summary, `${path}.summary`)
+  displayString(item.summary, `${path}.summary`)
   const summary = redactSummary()
   return {
-    id: string(item.id, `${path}.id`),
-    title: redactText(string(item.title, `${path}.title`)),
+    id: identifierString(item.id, `${path}.id`),
+    title: displayString(item.title, `${path}.title`),
     type: enumeration(item.type, EVIDENCE_TYPES, `${path}.type`),
     outcome: enumeration(item.outcome, EVIDENCE_OUTCOMES, `${path}.outcome`),
-    clusterId: string(item.clusterId, `${path}.clusterId`),
-    contract: redactText(string(item.contract, `${path}.contract`)),
-    revision: redactText(string(item.revision, `${path}.revision`)),
-    observedAt: string(item.observedAt, `${path}.observedAt`),
-    source: redactText(string(item.source, `${path}.source`)),
+    clusterId: identifierString(item.clusterId, `${path}.clusterId`),
+    contract: displayString(item.contract, `${path}.contract`),
+    revision: displayString(item.revision, `${path}.revision`),
+    observedAt: displayString(item.observedAt, `${path}.observedAt`),
+    source: displayString(item.source, `${path}.source`),
     summary: summary.summary,
     classification: enumeration(item.classification, CLASSIFICATION, `${path}.classification`),
     redacted: summary.redacted,
@@ -218,7 +262,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   if (envelope.apiVersion !== QUERY_VERSION || envelope.kind !== QUERY_KIND) throw new ObservedStateContractError('Observed-state query contract is incompatible.')
   const metadata = record(envelope.metadata, '$.metadata')
   const data = record(envelope.data, '$.data')
-  const observedAt = string(metadata.observedAt, '$.metadata.observedAt')
+  const observedAt = displayString(metadata.observedAt, '$.metadata.observedAt')
   const observedTime = Date.parse(observedAt)
   if (!Number.isFinite(observedTime)) throw new Error('$.metadata.observedAt must be an ISO timestamp.')
   const environment = record(data.environment, '$.data.environment')
@@ -271,10 +315,10 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   const partial = metadata.partial === true
   return {
     observedAt,
-    sourceRevision: string(metadata.sourceRevision, '$.metadata.sourceRevision'),
+    sourceRevision: displayString(metadata.sourceRevision, '$.metadata.sourceRevision'),
     environment: {
       id: environmentId,
-      displayName: string(environment.displayName, '$.data.environment.displayName'),
+      displayName: displayString(environment.displayName, '$.data.environment.displayName'),
     },
     metrics,
     clusters,

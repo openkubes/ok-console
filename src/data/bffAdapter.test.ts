@@ -13,6 +13,23 @@ const jsonResponse = (body: unknown, status = 200) =>
   })
 
 describe('BffConsoleAdapter', () => {
+  it('labels hosting deployment placements as observations and loads their evidence', async () => {
+    const overview = structuredClone(platformOverview)
+    overview.data.recentPlacements = [{
+      id: 'observed-deployment-openkubes-console-ok-console', name: 'openkubes-console/ok-console',
+      targetCluster: 'ok-shared', readiness: 'Ready', evidenceId: 'ev-observed-console',
+    }]
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/overview')) return jsonResponse(overview)
+      if (url.endsWith('/clusters')) return jsonResponse(clusterList)
+      return jsonResponse(evidenceReference)
+    }) as typeof fetch
+    const snapshot = await new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+    expect(snapshot.claims[0]).toMatchObject({ kind: 'Observed Deployment', targetCluster: 'ok-shared' })
+    expect(fetcher).toHaveBeenCalledWith('/api/console/v0/evidence/ev-observed-console', expect.anything())
+  })
+
   it('maps the stable read-only responses behind ConsoleDataPort', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

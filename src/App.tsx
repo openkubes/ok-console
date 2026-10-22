@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
 import { consoleData, consoleDataMode } from './data/consoleData'
+import { platformFixture } from './data/fixtures'
 import { ConsoleDataError } from './data/bffAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
 
@@ -245,7 +246,15 @@ function CapabilityGrid({ capabilities, data, openEvidence }: { capabilities: Ca
 }
 
 function Capabilities({ data, openEvidence }: { data: PlatformSnapshot; openEvidence: (e: EvidenceRef) => void }) {
-  return <><PageTitle eyebrow="Global catalog" title="Capabilities" description="Contracts first. Implementations remain replaceable and provider-neutral."/><CapabilityGrid capabilities={data.capabilities} data={data} openEvidence={openEvidence}/></>
+  const demoPreview = data.source === 'bff' && data.capabilities.length === 0
+  const capabilities = demoPreview ? platformFixture.capabilities : data.capabilities
+  return <>
+    <PageTitle eyebrow="Global catalog" title="Capabilities" description="Contracts first. Implementations remain replaceable and provider-neutral." action={demoPreview ? <span className="prototype-badge">Demo catalog</span> : undefined}/>
+    {demoPreview && <aside className="capability-preview-note" role="note"><strong>Illustrative capability examples</strong><span>These seven entries are demo fixtures, not observations from ok-shared. Observed capability totals and cluster readiness remain unchanged.</span></aside>}
+    {capabilities.length > 0
+      ? <CapabilityGrid capabilities={capabilities} data={data} openEvidence={openEvidence}/>
+      : <EmptyState title="No capabilities observed" description="The Console BFF returned no capability records. No capability readiness is inferred."/>}
+  </>
 }
 
 function EvidenceList({ evidence, onSelect }: { evidence: EvidenceRef[]; onSelect: (e: EvidenceRef) => void }) {

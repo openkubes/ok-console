@@ -377,40 +377,47 @@ type ShellEntry = {
 
 const MUTATING_COMMAND = /\b(apply|create|delete|edit|patch|replace|scale|cordon|drain|uncordon|exec|rollout\s+restart|set\s+image)\b/i
 
-function simulatedShellResponse(command: string, cluster: Cluster): ShellEntry[] {
+function simulatedShellResponse(command: string, cluster: Cluster, source: PlatformSnapshot['source']): ShellEntry[] {
   const normalized = command.trim().toLowerCase()
   if (MUTATING_COMMAND.test(normalized)) {
     return [{ kind: 'blocked', content: 'BLOCKED · This read-only prototype cannot invoke a mutating operation. A production request would enter Review → Authorization → Execution.' }]
   }
   if (normalized.includes('why') || normalized.includes('explain') || normalized.includes('pending')) {
-    const pending = cluster.lifecycle.find((item) => item.state !== 'Ready')
-    const explanation = pending
-      ? `${cluster.name} is ${cluster.readiness.toLowerCase()} because ${pending.label.toLowerCase()} reports: ${pending.detail}. This is an explanation of fixture evidence, not a new readiness decision.`
-      : `${cluster.name} currently reports Ready across all required lifecycle checks. The explanation resolves to the observed contract revision and does not infer state from Kubernetes objects.`
+    const pending = cluster.lifecycle.filter((item) => item.state !== 'Ready')
+    const explanation = cluster.lifecycle.length === 0
+      ? `This shell session holds readiness ${cluster.readiness} for ${cluster.name}. This shell session holds no lifecycle detail for ${cluster.name}.`
+      : pending.length > 0
+      ? `This shell session holds readiness ${cluster.readiness} for ${cluster.name}.\n${pending.map((item) => `${item.label}: ${item.state} — ${item.detail}`).join('\n')}`
+      : cluster.readiness === 'Ready'
+        ? `This shell session holds readiness Ready and ${cluster.lifecycle.length} lifecycle stage(s), all reporting Ready.`
+        : `This shell session holds readiness ${cluster.readiness} for ${cluster.name}. Its ${cluster.lifecycle.length} lifecycle stage(s) all report Ready; stages do not establish overall readiness.`
     return [
       { kind: 'ai', content: explanation },
       { kind: 'proposal', content: `Suggested read-only command · kubectl get clusterconditions -o wide` },
     ]
   }
   if (normalized === 'help') {
-    return [{ kind: 'output', content: 'Allowed examples:\n  kubectl get nodes\n  kubectl get namespaces\n  kubectl get clusterconditions -o wide\n  ok evidence explain\n  why is this cluster pending?' }]
+    return [{ kind: 'output', content: 'Allowed examples:\n  kubectl get clusterconditions -o wide\n  ok evidence explain\n  why is this cluster pending?' }]
   }
   if (normalized.includes('get nodes')) {
-    return [{ kind: 'output', content: `NAME                    STATUS   ROLE           VERSION\n${cluster.name}-cp-01     Ready    control-plane  ${cluster.version}\n${cluster.name}-worker-01 Ready    worker         ${cluster.version}` }]
+    return [{ kind: 'blocked', content: 'UNAVAILABLE · Node listings are not available from the observed-state contract.' }]
   }
   if (normalized.includes('get namespaces')) {
-    return [{ kind: 'output', content: 'NAME                  STATUS\ndefault               Active\nkube-system           Active\nopenkubes-system      Active\nobservability         Active' }]
+    return [{ kind: 'blocked', content: 'UNAVAILABLE · Namespace listings are not available from the observed-state contract.' }]
   }
   if (normalized.includes('clusterconditions')) {
-    return [{ kind: 'output', content: cluster.lifecycle.map((item) => `${item.label.padEnd(18)} ${item.state.padEnd(8)} ${item.detail}`).join('\n') }]
+    if (cluster.lifecycle.length === 0) {
+      return [{ kind: 'blocked', content: `UNAVAILABLE · This shell session holds no lifecycle detail for ${cluster.name}.` }]
+    }
+    return [{ kind: 'output', content: `This shell session holds the following lifecycle snapshot:\n` + cluster.lifecycle.map((item) => `${item.label.padEnd(18)} ${item.state.padEnd(8)} ${item.detail}`).join('\n') }]
   }
   if (normalized.includes('evidence')) {
-    return [{ kind: 'output', content: `EVIDENCE     ${cluster.evidenceId}\nCONTRACT     ${cluster.contractVersion}\nREVISION     ${cluster.revision}\nREADINESS    ${cluster.readiness}\nSOURCE       deterministic prototype fixture` }]
+    return [{ kind: 'output', content: `This shell session holds the following evidence snapshot:\nEVIDENCE     ${cluster.evidenceId}\nCONTRACT     ${cluster.contractVersion}\nREVISION     ${cluster.revision}\nREADINESS    ${cluster.readiness}\nSOURCE       ${source ?? 'unspecified'}` }]
   }
   return [{ kind: 'blocked', content: 'UNKNOWN · This command is not in the prototype read-only allowlist. Type “help” to see supported diagnostics.' }]
 }
 
-function ClusterShell({ cluster, close }: { cluster: Cluster; close: () => void }) {
+function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: PlatformSnapshot['source']; close: () => void }) {
   const [namespace, setNamespace] = useState('all namespaces')
   const [command, setCommand] = useState('')
   const [entries, setEntries] = useState<ShellEntry[]>([
@@ -425,7 +432,7 @@ function ClusterShell({ cluster, close }: { cluster: Cluster; close: () => void 
       setCommand('')
       return
     }
-    setEntries((current) => [...current, { kind: 'command', content: nextCommand }, ...simulatedShellResponse(nextCommand, cluster)])
+    setEntries((current) => [...current, { kind: 'command', content: nextCommand }, ...simulatedShellResponse(nextCommand, cluster, source)])
     setCommand('')
   }
 
@@ -438,12 +445,12 @@ function ClusterShell({ cluster, close }: { cluster: Cluster; close: () => void 
       </header>
       <div className="shell-context">
         <div><span>Cluster</span><strong><Icon name={cluster.role === 'Management plane' ? 'shield' : 'cube'} size={14}/>{cluster.name}</strong></div>
-        <label><span>Namespace</span><select aria-label="Shell namespace" value={namespace} onChange={(event) => setNamespace(event.target.value)}><option>all namespaces</option><option>openkubes-system</option><option>kube-system</option><option>observability</option></select></label>
+        <label><span>Namespace</span><select aria-label="Shell namespace" value={namespace} onChange={(event) => setNamespace(event.target.value)}><option>all namespaces</option></select></label>
         <div><span>Authority</span><strong>diagnostics.read</strong></div>
         <div><span>Session evidence</span><strong>shell/{cluster.name}/demo-01</strong></div>
       </div>
       {cluster.role === 'Management plane' && <div className="management-warning"><Icon name="shield"/><strong>Management Plane guardrail</strong><span>This session has the strictest diagnostic-only policy. Mutations and interactive exec are unavailable.</span></div>}
-      <div className="shell-toolbar"><span>Try a safe diagnostic</span><div>{['kubectl get nodes', 'kubectl get clusterconditions -o wide', 'ok evidence explain'].map((item) => <button key={item} onClick={() => run(item)}>{item}</button>)}</div></div>
+      <div className="shell-toolbar"><span>Try a safe diagnostic</span><div>{['kubectl get clusterconditions -o wide', 'ok evidence explain'].map((item) => <button key={item} onClick={() => run(item)}>{item}</button>)}</div></div>
       <div className="terminal-output" role="log" aria-live="polite">
         {entries.map((entry, index) => <div className={`terminal-entry terminal-${entry.kind}`} key={`${entry.kind}-${index}`}>
           {entry.kind === 'command' && <span className="terminal-prompt">{cluster.name}<i>:</i>{namespace === 'all namespaces' ? '*' : namespace}<b>$</b></span>}
@@ -584,6 +591,6 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
       <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</span></footer></main>
     </div>
     {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}
-    {shellCluster && <ClusterShell cluster={shellCluster} close={() => setShellCluster(undefined)}/>}
+    {shellCluster && <ClusterShell cluster={shellCluster} source={data.source} close={() => setShellCluster(undefined)}/>}
   </div>
 }

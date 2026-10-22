@@ -78,6 +78,7 @@ export interface AgentDefinition {
   version: string
   publisher: string
   verified: boolean
+  demoOnly?: boolean
   artifactDigest: string
   requiredCapabilities: string[]
   resourceProfile: string

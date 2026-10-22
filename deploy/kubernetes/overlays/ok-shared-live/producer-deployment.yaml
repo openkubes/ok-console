@@ -53,6 +53,8 @@ spec:
               value: openkubes-console
             - name: OK_OBSERVER_HOSTING_DEPLOYMENT
               value: ok-console
+            - name: OK_OBSERVER_WORKLOAD_DEPLOYMENTS
+              value: ok-console,observed-state-producer
             - name: OK_OBSERVER_HOSTING_REGION
               value: shared
             - name: OK_OBSERVER_PORT

@@ -32,7 +32,7 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(rbac).toContain('resources: ["nodes"]')
     expect(rbac).toContain('verbs: ["get", "list"]')
     expect(rbac).toContain('nonResourceURLs: ["/version"]')
-    expect(rbac).toContain('resourceNames: ["ok-console"]')
+    expect(rbac).toContain('resourceNames: ["ok-console", "observed-state-producer"]')
     expect(rbac).not.toMatch(/secrets|pods|exec|logs|create|update|patch|delete|impersonate/)
     expect(rbac).not.toMatch(/crossplane|kubevirt|cluster\.x-k8s/i)
   })

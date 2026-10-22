@@ -161,7 +161,21 @@ function ClusterDetail({ cluster, data, detailError, close, openEvidence, openSh
 }
 
 function Workloads({ claims, data, openEvidence }: { claims: WorkloadClaim[]; data: PlatformSnapshot; openEvidence: (e: EvidenceRef) => void }) {
-  return <><PageTitle eyebrow="Intent & placement" title="Workloads" description="Follow each claim from team intent to capability fit and evidence."/><section className="claims-grid">{claims.map((claim) => <article className="claim-card" key={claim.id}><div className="claim-head"><span className="claim-kind">{claim.kind}</span><StatusBadge status={claim.readiness}/></div><h2>{claim.name}</h2><p>{claim.intent}</p><div className="placement-flow"><div><span>Owner</span><strong>{claim.owner}</strong></div><Icon name="arrow"/><div><span>Placed on</span><strong>{claim.targetCluster}</strong></div></div><div className="cap-tags">{claim.requiredCapabilities.map((item) => <span key={item}><Icon name="check" size={12}/>{item}</span>)}</div><div className="decision"><Icon name="shield"/><div><span>Placement decision</span><strong>{claim.decision}</strong></div></div><EvidenceLink id={claim.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></article>)}</section></>
+  return <><PageTitle eyebrow="Intent & observation" title="Workloads" description="Inspect observed workloads, their placement, readiness, and evidence."/>
+    {claims.length === 0 && <EmptyState title="No workloads observed" description="Workloads appear when the configured source provides placement observations."/>}
+    <section className="claims-grid">{claims.map((claim) => {
+      const observed = claim.kind === 'Observed Deployment'
+      const evidence = data.evidence.find((item) => item.id === claim.evidenceId)
+      const replicas = observed ? evidence?.revision.match(/;replicas:([^;]+)/)?.[1] : undefined
+      return <article className="claim-card" key={claim.id}>
+        <div className="claim-head"><span className="claim-kind">{claim.kind}</span><StatusBadge status={claim.readiness}/></div>
+        <h2>{claim.name}</h2><p>{claim.intent}</p>
+        <div className="placement-flow"><div><span>Owner</span><strong>{claim.owner}</strong></div><Icon name="arrow"/><div><span>Placed on</span><strong>{claim.targetCluster}</strong></div></div>
+        <div className="cap-tags">{claim.requiredCapabilities.map((item) => <span key={item}><Icon name="check" size={12}/>{item}</span>)}</div>
+        <div className="decision"><Icon name="shield"/><div><span>{observed ? 'Available / desired replicas' : 'Placement decision'}</span><strong>{observed ? (replicas ?? 'Unknown') : claim.decision}</strong></div></div>
+        <EvidenceLink id={claim.evidenceId} evidence={data.evidence} onSelect={openEvidence}/>
+      </article>
+    })}</section></>
 }
 
 const agentFitsCluster = (agent: AgentDefinition, cluster: Cluster) => agent.requiredCapabilities.every((capability) => cluster.capabilities.includes(capability)) && cluster.compatibility === 'Supported'

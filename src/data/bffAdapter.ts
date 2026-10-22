@@ -177,9 +177,9 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       claims: overview.data.recentPlacements.map((placement) => ({
         id: placement.id,
         name: placement.name,
-        kind: 'WorkloadClaim',
-        owner: 'Platform team',
-        intent: 'Read-only placement projection',
+        kind: placement.id.startsWith('observed-deployment-') ? 'Observed Deployment' : 'WorkloadClaim',
+        owner: placement.id.startsWith('observed-deployment-') ? 'Hosting cluster' : 'Platform team',
+        intent: placement.id.startsWith('observed-deployment-') ? 'Current Kubernetes Deployment observed through the hosting-cluster API.' : 'Read-only placement projection',
         targetCluster: placement.targetCluster,
         readiness: placement.readiness,
         requiredCapabilities: [],

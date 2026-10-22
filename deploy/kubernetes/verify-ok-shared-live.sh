@@ -4,8 +4,8 @@ set -euo pipefail
 readonly expected_context="${OK_CONSOLE_KUBE_CONTEXT:-ok-shared-admin@ok-shared}"
 readonly namespace="openkubes-console"
 readonly overlay="deploy/kubernetes/overlays/ok-shared-live"
-readonly expected_console_image="ghcr.io/openkubes/ok-console@sha256:f9328f515879a06c28328a1a65de135b3aef1a106430d41022aab2314b3c1f5d"
-readonly expected_producer_image="ghcr.io/openkubes/observed-state-producer@sha256:8b4783066661a084b0c956c56e600fc76b37272c759c6614d3736533ccc42c65"
+readonly expected_console_image="ghcr.io/openkubes/ok-console@sha256:a2b1b3e00a8f0dcda091e83b9bffaf7aefd22b4f13b416790818e474f3d63ba6"
+readonly expected_producer_image="ghcr.io/openkubes/observed-state-producer@sha256:6ee7ce8f26a436cf03f56dd5e9ff065c0e121183320cd68e1acaab7916646012"
 
 actual_context="$(kubectl config current-context)"
 if [[ "${actual_context}" != "${expected_context}" ]]; then

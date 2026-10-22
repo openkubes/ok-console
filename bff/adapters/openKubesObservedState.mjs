@@ -6,7 +6,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const MAX_FUTURE_SKEW_MS = 60 * 1_000
 
 const READINESS = new Set(['Ready', 'Pending', 'Failed', 'Unknown'])
-const ROLES = new Set(['Management plane', 'Workload cluster'])
+const ROLES = new Set(['Management plane', 'Infrastructure plane', 'Workload cluster'])
 const COMPATIBILITY = new Set(['Supported', 'Read only'])
 const CLASSIFICATION = new Set(['Immutable', 'Current'])
 const EVIDENCE_TYPES = new Set(['Observation', 'Transition', 'Authorization'])

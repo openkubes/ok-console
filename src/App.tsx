@@ -255,7 +255,27 @@ function EvidenceList({ evidence, onSelect }: { evidence: EvidenceRef[]; onSelec
 function Evidence({ data, openEvidence }: { data: PlatformSnapshot; openEvidence: (e: EvidenceRef) => void }) {
   const [filter, setFilter] = useState<'All' | EvidenceRef['type']>('All')
   const items = filter === 'All' ? data.evidence : data.evidence.filter((item) => item.type === filter)
-  return <><PageTitle eyebrow="Trust & provenance" title="Evidence & Audit" description="Current observations, immutable outcomes, and authority decisions remain distinct."/><div className="evidence-explainer"><div><span className="legend observation"/><strong>Observation</strong><small>Current, freshness-bound state</small></div><div><span className="legend transition"/><strong>Transition</strong><small>Immutable historical outcome</small></div><div><span className="legend authorization"/><strong>Authorization</strong><small>Explicit authority decision</small></div></div><div className="filter-bar">{(['All', 'Observation', 'Transition', 'Authorization'] as const).map((item) => <button className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><EvidenceList evidence={items} onSelect={openEvidence}/></>
+  return <><PageTitle eyebrow="Trust & provenance" title="Evidence & Audit" description="Current observations, immutable outcomes, and authority decisions remain distinct."/>
+    <section className="framework-preview" aria-labelledby="framework-preview-title">
+      <div className="framework-preview-heading"><div><span className="eyebrow">Roadmap preview</span><h2 id="framework-preview-title">Framework views</h2></div><span>Scope in definition</span></div>
+      <div className="framework-preview-grid">
+        <article className="framework-preview-card">
+          <div className="framework-preview-card-head"><span className="framework-preview-icon"><Icon name="shield"/></span><span className="planned-badge">Planned</span></div>
+          <h3>DORA Evidence View</h3>
+          <p>A planned view for evidence across ICT assets and functions, incidents and resilience tests, and ICT third-party services.</p>
+          <div className="framework-preview-topics"><span>ICT assets & functions</span><span>Incidents & tests</span><span>Third-party services</span></div>
+          <small>Preview only · No DORA assessment is available yet.</small>
+        </article>
+        <article className="framework-preview-card">
+          <div className="framework-preview-card-head"><span className="framework-preview-icon"><Icon name="shield"/></span><span className="planned-badge">Planned</span></div>
+          <h3>KRITIS Evidence View</h3>
+          <p>A planned view for operator and sector-specific evidence mapping, findings, and supporting records.</p>
+          <div className="framework-preview-topics"><span>Operator profile</span><span>Sector mapping</span><span>Findings & evidence</span></div>
+          <small>Preview only · No KRITIS assessment is available yet.</small>
+        </article>
+      </div>
+    </section>
+    <div className="evidence-explainer"><div><span className="legend observation"/><strong>Observation</strong><small>Current, freshness-bound state</small></div><div><span className="legend transition"/><strong>Transition</strong><small>Immutable historical outcome</small></div><div><span className="legend authorization"/><strong>Authorization</strong><small>Explicit authority decision</small></div></div><div className="filter-bar">{(['All', 'Observation', 'Transition', 'Authorization'] as const).map((item) => <button className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><EvidenceList evidence={items} onSelect={openEvidence}/></>
 }
 
 const createSteps = ['Draft', 'Review', 'Authorize', 'Execute', 'Evidence'] as const

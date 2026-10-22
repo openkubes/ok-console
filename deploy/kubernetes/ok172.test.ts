@@ -17,7 +17,7 @@ const yamlToJson = (manifest: string) => JSON.parse(execFileSync('python3', [
 describe('OK-172 ok-shared live slice invariants', () => {
   it('renders only immutable accepted candidates without credential objects or placeholders', async () => {
     const { stdout } = await execute('kubectl', ['kustomize', new URL(overlay, import.meta.url).pathname])
-    expect(stdout).toContain('ghcr.io/openkubes/ok-console@sha256:40e3b89eca8bf133c4ca736dd90c27e92baf4ea2ee7857757a38845796afd9aa')
+    expect(stdout).toContain('ghcr.io/openkubes/ok-console@sha256:9b75aaddcf63fe7a09de2ebe57eb646570aeea5e0c12e073492c360feacbb7e1')
     expect(stdout).toContain('ghcr.io/openkubes/observed-state-producer@sha256:6ee7ce8f26a436cf03f56dd5e9ff065c0e121183320cd68e1acaab7916646012')
     expect(stdout).not.toMatch(/REPLACE_|\.invalid|sha256:0{64}|image: .+:latest/)
     expect(stdout).not.toMatch(/^kind: Secret$/m)

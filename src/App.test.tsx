@@ -202,6 +202,24 @@ describe('OpenKubes Console', () => {
     await waitFor(() => expect(authorize).toBeEnabled())
   })
 
+  it('shows a grouped illustrative CAPI provider catalog in the cluster draft', async () => {
+    window.location.hash = '#/create'
+    await renderSignedIn()
+
+    const provider = screen.getByRole('combobox', { name: 'Infrastructure provider' })
+    expect(within(provider).getByRole('group', { name: /Sovereign & self-managed/i })).toBeInTheDocument()
+    expect(within(provider).getByRole('group', { name: /Public cloud/i })).toBeInTheDocument()
+    for (const label of ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON', 'AWS', 'GCP', 'Azure']) {
+      expect(within(provider).getByRole('option', { name: label })).toBeInTheDocument()
+    }
+    expect(screen.getByText(/Illustrative CAPI provider catalog · selection does not provision infrastructure/i)).toBeInTheDocument()
+
+    fireEvent.change(provider, { target: { value: 'STACKIT' } })
+    fireEvent.click(screen.getByRole('button', { name: /Generate contract/i }))
+    expect(await screen.findByText('STACKIT')).toBeInTheDocument()
+    expect(screen.getByText(/provider: stackit/)).toBeInTheDocument()
+  })
+
   it('opens a cluster-scoped shell and blocks mutating commands', async () => {
     const shell = await openShell()
     expect(shell.log.querySelector('pre')?.textContent).toBe('Read-only prototype session established for ok-mgmt. No credential, kubeconfig, WebSocket, or backend connection was created.')

@@ -1,0 +1,21 @@
+# Isolated fixture-only preview. Does not start the Console BFF.
+FROM node:22.22.0-alpine3.22 AS build
+WORKDIR /work
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY index.html vite.config.ts tsconfig.json tsconfig.app.json tsconfig.node.json ./
+COPY public ./public
+COPY src ./src
+COPY contracts ./contracts
+COPY bff ./bff
+ENV VITE_CONSOLE_DATA_MODE=fixture VITE_CONSOLE_AUTH_MODE=prototype
+RUN pnpm build
+
+FROM node:22.22.0-alpine3.22
+ENV NODE_ENV=production PORT=8787
+WORKDIR /app
+COPY --from=build /work/dist ./dist
+COPY scripts/preview-server.mjs ./server.mjs
+USER node
+EXPOSE 8787
+CMD ["node", "server.mjs"]

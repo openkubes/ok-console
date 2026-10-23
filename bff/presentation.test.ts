@@ -36,4 +36,19 @@ describe('overview projection', () => {
   it('still projects the management plane when it is visible', () => {
     expect(overviewProjection(snapshot).managementPlane).toMatchObject({ role: 'Management plane' })
   })
+
+  it('drops placements with a hidden target and preserves a valid projection', () => {
+    const targetId = snapshot.placements[0].targetClusterId
+    const hidden = snapshot.placements.filter((item: { targetClusterId: string }) => item.targetClusterId === targetId)
+    const data = overviewProjection({
+      ...snapshot,
+      clusters: snapshot.clusters.filter((item: { id: string }) => item.id !== targetId),
+    })
+    expect(hidden.length).toBeGreaterThan(0)
+    expect(data.recentPlacements).toHaveLength(snapshot.placements.length - hidden.length)
+    for (const item of hidden) expect(data.recentPlacements.some((placement: { id: string }) => placement.id === item.id)).toBe(false)
+    expect(validateConsoleResponse({
+      apiVersion: 'console.openkubes.io/v0alpha1', kind: 'PlatformOverview', data, meta: platformOverview.meta,
+    })).toEqual({ valid: true, errors: [] })
+  })
 })

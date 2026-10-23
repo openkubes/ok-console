@@ -107,7 +107,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/nonEmptyString" },
         "name": { "$ref": "#/$defs/nonEmptyString" },
-        "role": { "enum": ["Management plane", "Workload cluster"] },
+        "role": { "enum": ["Management plane", "Infrastructure plane", "Workload cluster"] },
         "provider": { "$ref": "#/$defs/nonEmptyString" },
         "profile": { "$ref": "#/$defs/nonEmptyString" },
         "kubernetesVersion": { "$ref": "#/$defs/nonEmptyString" },

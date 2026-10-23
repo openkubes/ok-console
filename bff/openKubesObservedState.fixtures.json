@@ -1,0 +1,623 @@
+{
+  "producerRevision": "ad351c9",
+  "producerSha256": "b0eed6638f4065123e91b8f761dee3b8f8c3f7327b032d207dca730599371359",
+  "snapshots": {
+    "hosting-cluster": {
+      "apiVersion": "observed.openkubes.io/v0alpha2",
+      "kind": "ConsoleObservedState",
+      "metadata": {
+        "observedAt": "2026-10-22T12:00:00Z",
+        "sourceRevision": "kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633",
+        "partial": true
+      },
+      "data": {
+        "environment": {
+          "id": "openkubes-management",
+          "displayName": "OpenKubes management plane"
+        },
+        "metrics": [
+          {
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            },
+            "capabilities": {
+              "total": 0,
+              "ready": 0,
+              "pending": 0,
+              "failed": 0,
+              "unknown": 0
+            },
+            "workloadClaims": {
+              "total": 0,
+              "ready": 0,
+              "pending": 0,
+              "failed": 0,
+              "unknown": 0
+            },
+            "openFindings": {
+              "total": 0,
+              "critical": 0
+            }
+          }
+        ],
+        "clusters": [
+          {
+            "id": "cluster-ok-mgmt",
+            "name": "ok-mgmt",
+            "role": "Management plane",
+            "provider": "OpenKubes",
+            "profile": "Management plane",
+            "kubernetesVersion": "unknown",
+            "region": "unknown",
+            "readiness": "Unknown",
+            "compatibility": "Read only",
+            "contractVersion": "unknown",
+            "revision": "not-observed-by-hosting-source",
+            "evidenceId": "ev-ok-mgmt-source-boundary",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "Source boundary",
+                "state": "Unknown",
+                "detail": "The hosting-cluster source does not observe the OpenKubes management plane."
+              },
+              {
+                "label": "Compositions",
+                "state": "Unknown",
+                "detail": "Composition state is outside this bounded Phase B1 source."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "cluster-ok-shared",
+            "name": "ok-shared",
+            "role": "Workload cluster",
+            "provider": "Kubernetes",
+            "profile": "Console hosting cluster",
+            "kubernetesVersion": "v1.35.5+rke2r1",
+            "region": "unknown",
+            "readiness": "Ready",
+            "compatibility": "Read only",
+            "contractVersion": "kubernetes.io/core+apps/v1",
+            "revision": "nodes:31461260;deployment:31452633",
+            "evidenceId": "ev-ok-shared-hosting-state",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "Kubernetes API",
+                "state": "Ready",
+                "detail": "The bounded read-only Kubernetes API queries completed."
+              },
+              {
+                "label": "Nodes",
+                "state": "Ready",
+                "detail": "Ready: 1; not ready: 0; unknown: 0."
+              },
+              {
+                "label": "Console workload",
+                "state": "Ready",
+                "detail": "Available replicas: 2 of 2."
+              },
+              {
+                "label": "OpenKubes Compositions",
+                "state": "Unknown",
+                "detail": "Composition and multi-cluster state are intentionally outside Phase B1."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ],
+        "placements": [
+          {
+            "id": "observed-deployment-openkubes-console-ok-console",
+            "name": "openkubes-console/ok-console",
+            "targetCluster": "ok-shared",
+            "targetClusterId": "cluster-ok-shared",
+            "readiness": "Ready",
+            "evidenceId": "ev-observed-deployment-openkubes-console-ok-console",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "id": "ev-ok-mgmt-source-boundary",
+            "title": "Management plane outside hosting source",
+            "type": "Observation",
+            "outcome": "Unknown",
+            "clusterId": "cluster-ok-mgmt",
+            "contract": "Unavailable",
+            "revision": "not-observed-by-hosting-source",
+            "observedAt": "2026-10-22T12:00:00Z",
+            "source": "OpenKubes hosting-cluster source boundary",
+            "summary": "ok-mgmt identity is configured, but no management-plane or Composition state is observed in Phase B1.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-ok-shared-hosting-state",
+            "title": "ok-shared hosting-cluster state",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-shared",
+            "contract": "Kubernetes core/apps v1",
+            "revision": "nodes:31461260;deployment:31452633",
+            "observedAt": "2026-10-22T12:00:00Z",
+            "source": "Bounded Kubernetes API projection",
+            "summary": "Console hosting cluster: 1 Ready Nodes; Console replicas 2/2 available.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-observed-deployment-openkubes-console-ok-console",
+            "title": "Deployment openkubes-console/ok-console",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-shared",
+            "contract": "Deployment/apps/v1",
+            "revision": "resourceVersion:31452633;replicas:2/2",
+            "observedAt": "2026-10-22T12:00:00Z",
+            "source": "Authenticated hosting-cluster Kubernetes API",
+            "summary": "Available replicas: 2; desired replicas: 2.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ]
+      }
+    },
+    "hosting-external": {
+      "apiVersion": "observed.openkubes.io/v0alpha2",
+      "kind": "ConsoleObservedState",
+      "metadata": {
+        "observedAt": "2026-10-22T12:00:00Z",
+        "sourceRevision": "kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633",
+        "partial": true
+      },
+      "data": {
+        "environment": {
+          "id": "openkubes-management",
+          "displayName": "OpenKubes management plane"
+        },
+        "metrics": [
+          {
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            },
+            "capabilities": {
+              "total": 0,
+              "ready": 0,
+              "pending": 0,
+              "failed": 0,
+              "unknown": 0
+            },
+            "workloadClaims": {
+              "total": 0,
+              "ready": 0,
+              "pending": 0,
+              "failed": 0,
+              "unknown": 0
+            },
+            "openFindings": {
+              "total": 0,
+              "critical": 0
+            }
+          }
+        ],
+        "clusters": [
+          {
+            "id": "cluster-ok-mgmt",
+            "name": "ok-mgmt",
+            "role": "Management plane",
+            "provider": "Kubernetes",
+            "profile": "Management plane",
+            "kubernetesVersion": "v1.34.1",
+            "region": "management",
+            "readiness": "Ready",
+            "compatibility": "Read only",
+            "contractVersion": "kubernetes.io/core+apps/v1",
+            "revision": "external-observation",
+            "evidenceId": "ev-ok-mgmt-external-observation",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "Kubernetes API",
+                "state": "Ready",
+                "detail": "The bounded read-only management-cluster observation completed."
+              },
+              {
+                "label": "External observation",
+                "state": "Ready",
+                "detail": "Operator-provided read-only cluster observation."
+              },
+              {
+                "label": "Management capabilities",
+                "state": "Unknown",
+                "detail": "Management capabilities are not verified by this observation."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "cluster-ok-shared",
+            "name": "ok-shared",
+            "role": "Workload cluster",
+            "provider": "Kubernetes",
+            "profile": "Console hosting cluster",
+            "kubernetesVersion": "v1.35.5+rke2r1",
+            "region": "unknown",
+            "readiness": "Ready",
+            "compatibility": "Read only",
+            "contractVersion": "kubernetes.io/core+apps/v1",
+            "revision": "nodes:31461260;deployment:31452633",
+            "evidenceId": "ev-ok-shared-hosting-state",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "Kubernetes API",
+                "state": "Ready",
+                "detail": "The bounded read-only Kubernetes API queries completed."
+              },
+              {
+                "label": "Nodes",
+                "state": "Ready",
+                "detail": "Ready: 1; not ready: 0; unknown: 0."
+              },
+              {
+                "label": "Console workload",
+                "state": "Ready",
+                "detail": "Available replicas: 2 of 2."
+              },
+              {
+                "label": "OpenKubes Compositions",
+                "state": "Unknown",
+                "detail": "Composition and multi-cluster state are intentionally outside Phase B1."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "cluster-ok-ai",
+            "name": "ok-ai",
+            "role": "Workload cluster",
+            "provider": "Kubernetes",
+            "profile": "AI workload cluster",
+            "kubernetesVersion": "v1.34.1",
+            "region": "ai",
+            "readiness": "Ready",
+            "compatibility": "Read only",
+            "contractVersion": "kubernetes.io/core+apps/v1",
+            "revision": "external-observation",
+            "evidenceId": "ev-ok-ai-external-observation",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "External observation",
+                "state": "Ready",
+                "detail": "Operator-provided read-only cluster observation."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "cluster-ok-infra",
+            "name": "ok-infra",
+            "role": "Infrastructure plane",
+            "provider": "Kubernetes",
+            "profile": "Infrastructure host cluster",
+            "kubernetesVersion": "v1.35.5+rke2r1",
+            "region": "infrastructure",
+            "readiness": "Ready",
+            "compatibility": "Read only",
+            "contractVersion": "kubernetes.io/core+apps/v1",
+            "revision": "external-observation",
+            "evidenceId": "ev-ok-infra-external-observation",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "External observation",
+                "state": "Ready",
+                "detail": "Operator-provided read-only cluster observation."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ],
+        "placements": [
+          {
+            "id": "observed-deployment-openkubes-console-ok-console",
+            "name": "openkubes-console/ok-console",
+            "targetCluster": "ok-shared",
+            "targetClusterId": "cluster-ok-shared",
+            "readiness": "Ready",
+            "evidenceId": "ev-observed-deployment-openkubes-console-ok-console",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "id": "ev-ok-mgmt-external-observation",
+            "title": "ok-mgmt external cluster observation",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-mgmt",
+            "contract": "Kubernetes core/apps v1",
+            "revision": "external-observation",
+            "observedAt": "2026-10-21T20:10:00Z",
+            "source": "Operator-provided read-only observation bundle",
+            "summary": "ok-mgmt: Kubernetes v1.34.1; readiness Ready.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-ok-shared-hosting-state",
+            "title": "ok-shared hosting-cluster state",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-shared",
+            "contract": "Kubernetes core/apps v1",
+            "revision": "nodes:31461260;deployment:31452633",
+            "observedAt": "2026-10-22T12:00:00Z",
+            "source": "Bounded Kubernetes API projection",
+            "summary": "Console hosting cluster: 1 Ready Nodes; Console replicas 2/2 available.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-observed-deployment-openkubes-console-ok-console",
+            "title": "Deployment openkubes-console/ok-console",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-shared",
+            "contract": "Deployment/apps/v1",
+            "revision": "resourceVersion:31452633;replicas:2/2",
+            "observedAt": "2026-10-22T12:00:00Z",
+            "source": "Authenticated hosting-cluster Kubernetes API",
+            "summary": "Available replicas: 2; desired replicas: 2.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-ok-ai-external-observation",
+            "title": "ok-ai external cluster observation",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-ai",
+            "contract": "Kubernetes core/apps v1",
+            "revision": "external-observation",
+            "observedAt": "2026-10-21T19:12:00Z",
+            "source": "Operator-provided read-only observation bundle",
+            "summary": "ok-ai: Kubernetes v1.34.1; readiness Ready.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-ok-infra-external-observation",
+            "title": "ok-infra external cluster observation",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-ok-infra",
+            "contract": "Kubernetes core/apps v1",
+            "revision": "external-observation",
+            "observedAt": "2026-10-21T19:12:00Z",
+            "source": "Operator-provided read-only observation bundle",
+            "summary": "ok-infra: Kubernetes v1.35.5+rke2r1; readiness Ready.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ]
+      }
+    },
+    "kubevirt-claims": {
+      "apiVersion": "observed.openkubes.io/v0alpha2",
+      "kind": "ConsoleObservedState",
+      "metadata": {
+        "observedAt": "2026-10-22T12:00:00Z",
+        "sourceRevision": "kubevirtclusterclaims:42",
+        "partial": true
+      },
+      "data": {
+        "environment": {
+          "id": "openkubes-management",
+          "displayName": "OpenKubes management plane"
+        },
+        "metrics": [
+          {
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            },
+            "capabilities": {
+              "total": 0,
+              "ready": 0,
+              "pending": 0,
+              "failed": 0,
+              "unknown": 0
+            },
+            "workloadClaims": {
+              "total": 0,
+              "ready": 0,
+              "pending": 0,
+              "failed": 0,
+              "unknown": 0
+            },
+            "openFindings": {
+              "total": 0,
+              "critical": 0
+            }
+          }
+        ],
+        "clusters": [
+          {
+            "id": "cluster-ok-mgmt",
+            "name": "ok-mgmt",
+            "role": "Management plane",
+            "provider": "OpenKubes",
+            "profile": "Management plane",
+            "kubernetesVersion": "unknown",
+            "region": "unknown",
+            "readiness": "Unknown",
+            "compatibility": "Read only",
+            "contractVersion": "unknown",
+            "revision": "claimListResourceVersion:42",
+            "evidenceId": "ev-ok-mgmt-source-boundary",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "Declared",
+                "state": "Unknown",
+                "detail": "No normative Management Plane Contract is available from this source."
+              },
+              {
+                "label": "Infrastructure",
+                "state": "Unknown",
+                "detail": "Infrastructure readiness is outside this source boundary."
+              },
+              {
+                "label": "Control plane",
+                "state": "Unknown",
+                "detail": "API reachability is not converted into normative readiness."
+              },
+              {
+                "label": "Capabilities",
+                "state": "Unknown",
+                "detail": "Capability observations are not available from this source."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "cluster-worker-east",
+            "name": "worker-east",
+            "role": "Workload cluster",
+            "provider": "kubevirt",
+            "profile": "KubeVirt cluster claim",
+            "kubernetesVersion": "v1.34.1",
+            "region": "fra-dc1",
+            "readiness": "Ready",
+            "compatibility": "Supported",
+            "contractVersion": "platform.openkubes.ai/v1alpha1",
+            "revision": "resourceVersion:43",
+            "evidenceId": "ev-worker-east-claim-readiness",
+            "capabilities": [],
+            "lifecycle": [
+              {
+                "label": "Declared",
+                "state": "Ready",
+                "detail": "The namespaced OpenKubes cluster Claim exists."
+              },
+              {
+                "label": "Infrastructure",
+                "state": "Ready",
+                "detail": "The OpenKubes cluster Claim reports Ready=True."
+              },
+              {
+                "label": "Control plane",
+                "state": "Unknown",
+                "detail": "This source exposes no normative control-plane Condition."
+              },
+              {
+                "label": "Capabilities",
+                "state": "Unknown",
+                "detail": "Capability observations are not available from this source."
+              }
+            ],
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ],
+        "placements": [],
+        "evidence": [
+          {
+            "id": "ev-ok-mgmt-source-boundary",
+            "title": "Management plane observation boundary",
+            "type": "Observation",
+            "outcome": "Unknown",
+            "clusterId": "cluster-ok-mgmt",
+            "contract": "Unavailable",
+            "revision": "claimListResourceVersion:42",
+            "observedAt": "2026-10-22T12:00:00Z",
+            "source": "OpenKubes observed-state producer",
+            "summary": "Management plane identity is configured, but this source has no normative readiness Contract.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          },
+          {
+            "id": "ev-worker-east-claim-readiness",
+            "title": "worker-east cluster Claim readiness",
+            "type": "Observation",
+            "outcome": "Ready",
+            "clusterId": "cluster-worker-east",
+            "contract": "KubeVirtClusterClaim/v1alpha1",
+            "revision": "resourceVersion:43",
+            "observedAt": "2026-10-22T11:00:00Z",
+            "source": "OpenKubes management-plane Kubernetes API",
+            "summary": "The OpenKubes cluster Claim reports Ready=True.",
+            "classification": "Current",
+            "ownership": {
+              "environmentId": "openkubes-management",
+              "tenantId": "platform"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

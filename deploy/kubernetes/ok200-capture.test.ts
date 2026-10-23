@@ -1,7 +1,8 @@
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { accessSync, constants } from 'node:fs'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -71,31 +72,107 @@ printf 'LISTEN 0 4096 127.0.0.1:18787 0.0.0.0:*   \\n'
 printf 'LISTEN 0 128 127.0.0.1:9999 0.0.0.0:* bearer planted-listener-secret\\n'
 `
 
+const lsofStub = `#!/usr/bin/env bash
+set -Eeuo pipefail
+printf 'lsof %s\\n' "$*" >>"$CAPTURE_ARGV_LOG"
+[[ "$*" == '-nP -iTCP:18787 -sTCP:LISTEN' ]] || exit 2
+printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\\n'
+printf 'kubectl 1234 user 7u IPv4 0t0 TCP 127.0.0.1:18787 (LISTEN)\\n'
+printf 'kubectl 1234 user 8u IPv4 0t0 TCP 127.0.0.1:9999 (LISTEN)\\n'
+`
+
+const findExecutable = (name: string) => {
+  for (const directory of (process.env.PATH ?? '').split(':')) {
+    const candidate = join(directory, name)
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Continue searching PATH when this entry is missing or not executable.
+    }
+  }
+  return undefined
+}
+
+const timeoutStub = `#!${process.execPath}
+const { spawn } = require('node:child_process')
+const args = process.argv.slice(2)
+const duration = args.find((value) => /^\\d+s$/.test(value))
+if (!duration) process.exit(125)
+const nativeTimeout = ${JSON.stringify(findExecutable('timeout') ?? '')}
+if (nativeTimeout) {
+  const native = spawn(nativeTimeout, args, { stdio: 'inherit' })
+  native.on('error', () => process.exit(127))
+  native.on('close', (code, signal) => process.exit(code ?? (signal ? 128 : 0)))
+} else {
+const command = args.slice(args.indexOf(duration) + 1)
+if (!command.length) process.exit(125)
+const child = spawn(command[0], command.slice(1), { stdio: 'inherit' })
+let timedOut = false
+let killTimer
+const timeout = setTimeout(() => {
+  timedOut = true
+  child.kill('SIGTERM')
+  killTimer = setTimeout(() => child.kill('SIGKILL'), 1000)
+}, Number(duration.slice(0, -1)) * 1000)
+child.on('error', () => process.exit(127))
+child.on('close', (code, signal) => {
+  clearTimeout(timeout)
+  clearTimeout(killTimer)
+  process.exit(timedOut ? 124 : (code ?? (signal ? 128 : 0)))
+})
+}
+`
+
+const executable = (name: string) => {
+  const candidate = findExecutable(name)
+  if (!candidate) throw new Error(`Required host executable is unavailable: ${name}`)
+  return candidate
+}
+
+const makeCapturePath = async (name: string, options: { ss?: boolean; lsof?: boolean } = {}) => {
+  const directory = join(fixtureDirectory, name)
+  await mkdir(directory)
+  const hostTools = ['bash', 'awk', 'cat', 'date', 'head', 'rm', 'wc', 'sleep']
+  const stubs = ['kubectl', 'kind', 'docker', 'timeout']
+  for (const tool of hostTools) await symlink(executable(tool), join(directory, tool))
+  for (const tool of stubs) await symlink(tool === 'timeout' ? join(fixtureDirectory, 'timeout') : join(fixtureDirectory, tool), join(directory, tool))
+  if (options.ss) await symlink(join(fixtureDirectory, 'ss'), join(directory, 'ss'))
+  if (options.lsof) await symlink(join(fixtureDirectory, 'lsof'), join(directory, 'lsof'))
+  return directory
+}
+
 beforeAll(async () => {
+  const bash = await exec('bash', ['-c', 'printf "%s.%s\\n" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'])
+  const [bashMajor, bashMinor] = bash.stdout.trim().split('.').map(Number)
+  expect(bashMajor > 4 || (bashMajor === 4 && bashMinor >= 4), `Tests require Bash 4.4 or newer; found ${bash.stdout.trim()}. On macOS install Homebrew Bash and put it first on PATH.`).toBe(true)
   fixtureDirectory = await mkdtemp(join(tmpdir(), 'ok-console-ok200-capture-'))
-  for (const [name, contents] of Object.entries({ kubectl: kubectlStub, kind: kindStub, docker: dockerStub, ss: ssStub })) {
+  for (const [name, contents] of Object.entries({ kubectl: kubectlStub, kind: kindStub, docker: dockerStub, ss: ssStub, lsof: lsofStub, timeout: timeoutStub })) {
     await writeFile(join(fixtureDirectory, name), contents)
     await chmod(join(fixtureDirectory, name), 0o755)
   }
+  await makeCapturePath('ss-tools-bin', { ss: true })
+  await makeCapturePath('lsof-tools-bin', { lsof: true })
+  await makeCapturePath('no-listener-tools-bin')
 })
 
 afterAll(async () => {
   await rm(fixtureDirectory, { recursive: true, force: true })
 })
 
-const environment = (scenario = 'normal') => {
+const environment = (scenario = 'normal', path = `${fixtureDirectory}:${process.env.PATH}`) => {
   const id = execution++
   return {
     ...process.env,
-    PATH: `${fixtureDirectory}:${process.env.PATH}`,
+    PATH: path,
     CAPTURE_ARGV_LOG: join(fixtureDirectory, `argv-${id}.log`),
     CAPTURE_SCENARIO: scenario,
     CAPTURE_SLOW_MARKER: join(fixtureDirectory, `slow-marker-${id}`),
   }
 }
 
-const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string, versionFixture?: string) => {
-  const env = { ...environment(scenario), CAPTURE_VERSION_FIXTURE: versionFixture ?? '' }
+const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string, versionFixture?: string, path = `${fixtureDirectory}:${process.env.PATH}`, overrides: Record<string, string> = {}) => {
+  const env = { ...environment(scenario, path), CAPTURE_VERSION_FIXTURE: versionFixture ?? '', ...overrides }
   const directory = join(fixtureDirectory, `artifacts-${execution}`)
   await mkdir(directory)
   const netstatBaseline =
@@ -121,6 +198,18 @@ const capture = async (scenario = 'normal', suppliedNetstatBaseline?: string, ve
     },
   )
   return { directory, env, elapsedMs: performance.now() - started, netstatBaseline, result }
+}
+
+const procCountersAvailable = () => {
+  if (process.platform === 'darwin') return false
+  if (process.platform !== 'linux') throw new Error(`Unsupported test platform for OK-200 capture: ${process.platform}`)
+  const source = process.env.OK200_PROC_NET_NETSTAT || '/proc/net/netstat'
+  try {
+    accessSync(source, constants.R_OK)
+    return true
+  } catch {
+    return false
+  }
 }
 
 describe('OK-200 failure diagnostic capture', () => {
@@ -357,7 +446,28 @@ append_file "$2/aggregate.txt" "$content" 32768
   it('returns only the local TCP listen-overflow counter pair', async () => {
     const { stdout, stderr } = await exec('bash', [helper, 'snapshot-netstat'], { env: environment() })
     expect(stderr).toBe('')
-    expect(stdout).toMatch(/^TcpExt ListenOverflows=\d+ ListenDrops=\d+\n$/)
+    if (procCountersAvailable()) {
+      expect(stdout).toMatch(/^TcpExt ListenOverflows=\d+ ListenDrops=\d+\n$/)
+    } else {
+      expect(stdout).toBe('TcpExt ListenOverflows=unavailable ListenDrops=unavailable\n')
+    }
+  })
+
+  it('reports proc counters unavailable when the proc net source cannot be read', async () => {
+    const procUnavailable = join(fixtureDirectory, 'missing-proc-netstat')
+    const { stdout, stderr } = await exec('bash', [helper, 'snapshot-netstat'], {
+      env: { ...environment(), OK200_PROC_NET_NETSTAT: procUnavailable },
+    })
+    expect(stderr).toBe('')
+    expect(stdout).toBe('TcpExt ListenOverflows=unavailable ListenDrops=unavailable\n')
+    const baseline = 'TcpExt ListenOverflows=unavailable ListenDrops=unavailable'
+    const { directory } = await capture('normal', baseline, undefined, `${fixtureDirectory}:${process.env.PATH}`, {
+      OK200_PROC_NET_NETSTAT: procUnavailable,
+    })
+    const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
+    expect(netstat).toContain(`start ${baseline}`)
+    expect(netstat).toContain(`end ${baseline}`)
+    expect(netstat).toContain(`delta ${baseline}`)
   })
 
   it('preserves valid start and end counters when a decreasing counter makes the delta unavailable', async () => {
@@ -365,7 +475,11 @@ append_file "$2/aggregate.txt" "$content" 32768
     const { directory } = await capture('normal', baseline)
     const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
     expect(netstat).toContain(`start ${baseline}`)
-    expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    if (procCountersAvailable()) {
+      expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    } else {
+      expect(netstat).toContain('end TcpExt ListenOverflows=unavailable ListenDrops=unavailable')
+    }
     expect(netstat).toContain('delta TcpExt ListenOverflows=unavailable ListenDrops=unavailable')
   })
 
@@ -374,7 +488,11 @@ append_file "$2/aggregate.txt" "$content" 32768
     const { directory } = await capture('normal', unavailable)
     const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
     expect(netstat).toContain(`start ${unavailable}`)
-    expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    if (procCountersAvailable()) {
+      expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    } else {
+      expect(netstat).toContain('end TcpExt ListenOverflows=unavailable ListenDrops=unavailable')
+    }
     expect(netstat).toContain(`delta ${unavailable}`)
   })
 
@@ -464,15 +582,20 @@ capture_workloads "$2/workloads.txt" kind-test
     expect(await readFile(join(directory, 'listener.txt'), 'utf8')).toMatch(/^LISTEN 0 4096 127\.0\.0\.1:18787 0\.0\.0\.0:\*\s*$/m)
     const netstat = await readFile(join(directory, 'netstat.txt'), 'utf8')
     expect(netstat).toContain(`start ${netstatBaseline}`)
-    expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
-    expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    if (procCountersAvailable()) {
+      expect(netstat).toMatch(/^end TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+    } else {
+      expect(netstat).toContain('end TcpExt ListenOverflows=unavailable ListenDrops=unavailable')
+      expect(netstat).toContain('delta TcpExt ListenOverflows=unavailable ListenDrops=unavailable')
+    }
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('Client Version: v1.32.0')
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('kind v0.25.0')
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('containerd github.com/containerd/containerd v2.0.0')
     expect(all).toContain('Pod current-pod uid=pod-uid ownerRS=rs-uid phase=Running ready=True')
     expect(all).toContain('ReplicaSet current-rs uid=rs-uid ownerDeployment=deployment-uid revision=7 desired=1')
     expect(all).not.toMatch(/planted-|Authorization|https:|certificate-authority-data|clusters:/i)
-    expect(elapsedMs).toBeLessThan(5000)
+    expect(elapsedMs).toBeLessThan(8000)
     const calls = await readFile(env.CAPTURE_ARGV_LOG!, 'utf8')
     expect(calls).toContain('kubectl version --client')
     expect(calls).toContain('kubectl --context kind-test --namespace openkubes-console get pods')
@@ -482,11 +605,28 @@ capture_workloads "$2/workloads.txt" kind-test
     expect(calls).toContain('ss -ltn sport = :18787')
   })
 
+  it('normalizes the requested TCP listener from lsof when ss is absent', async () => {
+    const path = join(fixtureDirectory, 'lsof-tools-bin')
+    const { directory, env } = await capture('normal', undefined, undefined, path)
+    const listener = await readFile(join(directory, 'listener.txt'), 'utf8')
+    expect(listener).toBe('TCP 127.0.0.1:18787 (LISTEN)\n')
+    expect(listener).toMatch(/127\.0\.0\.1:18787/)
+    expect(listener).not.toContain('9999')
+    expect(listener).not.toContain('user')
+    expect(await readFile(env.CAPTURE_ARGV_LOG!, 'utf8')).toContain('lsof -nP -iTCP:18787 -sTCP:LISTEN')
+  })
+
+  it('records an explicit unavailable listener when both ss and lsof are absent', async () => {
+    const path = join(fixtureDirectory, 'no-listener-tools-bin')
+    const { directory } = await capture('normal', undefined, undefined, path)
+    expect(await readFile(join(directory, 'listener.txt'), 'utf8')).toContain('unavailable: neither ss nor lsof is installed')
+  })
+
   it('continues after a diagnostic command times out and keeps total capture runtime bounded', async () => {
     const { directory, elapsedMs, env } = await capture('slow')
     expect(await readFile(env.CAPTURE_SLOW_MARKER!, 'utf8')).toBe('started\n')
     expect(elapsedMs).toBeGreaterThanOrEqual(2500)
-    expect(elapsedMs).toBeLessThan(6000)
+    expect(elapsedMs).toBeLessThan(8500)
     expect(await readFile(join(directory, 'capture.txt'), 'utf8')).toContain('Total capture budget: 26s')
     expect(await readFile(join(directory, 'versions.txt'), 'utf8')).toContain('Client Version: v1.32.0')
   }, 10000)

@@ -13,6 +13,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ok200-macos:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Select supported Bash
+        run: |
+          # /bin/bash on macOS is 3.2; the verifier requires Bash 4.4+.
+          brew list bash >/dev/null 2>&1 || brew install bash
+          echo "$(brew --prefix bash)/bin" >> "$GITHUB_PATH"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test OK-200 diagnostics
+        run: |
+          command -v bash
+          bash --version
+          bash -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) ))'
+          pnpm exec vitest run deploy/kubernetes/ok200-capture.test.ts deploy/kubernetes/ok200.test.ts
+
   console:
     runs-on: ubuntu-latest
     timeout-minutes: 15

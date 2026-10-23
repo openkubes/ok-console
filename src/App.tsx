@@ -290,19 +290,32 @@ function Evidence({ data, openEvidence }: { data: PlatformSnapshot; openEvidence
 
 const createSteps = ['Draft', 'Review', 'Authorize', 'Execute', 'Evidence'] as const
 
+const createClusterProviderGroups = [
+  {
+    label: 'Sovereign & self-managed · demo catalog',
+    providers: ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON'],
+  },
+  {
+    label: 'Public cloud · demo catalog',
+    providers: ['AWS', 'GCP', 'Azure'],
+  },
+] as const
+
+const providerIdentifier = (provider: string) => provider.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
 function CreateCluster() {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('ok-edge-berlin')
-  const [provider, setProvider] = useState('Bare metal')
+  const [provider, setProvider] = useState('Bare Metal Infra')
   const [profile, setProfile] = useState('Constrained edge')
   const [confirmed, setConfirmed] = useState(false)
   const [dryRunState, setDryRunState] = useState<'idle' | 'running' | 'ready' | 'error'>('idle')
   const [dryRunResult, setDryRunResult] = useState<{ contractRevision?: string; contractIdentity?: string; mutationAllowed?: boolean } | null>(null)
   const [dryRunError, setDryRunError] = useState<string | null>(null)
-  const contract = `apiVersion: platform.openkubes.io/v1alpha1\nkind: OpenKubesCluster\nmetadata:\n  name: ${name || 'cluster-name'}\nspec:\n  role: workload\n  implementationProfile:\n    provider: ${provider.toLowerCase().replace(' ', '-')}\n    profile: ${profile.toLowerCase().replace(' ', '-')}\n  capabilities:\n    required:\n      - observability\n      - persistent-storage`
+  const contract = `apiVersion: platform.openkubes.io/v1alpha1\nkind: OpenKubesCluster\nmetadata:\n  name: ${name || 'cluster-name'}\nspec:\n  role: workload\n  implementationProfile:\n    provider: ${providerIdentifier(provider)}\n    profile: ${profile.toLowerCase().replace(' ', '-')}\n  capabilities:\n    required:\n      - observability\n      - persistent-storage`
   const runDryRun = async () => {
     setDryRunState('running'); setDryRunError(null)
-    const payload = { apiVersion: 'platform.openkubes.io/v1alpha1', kind: 'OpenKubesCluster', metadata: { name: name || 'cluster-name', namespace: 'default' }, spec: { role: 'workload', implementationProfile: { provider: provider.toLowerCase().replace(' ', '-'), profile: profile.toLowerCase().replace(' ', '-') }, capabilities: { required: ['observability', 'persistent-storage'] } } }
+    const payload = { apiVersion: 'platform.openkubes.io/v1alpha1', kind: 'OpenKubesCluster', metadata: { name: name || 'cluster-name', namespace: 'default' }, spec: { role: 'workload', implementationProfile: { provider: providerIdentifier(provider), profile: profile.toLowerCase().replace(' ', '-') }, capabilities: { required: ['observability', 'persistent-storage'] } } }
     try {
       const response = await fetch('/api/console/v0/operations/create-cluster/dry-run', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ contract: payload }) })
       const body = await response.json() as { data?: typeof dryRunResult; error?: { message?: string } }
@@ -316,7 +329,7 @@ function CreateCluster() {
     <ol className="stepper">{createSteps.map((item, index) => <li className={index === step ? 'active' : index < step ? 'done' : ''} key={item}><span>{index < step ? '✓' : index + 1}</span><strong>{item}</strong></li>)}</ol>
     <div className="create-layout">
       <section className="panel create-main">
-        {step === 0 && <><div className="panel-title"><div><span className="eyebrow">Step 1</span><h2>Declare cluster intent</h2></div></div><div className="form-grid"><label><span>Cluster name</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Lowercase DNS-compatible identity</small></label><label><span>Provider</span><select value={provider} onChange={(event) => setProvider(event.target.value)}><option>Bare metal</option><option>KubeVirt</option><option>OpenStack</option><option>Cloud</option></select><small>An implementation detail below the contract</small></label><label><span>Implementation profile</span><select value={profile} onChange={(event) => setProfile(event.target.value)}><option>Constrained edge</option><option>General purpose</option><option>AI accelerated</option><option>Shared services</option></select></label><label><span>Region / placement</span><input defaultValue="ber-edge-1"/></label></div><fieldset><legend>Required capabilities</legend><div className="check-grid"><label><input type="checkbox" defaultChecked/>Observability</label><label><input type="checkbox" defaultChecked/>Persistent Storage</label><label><input type="checkbox"/>Ingress</label><label><input type="checkbox"/>Artifact Registry</label></div></fieldset></>}
+        {step === 0 && <><div className="panel-title"><div><span className="eyebrow">Step 1</span><h2>Declare cluster intent</h2></div></div><div className="form-grid"><label><span>Cluster name</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Lowercase DNS-compatible identity</small></label><label><span>Infrastructure provider</span><select aria-label="Infrastructure provider" value={provider} onChange={(event) => setProvider(event.target.value)}>{createClusterProviderGroups.map((group) => <optgroup label={group.label} key={group.label}>{group.providers.map((item) => <option key={item}>{item}</option>)}</optgroup>)}</select><small>Illustrative CAPI provider catalog · selection does not provision infrastructure</small></label><label><span>Implementation profile</span><select value={profile} onChange={(event) => setProfile(event.target.value)}><option>Constrained edge</option><option>General purpose</option><option>AI accelerated</option><option>Shared services</option></select></label><label><span>Region / placement</span><input defaultValue="ber-edge-1"/></label></div><fieldset><legend>Required capabilities</legend><div className="check-grid"><label><input type="checkbox" defaultChecked/>Observability</label><label><input type="checkbox" defaultChecked/>Persistent Storage</label><label><input type="checkbox"/>Ingress</label><label><input type="checkbox"/>Artifact Registry</label></div></fieldset></>}
         {step === 1 && <><div className="panel-title"><div><span className="eyebrow">Step 2</span><h2>Review generated contract</h2></div><span className="digest">sha256:preview…7a21</span></div><div className="review-summary"><div><span>Requested identity</span><strong>{name}</strong></div><div><span>Profile</span><strong>{profile}</strong></div><div><span>Provider</span><strong>{provider}</strong></div></div><pre className="contract-preview"><code>{contract}</code></pre><div className="no-go"><Icon name="shield"/><div><strong>NO-GO checks</strong><p>Execution remains unavailable if identity, placement, capability prerequisites, policy, or evidence freshness cannot be proven.</p></div></div></>}
         {step === 2 && <><div className="authority-card"><div className="authority-icon"><Icon name="shield" size={32}/></div><span className="eyebrow">Step 3 · Authority boundary</span><h2>Authorize this exact review artifact</h2><p>This prototype illustrates a single-use grant bound to the reviewed payload digest. The browser is never the security boundary.</p><dl><div><dt>Operation</dt><dd>CreateCluster</dd></div><div><dt>Payload digest</dt><dd>sha256:preview…7a21</dd></div><div><dt>Grant</dt><dd>Single use · 10 minutes</dd></div></dl><label className="confirm-box"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/><span>I confirm that I reviewed the exact contract above.</span></label></div></>}
         {step === 3 && <><div className="execution-preview"><span className="pulse-ring"><Icon name="code" size={28}/></span><span className="eyebrow">Step 4</span><h2>Dry-run plan</h2><p>The Console sent a bounded, non-mutating CreateCluster dry-run to the OK-147 runner.</p><div className="boundary-stack"><div className="done"><Icon name="check"/><span><strong>Runner reached</strong><small>{dryRunResult?.contractIdentity ?? 'CreateCluster'}</small></span></div><div className="done"><Icon name="check"/><span><strong>Mutation disabled</strong><small>mutationAllowed: {String(dryRunResult?.mutationAllowed ?? false)}</small></span></div><div><Icon name="evidence"/><span><strong>Contract revision</strong><small>{dryRunResult?.contractRevision ?? 'not returned'}</small></span></div></div></div></>}

@@ -293,7 +293,7 @@ const createSteps = ['Draft', 'Review', 'Authorize', 'Execute', 'Evidence'] as c
 const createClusterProviderGroups = [
   {
     label: 'Sovereign & self-managed · demo catalog',
-    providers: ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON'],
+    providers: ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'VMware vSphere', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON'],
   },
   {
     label: 'Public cloud · demo catalog',

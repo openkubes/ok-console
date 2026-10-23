@@ -209,15 +209,15 @@ describe('OpenKubes Console', () => {
     const provider = screen.getByRole('combobox', { name: 'Infrastructure provider' })
     expect(within(provider).getByRole('group', { name: /Sovereign & self-managed/i })).toBeInTheDocument()
     expect(within(provider).getByRole('group', { name: /Public cloud/i })).toBeInTheDocument()
-    for (const label of ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON', 'AWS', 'GCP', 'Azure']) {
+    for (const label of ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'VMware vSphere', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON', 'AWS', 'GCP', 'Azure']) {
       expect(within(provider).getByRole('option', { name: label })).toBeInTheDocument()
     }
     expect(screen.getByText(/Illustrative CAPI provider catalog · selection does not provision infrastructure/i)).toBeInTheDocument()
 
-    fireEvent.change(provider, { target: { value: 'STACKIT' } })
+    fireEvent.change(provider, { target: { value: 'VMware vSphere' } })
     fireEvent.click(screen.getByRole('button', { name: /Generate contract/i }))
-    expect(await screen.findByText('STACKIT')).toBeInTheDocument()
-    expect(screen.getByText(/provider: stackit/)).toBeInTheDocument()
+    expect(await screen.findByText('VMware vSphere')).toBeInTheDocument()
+    expect(screen.getByText(/provider: vmware-vsphere/)).toBeInTheDocument()
   })
 
   it('opens a cluster-scoped shell and blocks mutating commands', async () => {

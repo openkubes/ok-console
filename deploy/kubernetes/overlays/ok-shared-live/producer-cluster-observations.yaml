@@ -13,11 +13,9 @@ data:
         {
           "name": "ok-mgmt",
           "provider": "Kubernetes",
-          "profile": "Management plane infrastructure",
           "kubernetesVersion": "v1.34.1",
           "region": "management",
           "readiness": "Ready",
-          "revision": "nodes:3-ready",
           "observedAt": "2026-10-21T20:10:00Z"
         },
         {
@@ -27,7 +25,6 @@ data:
           "kubernetesVersion": "v1.34.1",
           "region": "ai",
           "readiness": "Ready",
-          "revision": "nodes:4-ready",
           "observedAt": "2026-10-21T19:12:00Z"
         },
         {
@@ -37,7 +34,6 @@ data:
           "kubernetesVersion": "v1.35.5+rke2r1",
           "region": "infrastructure",
           "readiness": "Ready",
-          "revision": "nodes:2-ready",
           "observedAt": "2026-10-21T19:12:00Z"
         }
       ]

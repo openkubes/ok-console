@@ -77,12 +77,119 @@ const string = (value, path) => {
   return value
 }
 
-const displayString = (value, path) => redactText(string(value, path))
-
+// Field grammars run before the credential deny-list. Never repair producer identities.
+const ID = /^[a-z0-9](?:[a-z0-9.-]{0,510}[a-z0-9])?$/
+const DNS_LABEL = /^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$/
+const DNS_NAME = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$/
+const dnsName = (value) => value.length <= 253 && DNS_NAME.exec(value)?.[0] === value
+  && value.split('.').every((label) => DNS_LABEL.test(label))
+const words = (value) => value.length <= 64 && /^[A-Za-z]+(?: [A-Za-z]+){0,5}$/.test(value)
+const version = (value) => {
+  if (value === 'unknown') return true
+  const match = /^(v?[0-9]{1,10}\.[0-9]{1,10}(?:\.[0-9]{1,10})?)(?:-([A-Za-z0-9-]{1,16}(?:\.[A-Za-z0-9-]{1,16}){0,3}))?(?:\+([A-Za-z0-9-]{1,16}(?:\.[A-Za-z0-9-]{1,16}){0,3}))?$/.exec(value)
+  return value.length <= 64 && !!match && (match[2]?.length ?? 0) <= 32 && (match[3]?.length ?? 0) <= 32
+}
+const placementName = (value) => {
+  const parts = value.split('/')
+  return parts.length === 2 && DNS_LABEL.test(parts[0]) && dnsName(parts[1])
+}
+const oneOf = (...values) => (value) => values.includes(value)
+const clusterContract = oneOf('unknown', 'platform.openkubes.ai/v1alpha1', 'kubernetes.io/core+apps/v1')
+const evidenceContract = oneOf('Unavailable', 'KubeVirtClusterClaim/v1alpha1', 'Kubernetes core/apps v1', 'Deployment/apps/v1')
+const sources = [
+  'OpenKubes hosting-cluster source boundary', 'Bounded Kubernetes API projection',
+  'Authenticated hosting-cluster Kubernetes API', 'OpenKubes observed-state producer',
+  'OpenKubes management-plane Kubernetes API', 'Operator-provided read-only observation bundle',
+]
+const lifecycleLabel = oneOf('Source boundary', 'Compositions', 'Kubernetes API', 'Nodes', 'Console workload', 'OpenKubes Compositions', 'Declared', 'Infrastructure', 'Control plane', 'Capabilities', 'External observation', 'Management capabilities')
+const detailLiterals = [
+  'The hosting-cluster source does not observe the OpenKubes management plane.',
+  'Composition state is outside this bounded Phase B1 source.',
+  'The bounded read-only Kubernetes API queries completed.',
+  'Composition and multi-cluster state are intentionally outside Phase B1.',
+  'The bounded read-only management-cluster observation completed.',
+  'Operator-provided read-only cluster observation.',
+  'Management capabilities are not verified by this observation.',
+  'No normative Management Plane Contract is available from this source.',
+  'Infrastructure readiness is outside this source boundary.',
+  'API reachability is not converted into normative readiness.',
+  'Capability observations are not available from this source.',
+  'The namespaced OpenKubes cluster Claim exists.',
+  'The OpenKubes cluster Claim reports Ready=True.',
+  'The OpenKubes cluster Claim reports Ready=False.',
+  'The OpenKubes cluster Claim has no recognized Ready Condition.',
+  'This source exposes no normative control-plane Condition.',
+]
+const canonicalCount = (value) => /^(?:0|[1-9][0-9]{0,15})$/.test(value) && Number.isSafeInteger(Number(value))
+const lifecycleDetail = (value) => {
+  if (detailLiterals.includes(value)) return value
+  let match = /^Ready: ([0-9]+); not ready: ([0-9]+); unknown: ([0-9]+)\.$/.exec(value)
+  if (match && match.slice(1).every(canonicalCount)) return `Ready: ${Number(match[1])}; not ready: ${Number(match[2])}; unknown: ${Number(match[3])}.`
+  match = /^Available replicas: ([0-9]+|unknown) of ([0-9]+|unknown)\.$/.exec(value)
+  if (match && match.slice(1).every((part) => part === 'unknown' || canonicalCount(part))) {
+    const render = (part) => part === 'unknown' ? part : String(Number(part))
+    return `Available replicas: ${render(match[1])} of ${render(match[2])}.`
+  }
+  return null
+}
+const evidenceTitle = (value, cluster, source, placements) => (
+  (cluster?.role === 'Management plane' && (
+    (source === sources[0] && value === 'Management plane outside hosting source')
+    || (source === sources[3] && value === 'Management plane observation boundary')
+  ))
+  || (dnsName(cluster?.name ?? '') && [
+    [sources[1], 'hosting-cluster state'],
+    [sources[4], 'cluster Claim readiness'],
+    [sources[5], 'external cluster observation'],
+  ].some(([expectedSource, suffix]) => source === expectedSource && value === `${cluster.name} ${suffix}`))
+  || (source === sources[2] && placements.some((placement) => placementName(placement.name) && value === `Deployment ${placement.name}`))
+)
+const Q = '(?:unknown|[0-9]{1,128})'
+const clusterRevision = (value, source) => {
+  if (source === sources[5]) return value === 'external-observation'
+  if (source === sources[0]) return value === 'not-observed-by-hosting-source'
+  if (source === sources[3]) return new RegExp(`^claimListResourceVersion:${Q}$`).test(value)
+  if (source === sources[4]) return new RegExp(`^resourceVersion:${Q}$`).test(value)
+  if (source === sources[1]) return new RegExp(`^nodes:${Q};deployment:${Q}$`).test(value)
+  return false
+}
+const evidenceRevision = (value, source) => {
+  if (source !== sources[2]) return clusterRevision(value, source)
+  const match = new RegExp(`^resourceVersion:${Q};replicas:([0-9]+|None)/([0-9]+|None)$`).exec(value)
+  return !!match && match.slice(1).every((part) => part === 'None' || canonicalCount(part))
+}
+const sourceRevision = (value) => {
+  if (new RegExp(`^kubevirtclusterclaims:${Q}$`).test(value)) return true
+  const match = new RegExp(`^kubernetes:([^;]+);nodes:${Q};deployment:${Q}$`).exec(value)
+  return !!match && version(match[1])
+}
+const timestamp = (value) => {
+  if (typeof value !== 'string') return false
+  const match = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]{1,9})?(?:Z|[+-]([0-9]{2}):([0-9]{2}))$/.exec(value)
+  if (!match || match[0] !== value) return false
+  const [, year, month, day, hour, minute, second, offsetHour = '0', offsetMinute = '0'] = match
+  const y = Number(year)
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][Number(month) - 1]
+  return Number(month) >= 1 && Number(month) <= 12 && Number(day) >= 1 && Number(day) <= days
+    && Number(hour) <= 23 && Number(minute) <= 59 && Number(second) <= 59
+    && Number(offsetHour) <= 23 && Number(offsetMinute) <= 59 && Number.isFinite(Date.parse(value))
+}
+const displayString = (value, path, grammar) => {
+  const item = string(value, path)
+  return grammar(item) ? redactText(item) : REDACTED_TEXT
+}
 const identifierString = (value, path) => {
   const item = string(value, path)
+  if (!ID.test(item)) throw new Error(`${path} must match the ID grammar.`)
   if (hasCredentialValue(item)) throw new Error(`${path} must not contain a credential value.`)
   return item
+}
+const clusterName = (value, path) => {
+  const item = string(value, path)
+  if (!dnsName(item)) throw new Error(`${path} must be a DNS subdomain.`)
+  if (hasCredentialValue(item)) throw new Error(`${path} must not contain a credential value.`)
+  return redactText(item)
 }
 
 const enumeration = (value, allowed, path) => {
@@ -155,27 +262,27 @@ const normalizeCapability = (value, path, environmentId) => {
   const item = record(value, path)
   return {
     id: identifierString(item.id, `${path}.id`),
-    name: displayString(item.name, `${path}.name`),
+    name: displayString(item.name, `${path}.name`, words),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     evidenceId: identifierString(item.evidenceId, `${path}.evidenceId`),
     ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
   }
 }
 
-const normalizeCluster = (value, path, environmentId) => {
+const normalizeCluster = (value, path, environmentId, rawEvidence) => {
   const item = record(value, path)
   return {
     id: identifierString(item.id, `${path}.id`),
-    name: displayString(item.name, `${path}.name`),
+    name: clusterName(item.name, `${path}.name`),
     role: enumeration(item.role, ROLES, `${path}.role`),
-    provider: displayString(item.provider, `${path}.provider`),
-    profile: displayString(item.profile, `${path}.profile`),
-    kubernetesVersion: displayString(item.kubernetesVersion, `${path}.kubernetesVersion`),
-    region: displayString(item.region, `${path}.region`),
+    provider: displayString(item.provider, `${path}.provider`, words),
+    profile: displayString(item.profile, `${path}.profile`, words),
+    kubernetesVersion: displayString(item.kubernetesVersion, `${path}.kubernetesVersion`, version),
+    region: displayString(item.region, `${path}.region`, (value) => DNS_LABEL.test(value)),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     compatibility: enumeration(item.compatibility, COMPATIBILITY, `${path}.compatibility`),
-    contractVersion: displayString(item.contractVersion, `${path}.contractVersion`),
-    revision: displayString(item.revision, `${path}.revision`),
+    contractVersion: displayString(item.contractVersion, `${path}.contractVersion`, clusterContract),
+    revision: displayString(item.revision, `${path}.revision`, (value) => clusterRevision(value, rawEvidence.find((evidence) => evidence.id === item.evidenceId)?.source)),
     evidenceId: identifierString(item.evidenceId, `${path}.evidenceId`),
     ownership: normalizeOwnership(item.ownership, `${path}.ownership`, environmentId),
     capabilities: list(item.capabilities, `${path}.capabilities`).map((capability, index) => normalizeCapability(capability, `${path}.capabilities[${index}]`, environmentId)),
@@ -183,9 +290,9 @@ const normalizeCluster = (value, path, environmentId) => {
       const stagePath = `${path}.lifecycle[${index}]`
       const stageRecord = record(stage, stagePath)
       return {
-        label: displayString(stageRecord.label, `${stagePath}.label`),
+        label: displayString(stageRecord.label, `${stagePath}.label`, lifecycleLabel),
         state: enumeration(stageRecord.state, READINESS, `${stagePath}.state`),
-        detail: displayString(stageRecord.detail, `${stagePath}.detail`),
+        detail: displayString(stageRecord.detail, `${stagePath}.detail`, (value) => lifecycleDetail(value) !== null) === REDACTED_TEXT ? REDACTED_TEXT : lifecycleDetail(stageRecord.detail),
       }
     }),
   }
@@ -195,8 +302,8 @@ const normalizePlacement = (value, path, environmentId) => {
   const item = record(value, path)
   return {
     id: identifierString(item.id, `${path}.id`),
-    name: displayString(item.name, `${path}.name`),
-    targetCluster: displayString(item.targetCluster, `${path}.targetCluster`),
+    name: displayString(item.name, `${path}.name`, placementName),
+    targetCluster: displayString(item.targetCluster, `${path}.targetCluster`, dnsName),
     targetClusterId: identifierString(item.targetClusterId, `${path}.targetClusterId`),
     readiness: enumeration(item.readiness, READINESS, `${path}.readiness`),
     evidenceId: identifierString(item.evidenceId, `${path}.evidenceId`),
@@ -204,20 +311,22 @@ const normalizePlacement = (value, path, environmentId) => {
   }
 }
 
-const normalizeEvidence = (value, path, environmentId) => {
+const normalizeEvidence = (value, path, environmentId, rawClusters, rawPlacements) => {
   const item = record(value, path)
-  displayString(item.summary, `${path}.summary`)
+  string(item.summary, `${path}.summary`)
   const summary = redactSummary()
+  // The global size limit still rejects; other timestamp failures affect only this item.
+  if (typeof item.observedAt === 'string' && item.observedAt.length > 512) string(item.observedAt, `${path}.observedAt`)
   return {
     id: identifierString(item.id, `${path}.id`),
-    title: displayString(item.title, `${path}.title`),
+    title: displayString(item.title, `${path}.title`, (value) => evidenceTitle(value, rawClusters.find((cluster) => cluster.id === item.clusterId), item.source, rawPlacements.filter((placement) => placement.evidenceId === item.id && placement.targetClusterId === item.clusterId))),
     type: enumeration(item.type, EVIDENCE_TYPES, `${path}.type`),
     outcome: enumeration(item.outcome, EVIDENCE_OUTCOMES, `${path}.outcome`),
     clusterId: identifierString(item.clusterId, `${path}.clusterId`),
-    contract: displayString(item.contract, `${path}.contract`),
-    revision: displayString(item.revision, `${path}.revision`),
-    observedAt: displayString(item.observedAt, `${path}.observedAt`),
-    source: displayString(item.source, `${path}.source`),
+    contract: displayString(item.contract, `${path}.contract`, evidenceContract),
+    revision: displayString(item.revision, `${path}.revision`, (value) => evidenceRevision(value, item.source)),
+    observedAt: typeof item.observedAt === 'string' ? item.observedAt : null,
+    source: displayString(item.source, `${path}.source`, oneOf(...sources)),
     summary: summary.summary,
     classification: enumeration(item.classification, CLASSIFICATION, `${path}.classification`),
     redacted: summary.redacted,
@@ -262,15 +371,15 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   if (envelope.apiVersion !== QUERY_VERSION || envelope.kind !== QUERY_KIND) throw new ObservedStateContractError('Observed-state query contract is incompatible.')
   const metadata = record(envelope.metadata, '$.metadata')
   const data = record(envelope.data, '$.data')
-  const observedAt = displayString(metadata.observedAt, '$.metadata.observedAt')
+  const observedAt = string(metadata.observedAt, '$.metadata.observedAt')
   const observedTime = Date.parse(observedAt)
-  if (!Number.isFinite(observedTime)) throw new Error('$.metadata.observedAt must be an ISO timestamp.')
+  if (!timestamp(observedAt)) throw new Error('$.metadata.observedAt must be an ISO timestamp.')
   const environment = record(data.environment, '$.data.environment')
-  const environmentId = ownershipString(environment.id, '$.data.environment.id')
+  const environmentId = identifierString(environment.id, '$.data.environment.id')
   const metrics = list(data.metrics, '$.data.metrics').map((bucket, index) => normalizeMetricBucket(bucket, `$.data.metrics[${index}]`, environmentId))
-  const clusters = list(data.clusters, '$.data.clusters').map((cluster, index) => normalizeCluster(cluster, `$.data.clusters[${index}]`, environmentId))
+  const clusters = list(data.clusters, '$.data.clusters').map((cluster, index) => normalizeCluster(cluster, `$.data.clusters[${index}]`, environmentId, list(data.evidence, '$.data.evidence')))
   const placements = list(data.placements, '$.data.placements').map((placement, index) => normalizePlacement(placement, `$.data.placements[${index}]`, environmentId))
-  const evidence = list(data.evidence, '$.data.evidence').map((item, index) => normalizeEvidence(item, `$.data.evidence[${index}]`, environmentId))
+  const evidence = list(data.evidence, '$.data.evidence').map((item, index) => normalizeEvidence(item, `$.data.evidence[${index}]`, environmentId, data.clusters, data.placements))
 
   if (clusters.filter((cluster) => cluster.role === 'Management plane').length !== 1) throw new Error('Observed state must contain exactly one management plane.')
   assertUniqueIds(clusters, 'cluster')
@@ -315,21 +424,23 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   const partial = metadata.partial === true
   return {
     observedAt,
-    sourceRevision: displayString(metadata.sourceRevision, '$.metadata.sourceRevision'),
+    sourceRevision: displayString(metadata.sourceRevision, '$.metadata.sourceRevision', sourceRevision),
     environment: {
       id: environmentId,
-      displayName: displayString(environment.displayName, '$.data.environment.displayName'),
+      displayName: displayString(environment.displayName, '$.data.environment.displayName', words),
     },
     metrics,
     clusters,
     placements,
-    evidence,
+    // Validate the complete identity/ownership graph above, then make only invalid
+    // Evidence unavailable. Existing references resolve to 404, never fabricated time.
+    evidence: evidence.filter((item) => timestamp(item.observedAt)),
     sourceHealth: {
       freshness: stale ? 'Stale' : 'Current',
       warnings: [
         ...(stale ? [{ code: 'SOURCE_STALE', message: 'The latest OpenKubes observation is outside the configured freshness window.' }] : []),
         ...(partial ? [{ code: 'PARTIAL_DATA', message: 'The OpenKubes query source reported a partial observation.' }] : []),
-        ...(evidence.some((item) => item.redacted) ? [{ code: 'REDACTED', message: 'Sensitive Evidence summary content was redacted at the Console source boundary.' }] : []),
+        ...(evidence.some((item) => item.redacted) ? [{ code: 'REDACTED', message: 'Observed-state values were withheld by grammar checks or the Console redaction boundary.' }] : []),
       ],
     },
   }

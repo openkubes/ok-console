@@ -24,7 +24,7 @@ test('sign-in to Overview, Clusters, Detail, and Evidence uses the same-origin B
   const evidence = page.locator('.evidence-row').first()
   await expect(evidence).toBeVisible()
   await evidence.click()
-  await expect(page.getByRole('dialog', { name: /readiness/i })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'ok-mgmt external cluster observation' })).toBeVisible()
   await assertWcagAa(page, testInfo, 'evidence-dialog')
   await page.screenshot({ path: testInfo.outputPath('cluster-evidence.png'), fullPage: true })
   await page.keyboard.press('Escape')

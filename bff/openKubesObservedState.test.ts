@@ -54,7 +54,7 @@ const observedEnvelope = async (metadata: JsonRecord = {}) => {
     kind: 'ConsoleObservedState',
     metadata: {
       observedAt: fixture.observedAt,
-      sourceRevision: 'openkubes-query:84',
+      sourceRevision: 'kubevirtclusterclaims:84',
       ...metadata,
     },
     data: {
@@ -170,7 +170,7 @@ describe('OpenKubes observed-state query adapter', () => {
       const body = await response.json()
       expect(response.status, path).toBe(200)
       expect(validateConsoleResponse(body), path).toEqual({ valid: true, errors: [] })
-      expect(body).toMatchObject({ meta: { sourceRevision: 'openkubes-query:84' } })
+      expect(body).toMatchObject({ meta: { sourceRevision: 'kubevirtclusterclaims:84' } })
     }
   })
 
@@ -580,8 +580,8 @@ describe('OpenKubes observed-state query adapter', () => {
       for (const key of path.slice(0, -1)) parent = parent[key] as JsonRecord
       parent[path[path.length - 1]] = value
       expect(() => normalizeOpenKubesObservedState(envelope), path.join('.')).toThrow(
-        path.includes('ownership') || path[0] === 'environment'
-          ? 'must be a valid non-empty bounded string.' : 'must not contain a credential value.',
+        path.includes('ownership')
+          ? 'must be a valid non-empty bounded string.' : 'must match the ID grammar.',
       )
     }
   })
@@ -593,40 +593,14 @@ describe('OpenKubes observed-state query adapter', () => {
     'openkubes-query:84', `sha256:${'a'.repeat(64)}`,
     'ls0tls1crudjt', 'B3BLBNNZAC1RZXKTDJE', 'privateSkey', 'clientSkeySdata',
     'https://db?user=a@b', 'https://db#contact=a@b',
-  ])('preserves benign Claim text and source revisions: %s', async (value) => {
+  ])('applies field grammars to formerly unrestricted benign text: %s', async (value) => {
     const envelope = await observedEnvelope({ sourceRevision: value })
     envelope.data.clusters[0].profile = value
     envelope.data.evidence[0].source = value
     const snapshot = normalizeOpenKubesObservedState(envelope)
-    expect(snapshot.sourceRevision).toBe(value)
-    expect(snapshot.clusters[0].profile).toBe(value)
-    expect(snapshot.evidence[0].source).toBe(value)
-  })
-
-  it('preserves benign fixture and hosting-cluster values without over-redacting', async () => {
-    const envelope = await observedEnvelope()
-    // Read raw values so normalization cannot hide accidental fixture redaction.
-    const raw = JSON.parse(await readFile(new URL('./fixtures/observed-state.json', import.meta.url), 'utf8'))
-    for (const field of ['environment', 'clusters', 'placements', 'evidence'] as const) {
-      envelope.data[field] = raw[field]
-    }
-    for (const item of envelope.data.evidence) {
-      item.summary = 'Evidence summary withheld by the Console redaction boundary.'
-      item.redacted = true
-    }
-    Object.assign(envelope.data.clusters[0], {
-      provider: 'Talos', region: 'fra-dc1', revision: `sha256:${'a'.repeat(64)}`,
-      contractVersion: 'kubernetes.io/core+apps/v1',
-    })
-    envelope.data.clusters[1].provider = 'kubevirt'
-    envelope.data.clusters[0].lifecycle[0].detail = 'The bounded read-only Kubernetes API queries completed.'
-    envelope.data.clusters[0].lifecycle[1].detail = 'Ready: 3; not ready: 0; unknown: 0.'
-    envelope.data.evidence[0].title = 'Management plane outside hosting source'
-    envelope.data.evidence[0].source = 'Bounded Kubernetes API projection'
-    const snapshot = await new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }).readSnapshot()
-    for (const field of ['environment', 'clusters', 'placements', 'evidence'] as const) {
-      expect(snapshot[field]).toEqual(envelope.data[field])
-    }
+    expect(snapshot.sourceRevision).toBe('Value withheld by the Console redaction boundary.')
+    expect(snapshot.clusters[0].profile).toBe(/^[A-Za-z]+(?: [A-Za-z]+){0,5}$/.test(value) && value.length <= 64 ? value : 'Value withheld by the Console redaction boundary.')
+    expect(snapshot.evidence[0].source).toBe(value === 'OpenKubes management-plane Kubernetes API' ? value : 'Value withheld by the Console redaction boundary.')
   })
 
   it('rejects a parseable metadata timestamp carrying a credential', async () => {
@@ -656,20 +630,25 @@ describe('OpenKubes observed-state query adapter', () => {
         serialized = JSON.stringify(normalizeOpenKubesObservedState(envelope))
       } catch (error) {
         const leaf = path[path.length - 1]
-        const reason = path.includes('ownership') || path.join('.') === 'data.environment.id'
+        const reason = path.includes('ownership')
           ? 'must be a valid non-empty bounded string.'
           : ['id', 'evidenceId', 'clusterId', 'targetClusterId'].includes(leaf)
-            ? 'must not contain a credential value.'
+            ? 'must match the ID grammar.'
             : ['apiVersion', 'kind'].includes(leaf)
               ? 'Observed-state query contract is incompatible.'
               : path.join('.') === 'metadata.observedAt'
                 ? 'must be an ISO timestamp.'
-                : 'is not supported.'
+                : leaf === 'name' && path[1] === 'clusters' ? 'must be a DNS subdomain.' : 'is not supported.'
         expect((error as Error).message, path.join('.')).toContain(reason)
         expect((error as Error).message, path.join('.')).not.toContain('redaction-negative-proof')
         continue
       }
       expect(serialized, path.join('.')).not.toContain('redaction-negative-proof')
+      if (path[1] === 'evidence' && path.at(-1) === 'observedAt') {
+        const item = envelope.data.evidence[Number(path[2])]
+        expect(JSON.parse(serialized).evidence.some((evidence: JsonRecord) => evidence.id === item.id)).toBe(false)
+        continue
+      }
       expect(serialized, path.join('.')).toContain(path[path.length - 1] === 'summary'
         ? 'Evidence summary withheld by the Console redaction boundary.'
         : 'Value withheld by the Console redaction boundary.')
@@ -732,4 +711,452 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(() => new OpenKubesObservedStateAdapter({ url: 'http://platform.example.test/observed-state' })).toThrow('must use HTTPS')
     expect(() => new OpenKubesObservedStateAdapter({ url: 'https://user:password@platform.example.test/observed-state' })).toThrow('must not contain credentials')
   })
+})
+
+const withheld = 'Value withheld by the Console redaction boundary.'
+const startGoldenBff = (source: OpenKubesObservedStateAdapter) => startBff(source, async (request) => ({
+  ...await prototypeAuthorizer(request),
+  scope: { environmentId: 'openkubes-management', tenantIds: ['platform'] },
+}))
+const golden = async (mode = 'hosting-external') => {
+  const fixtures = JSON.parse(await readFile(new URL('./openKubesObservedState.fixtures.json', import.meta.url), 'utf8'))
+  expect(fixtures.producerRevision).toBe('ad351c9')
+  expect(fixtures.producerSha256).toBe('b0eed6638f4065123e91b8f761dee3b8f8c3f7327b032d207dca730599371359')
+  return structuredClone(fixtures.snapshots[mode])
+}
+const parentAt = (object: JsonRecord, path: string) => {
+  const keys = path.split('.')
+  let parent = object
+  for (const key of keys.slice(0, -1)) parent = parent[key] as JsonRecord
+  return { parent, key: keys.at(-1)! }
+}
+const at = (object: JsonRecord, path: string) => {
+  const { parent, key } = parentAt(object, path)
+  return parent[key]
+}
+
+// Every display grammar has a canonical value, an own-bound violation, and
+// foreign text. Display scalar/type/global-size errors remain structural failures;
+// Evidence timestamps deliberately isolate missing/type errors to their item.
+const displayCases = [
+  ['environment.displayName', 'Other sovereign environment', 'a'.repeat(65), 'Vendor9'],
+  ['clusters.0.provider', 'OtherCloud', 'a'.repeat(65), 'cloud://vendor'],
+  ['clusters.0.profile', 'West regional hosting cluster', 'one two three four five six seven', 'profile_v2'],
+  ['clusters.0.region', 'moon-west-2', 'a'.repeat(64), 'us/west'],
+  ['clusters.0.kubernetesVersion', 'v01.034.005-rc.01+rke2r1', 'v1.2.3+' + 'a'.repeat(33), 'v1.2.3 arbitrary'],
+  ['clusters.0.contractVersion', 'kubernetes.io/core+apps/v1', 'x'.repeat(100), 'platform.openkubes.io/v9'],
+  ['clusters.0.lifecycle.0.label', 'External observation', 'x'.repeat(100), 'Foreign stage'],
+  ['clusters.0.lifecycle.0.detail', 'Ready: 3; not ready: 0; unknown: 1.', 'Ready: 9007199254740992; not ready: 0; unknown: 1.', 'Ready: 3; not ready: 0; unknown: 1. tail'],
+  ['evidence.0.title', 'ok-mgmt external cluster observation', 'x'.repeat(300), 'other external cluster observation'],
+  ['evidence.0.contract', 'Kubernetes core/apps v1', 'x'.repeat(100), 'Other/v1'],
+  ['evidence.0.source', 'Operator-provided read-only observation bundle', 'x'.repeat(100), 'Other read only bundle'],
+  ['evidence.0.revision', 'external-observation', 'x'.repeat(150), 'sha256:' + 'a'.repeat(64)],
+  ['clusters.0.revision', 'external-observation', 'x'.repeat(150), 'resourceVersion:12'],
+  ['placements.0.name', 'openkubes-console/ok-console', 'n'.repeat(64) + '/ok-console', 'other:deployment'],
+  ['placements.0.targetCluster', 'ok-shared', 'a'.repeat(254), 'bad/name'],
+] as const
+
+describe('typed producer output contract', () => {
+  it.each(['hosting-cluster', 'hosting-external', 'kubevirt-claims'])('accepts pinned producer %s with no grammar withholding', async (mode) => {
+    const envelope = await golden(mode)
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now: () => new Date(envelope.metadata.observedAt) })
+    expect(JSON.stringify(snapshot)).not.toContain(withheld)
+    expect(snapshot.evidence).toHaveLength(envelope.data.evidence.length)
+    for (const field of ['clusters', 'placements', 'environment'] as const) expect(snapshot[field]).toEqual(envelope.data[field])
+    for (const [index, evidence] of snapshot.evidence.entries()) {
+      expect(evidence).toEqual({ ...envelope.data.evidence[index], summary: 'Evidence summary withheld by the Console redaction boundary.', redacted: true })
+    }
+    const bff = await startGoldenBff(new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now: () => new Date(envelope.metadata.observedAt) }))
+    for (const path of ['session', 'overview', 'clusters', ...snapshot.evidence.map((item: JsonRecord) => `evidence/${item.id}`)]) {
+      const response = await fetch(`${bff}/api/console/v0/${path}`)
+      expect(response.status, path).toBe(200)
+      const body = await response.json()
+      expect(validateConsoleResponse(body), path).toEqual({ valid: true, errors: [] })
+      expect(JSON.stringify(body), path).not.toContain(withheld)
+    }
+  })
+
+  it.each(displayCases)('validates display grammar %s', async (path, valid, ownBound, foreign) => {
+    for (const value of [valid, ownBound, foreign, '', ' ', ' leading', 'trailing ', 'double  spaces', 'value\n', 'value\t', 'ｖａｌｕｅ', `${valid} tail!`, `${valid}\n`]) {
+      const envelope = await golden()
+      const { parent, key } = parentAt(envelope.data, path)
+      parent[key] = value
+      if (value === '') {
+        expect(() => normalizeOpenKubesObservedState(envelope), path).toThrow('non-empty bounded string')
+      } else {
+        const snapshot = normalizeOpenKubesObservedState(envelope)
+        expect(at(snapshot, path), `${path}: ${JSON.stringify(value)}`).toBe(value === valid ? valid : withheld)
+      }
+    }
+    for (const value of [undefined, null, 7, {}, [], 'x'.repeat(513)]) {
+      const envelope = await golden()
+      const { parent, key } = parentAt(envelope.data, path)
+      if (value === undefined) delete parent[key]
+      else parent[key] = value
+      expect(() => normalizeOpenKubesObservedState(envelope), path).toThrow('non-empty bounded string')
+    }
+  })
+
+  it('withholds capability names outside the words grammar', async () => {
+    for (const value of [' ', '\n', 'ｘ', 'a'.repeat(65), 'Identity9', 'two  words', 'one two three four five six seven', 'token']) {
+      const envelope = await golden()
+      const cluster = envelope.data.clusters[0]
+      cluster.capabilities.push({ id: 'cap-identity', name: value, readiness: 'Ready', evidenceId: cluster.evidenceId, ownership: cluster.ownership })
+      expect(normalizeOpenKubesObservedState(envelope).clusters[0].capabilities[0].name).toBe(withheld)
+    }
+    for (const value of [undefined, null, 7, '', 'a'.repeat(513)]) {
+      const envelope = await golden()
+      const cluster = envelope.data.clusters[0]
+      cluster.capabilities.push({ id: 'cap-identity', name: value, readiness: 'Ready', evidenceId: cluster.evidenceId, ownership: cluster.ownership })
+      expect(() => normalizeOpenKubesObservedState(envelope)).toThrow()
+    }
+  })
+
+  it('checks all identifier leaves before joins, without narrowing the 512-character ID grammar', async () => {
+    const envelope = await golden()
+    const cluster = envelope.data.clusters[0]
+    cluster.capabilities.push({ id: 'a'.repeat(512), name: 'Future', readiness: 'Ready', evidenceId: cluster.evidenceId, ownership: cluster.ownership })
+    for (const id of ['a', 'a..b', 'a.-b', 'a'.repeat(512)]) {
+      cluster.capabilities[0].id = id
+      expect(normalizeOpenKubesObservedState(envelope).clusters[0].capabilities[0].id).toBe(id)
+    }
+    const paths = ['clusters.0.id', 'clusters.0.evidenceId', 'clusters.0.capabilities.0.id', 'clusters.0.capabilities.0.evidenceId', 'evidence.0.id', 'evidence.0.clusterId', 'placements.0.id', 'placements.0.evidenceId', 'placements.0.targetClusterId']
+    for (const path of paths) for (const value of [undefined, null, {}, '', 'a'.repeat(513), ' leading', 'trailing ', 'a\n', 'a\t', 'ａ', 'A', '-a', 'a-', 'a/path', 'foreign value']) {
+      const copy = structuredClone(envelope)
+      const { parent, key } = parentAt(copy.data, path)
+      if (value === undefined) delete parent[key]
+      else parent[key] = value
+      expect(() => normalizeOpenKubesObservedState(copy), `${path}: ${JSON.stringify(value)}`).toThrow()
+    }
+  })
+
+  it.each(['a'.repeat(63) + '.' + 'b'.repeat(63) + '.' + 'c'.repeat(63) + '.' + 'd'.repeat(61), 'a'.repeat(63) + '.west', 'dns-label'])('accepts DNS subdomain cluster name %s', async (name) => {
+    const envelope = await golden()
+    envelope.data.clusters[0].name = name
+    expect(normalizeOpenKubesObservedState(envelope).clusters[0].name).toBe(name)
+  })
+  it.each([undefined, null, 7, '', 'a'.repeat(64), 'a'.repeat(254), 'a'.repeat(513), '-a', 'a-', 'A', 'a..b', ' leading', 'a\n', 'a\t', 'ａ', 'name extra'])('rejects invalid cluster names %s', async (value) => {
+    const envelope = await golden()
+    envelope.data.clusters[0].name = value
+    expect(() => normalizeOpenKubesObservedState(envelope)).toThrow()
+  })
+
+  it.each(['Ready: 0; not ready: 9007199254740991; unknown: 1.', 'Available replicas: unknown of 2.', 'Available replicas: 0 of unknown.'])('regenerates numeric lifecycle detail %s', async (detail) => {
+    const envelope = await golden()
+    envelope.data.clusters[0].lifecycle[0].detail = detail
+    expect(normalizeOpenKubesObservedState(envelope).clusters[0].lifecycle[0].detail).toBe(detail)
+  })
+  it.each(['Ready: 01; not ready: 0; unknown: 0.', 'Available replicas: 01 of 2.', 'Available replicas: None of 2.', 'Available replicas: 9007199254740992 of 2.'])('withholds invalid numeric lifecycle detail %s', async (detail) => {
+    const envelope = await golden()
+    envelope.data.clusters[0].lifecycle[0].detail = detail
+    expect(normalizeOpenKubesObservedState(envelope).clusters[0].lifecycle[0].detail).toBe(withheld)
+  })
+
+  it.each(['unknown', '1.2', 'v1.2.3', '01.002.0003-01+00', 'v1.35.5+rke2r1', 'v1.2.3+ghp-abcdefghijk', 'v1.2.3+dXNlcjpwYXNz', 'v1.2.3+a8F3k7J9m2P4q6R1', 'v1.2.3+AKIA123456789012', 'v1.2.3+xoxb-123456789', 'v1.2.3+sk-abcdefghijk'])('accepts version grammar including known credential-shaped limits: %s', async (version) => {
+    const envelope = await golden('kubevirt-claims')
+    envelope.data.clusters[1].kubernetesVersion = version
+    expect(normalizeOpenKubesObservedState(envelope).clusters[1].kubernetesVersion).toBe(version)
+  })
+  it.each(['v1.2.3+' + 'x'.repeat(93), 'v1.2.3+abcdefghijklmnopq', 'v1.2.3-a.b.c.d.e', 'v1.2.3+a.b.c.d.e', 'v1.2.3+' + 'abcd.'.repeat(6) + 'abcd', 'v1.2.3+JWT.eyJ4IjoxfQ.eA', 'v12345678901.2.3', 'v1', 'v1.2.3.4', 'v1.2.3+'])('withholds invalid or deny-listed version %s', async (version) => {
+    const envelope = await golden('kubevirt-claims')
+    envelope.data.clusters[1].kubernetesVersion = version
+    const snapshot = normalizeOpenKubesObservedState(envelope)
+    expect(snapshot.clusters[1].kubernetesVersion).toBe(withheld)
+    expect(snapshot.clusters).toHaveLength(2)
+  })
+
+  it.each(['2024-02-29T23:59:59.123456789+05:30', '2026-10-22T12:00:00Z'])('accepts strict RFC 3339 %s', async (observedAt) => {
+    const envelope = await golden()
+    envelope.metadata.observedAt = observedAt
+    envelope.data.evidence[0].observedAt = observedAt
+    const snapshot = normalizeOpenKubesObservedState(envelope)
+    expect(snapshot.observedAt).toBe(observedAt)
+    expect(snapshot.evidence[0].observedAt).toBe(observedAt)
+  })
+  it.each([undefined, null, 7, '', {}, [], '2026-02-29T12:00:00Z', '2026-04-31T12:00:00Z', '2026-10-22', '2026-10-22T12:00:00', '2026-10-22T24:00:00Z', '2026-10-22T12:60:00Z', '2026-10-22T12:00:60Z', '2026-10-22T12:00:00+24:00', '2026-10-22T12:00:00+00:60', '2026-10-22T12:00:00.1234567890Z', '2026-10-22T12:00:00Z\n', 'ｘ', ' timestamp '])('rejects metadata but isolates Evidence timestamp %s', async (observedAt) => {
+    const envelope = await golden()
+    envelope.metadata.observedAt = observedAt
+    expect(() => normalizeOpenKubesObservedState(envelope)).toThrow()
+    envelope.metadata.observedAt = '2026-10-22T12:00:00Z'
+    envelope.data.evidence[0].observedAt = observedAt
+    const snapshot = normalizeOpenKubesObservedState(envelope)
+    expect(snapshot.evidence).toHaveLength(envelope.data.evidence.length - 1)
+    expect(snapshot.evidence.some((item: JsonRecord) => item.id === envelope.data.evidence[0].id)).toBe(false)
+    expect(snapshot.clusters[0].evidenceId).toBe(envelope.data.evidence[0].id)
+  })
+
+  it('isolates bad external Evidence time through HTTP and still checks its ownership and references', async () => {
+    const envelope = await golden()
+    const badId = envelope.data.evidence[0].id
+    envelope.data.evidence[0].observedAt = '2026-02-30T12:00:00Z'
+    const source = new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) })
+    const bff = await startGoldenBff(source)
+    for (const path of ['session', 'overview', 'clusters']) {
+      const response = await fetch(`${bff}/api/console/v0/${path}`)
+      expect(response.status).toBe(200)
+      expect(validateConsoleResponse(await response.json())).toEqual({ valid: true, errors: [] })
+    }
+    expect((await fetch(`${bff}/api/console/v0/evidence/${badId}`)).status).toBe(404)
+    envelope.data.evidence[0].ownership.tenantId = 'foreign'
+    expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('ownership')
+    envelope.data.evidence[0].ownership.tenantId = 'platform'
+    envelope.data.evidence[0].clusterId = 'missing-cluster'
+    expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('unresolved Evidence cluster reference')
+  })
+
+  it('retains valid unregistered tenant objects and hides them from another tenant', async () => {
+    const envelope = await golden()
+    assignClusterTenant(envelope, 'cluster-ok-ai', 'Unregistered Tenant')
+    expect(normalizeOpenKubesObservedState(envelope).clusters.find((item: JsonRecord) => item.id === 'cluster-ok-ai')).toBeDefined()
+    const bff = await startGoldenBff(new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }))
+    for (const path of ['session', 'overview', 'clusters']) {
+      const response = await fetch(`${bff}/api/console/v0/${path}`)
+      expect(response.status).toBe(200)
+      expect(JSON.stringify(await response.json())).not.toContain('cluster-ok-ai')
+    }
+  })
+
+  it('derives placement target from the resolved cluster identity', async () => {
+    const envelope = await golden()
+    envelope.data.placements[0].targetCluster = 'foreign-cluster'
+    const bff = await startGoldenBff(new OpenKubesObservedStateAdapter({ url: await startQuery(envelope) }))
+    const response = await fetch(`${bff}/api/console/v0/overview`)
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.data.recentPlacements[0].targetCluster).toBe('ok-shared')
+    expect(JSON.stringify(body)).not.toContain('foreign-cluster')
+  })
+
+  it('pins the live overlay to the grammar-accepted external producer fixture', async () => {
+    const yaml = await readFile(new URL('../deploy/kubernetes/overlays/ok-shared-live/producer-cluster-observations.yaml', import.meta.url), 'utf8')
+    const observations = JSON.parse(yaml.split('observations.json: |\n')[1])
+    const envelope = await golden()
+    const snapshot = normalizeOpenKubesObservedState(envelope)
+    for (const item of observations.clusters) {
+      expect(item).not.toHaveProperty('revision')
+      const cluster = snapshot.clusters.find((cluster: JsonRecord) => cluster.name === item.name)
+      for (const field of ['provider', 'kubernetesVersion', 'region', 'readiness']) expect(cluster[field]).toBe(item[field])
+      if (item.name === 'ok-mgmt') expect(item).not.toHaveProperty('profile')
+      else expect(cluster.profile).toBe(item.profile)
+      expect(cluster.revision).toBe('external-observation')
+    }
+  })
+})
+
+describe('source-specific revision grammars', () => {
+  it.each([
+    ['OpenKubes hosting-cluster source boundary', 'not-observed-by-hosting-source'],
+    ['Bounded Kubernetes API projection', 'nodes:unknown;deployment:00012'],
+    ['OpenKubes observed-state producer', 'claimListResourceVersion:12'],
+    ['OpenKubes management-plane Kubernetes API', 'resourceVersion:00012'],
+    ['Operator-provided read-only observation bundle', 'external-observation'],
+  ])('accepts the closed revision for %s', async (source, revision) => {
+    for (const value of [revision, `${revision} tail`, `${revision}\n`, 'foreign', 'sha256:' + 'a'.repeat(64), '0'.repeat(129), 'x'.repeat(512)]) {
+      const envelope = await golden()
+      envelope.data.evidence[0].source = source
+      envelope.data.evidence[0].revision = value
+      envelope.data.clusters[0].revision = value
+      const snapshot = normalizeOpenKubesObservedState(envelope)
+      expect(snapshot.clusters[0].revision).toBe(value === revision ? revision : withheld)
+      expect(snapshot.evidence[0].revision).toBe(value === revision ? revision : withheld)
+    }
+  })
+  it.each(['resourceVersion:12;replicas:2/2', 'resourceVersion:unknown;replicas:None/None', 'resourceVersion:' + '1'.repeat(128) + ';replicas:0/9007199254740991'])('accepts workload revision %s', async (revision) => {
+    const envelope = await golden()
+    const item = envelope.data.evidence.find((item: JsonRecord) => item.source === 'Authenticated hosting-cluster Kubernetes API')
+    item.revision = revision
+    expect(normalizeOpenKubesObservedState(envelope).evidence.find((evidence: JsonRecord) => evidence.id === item.id).revision).toBe(revision)
+  })
+  it.each(['resourceVersion:12;replicas:01/2', 'resourceVersion:12;replicas:9007199254740992/2', 'resourceVersion:' + '1'.repeat(129) + ';replicas:2/2', 'resourceVersion:12;replicas:unknown/2', 'resourceVersion:12;replicas:2/2 tail'])('withholds invalid workload revision %s', async (revision) => {
+    const envelope = await golden()
+    const item = envelope.data.evidence.find((item: JsonRecord) => item.source === 'Authenticated hosting-cluster Kubernetes API')
+    item.revision = revision
+    expect(normalizeOpenKubesObservedState(envelope).evidence.find((evidence: JsonRecord) => evidence.id === item.id).revision).toBe(withheld)
+  })
+  it('checks sourceRevision structure, size and scalar type', async () => {
+    const valid = ['kubevirtclusterclaims:unknown', 'kubevirtclusterclaims:' + '1'.repeat(128), 'kubernetes:unknown;nodes:unknown;deployment:12', 'kubernetes:v1.35.5+rke2r1;nodes:12;deployment:13']
+    for (const value of [...valid, 'kubevirtclusterclaims:' + '1'.repeat(129), 'kubernetes:v1.2.3+abcdefghijklmnopq;nodes:12;deployment:13', 'kubernetes:v1.2.3;nodes:1;deployment:2;tail', 'sha256:' + 'a'.repeat(64), ' ', 'ｘ', 'kubevirtclusterclaims:12\n', 'foreign', 'x'.repeat(512)]) {
+      const envelope = await golden()
+      envelope.metadata.sourceRevision = value
+      expect(normalizeOpenKubesObservedState(envelope).sourceRevision).toBe(valid.includes(value) ? value : withheld)
+    }
+    for (const value of [undefined, null, [], 1, '', 'x'.repeat(513)]) {
+      const envelope = await golden()
+      envelope.metadata.sourceRevision = value
+      expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('non-empty bounded string')
+    }
+  })
+})
+
+describe('grammar boundary discriminators', () => {
+  it.each([
+    ['v1.2.3-' + 'a'.repeat(15) + '.' + 'b'.repeat(16) + '+' + 'c'.repeat(11) + '.' + 'd'.repeat(12), true],
+    ['v1.2.3-' + 'a'.repeat(16) + '.' + 'b'.repeat(16), false],
+    ['v1.2.3+' + 'a'.repeat(16) + '.' + 'b'.repeat(16), false],
+    ['v1234567890.1234567890.1234567890-' + 'a'.repeat(15) + '.' + 'b'.repeat(16) + '+x', false],
+  ])('checks independent version bounds %s', async (value, valid) => {
+    const envelope = await golden()
+    envelope.data.clusters[0].kubernetesVersion = value
+    expect(normalizeOpenKubesObservedState(envelope).clusters[0].kubernetesVersion).toBe(valid ? value : withheld)
+  })
+  it('keeps the global Evidence timestamp size bound as an envelope failure', async () => {
+    const envelope = await golden()
+    envelope.data.evidence[0].observedAt = '1'.repeat(513)
+    expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('non-empty bounded string')
+  })
+  it('declares the producer Infrastructure plane role in the unchanged Presentation version', async () => {
+    const schema = JSON.parse(await readFile(new URL('../contracts/presentation/v0alpha1/schema.json', import.meta.url), 'utf8'))
+    expect(schema.$defs.clusterSummary.properties.role.enum).toContain('Infrastructure plane')
+    expect(schema.$defs.apiVersion.const).toBe('console.openkubes.io/v0alpha1')
+  })
+})
+
+describe('producer title and source bindings', () => {
+  it.each([
+    ['ok-ai external cluster observation', 'Operator-provided read-only observation bundle'],
+    ['Deployment openkubes-console/ok-console', 'Authenticated hosting-cluster Kubernetes API'],
+    ['ok-mgmt cluster Claim readiness', 'Operator-provided read-only observation bundle'],
+  ])('withholds foreign identity or source title %s', async (title, source) => {
+    const envelope = await golden()
+    envelope.data.evidence[0].title = title
+    envelope.data.evidence[0].source = source
+    expect(normalizeOpenKubesObservedState(envelope).evidence[0].title).toBe(withheld)
+  })
+  it.each([
+    ['Management plane outside hosting source', 'OpenKubes hosting-cluster source boundary'],
+    ['Management plane observation boundary', 'OpenKubes observed-state producer'],
+  ])('withholds management title on workload Evidence %s', async (title, source) => {
+    const envelope = await golden()
+    const evidence = envelope.data.evidence.find((item: JsonRecord) => item.clusterId === 'cluster-ok-shared')
+    evidence.title = title
+    evidence.source = source
+    expect(normalizeOpenKubesObservedState(envelope).evidence.find((item: JsonRecord) => item.id === evidence.id).title).toBe(withheld)
+  })
+  it('selects the cluster revision grammar from its own Evidence source', async () => {
+    const envelope = await golden()
+    envelope.data.evidence[1].source = 'OpenKubes observed-state producer'
+    envelope.data.clusters[0].revision = 'claimListResourceVersion:1'
+    expect(normalizeOpenKubesObservedState(envelope).clusters[0].revision).toBe(withheld)
+  })
+})
+
+describe('independent title binding discriminators', () => {
+  it.each([
+    ['Management plane outside hosting source', 'OpenKubes observed-state producer'],
+    ['Management plane observation boundary', 'OpenKubes hosting-cluster source boundary'],
+  ])('withholds management title with the wrong producer source %s', async (title, source) => {
+    const envelope = await golden()
+    envelope.data.evidence[0].title = title
+    envelope.data.evidence[0].source = source
+    expect(normalizeOpenKubesObservedState(envelope).evidence[0].title).toBe(withheld)
+  })
+  it('binds the Deployment title to its own Evidence ID even within one cluster', async () => {
+    const envelope = await golden()
+    const item = envelope.data.evidence.find((item: JsonRecord) => item.id === 'ev-ok-shared-hosting-state')
+    item.title = 'Deployment openkubes-console/ok-console'
+    item.source = 'Authenticated hosting-cluster Kubernetes API'
+    expect(normalizeOpenKubesObservedState(envelope).evidence.find((evidence: JsonRecord) => evidence.id === item.id).title).toBe(withheld)
+  })
+  it('binds the Deployment title to its placement target cluster', async () => {
+    const envelope = await golden()
+    const item = envelope.data.evidence.find((item: JsonRecord) => item.id === 'ev-observed-deployment-openkubes-console-ok-console')
+    item.clusterId = 'cluster-ok-ai'
+    expect(normalizeOpenKubesObservedState(envelope).evidence.find((evidence: JsonRecord) => evidence.id === item.id).title).toBe(withheld)
+  })
+})
+
+it('withholds a real Deployment title under a different producer source', async () => {
+  const envelope = await golden()
+  const item = envelope.data.evidence.find((item: JsonRecord) => item.id === 'ev-observed-deployment-openkubes-console-ok-console')
+  item.source = 'OpenKubes observed-state producer'
+  expect(normalizeOpenKubesObservedState(envelope).evidence.find((evidence: JsonRecord) => evidence.id === item.id).title).toBe(withheld)
+})
+
+it('retains the credential-shape check for a value that fits the ID grammar', async () => {
+  const envelope = await golden()
+  const cluster = envelope.data.clusters[0]
+  cluster.capabilities.push({
+    id: 'putty-user-key-file-3',
+    name: 'Future capability',
+    readiness: 'Ready',
+    evidenceId: cluster.evidenceId,
+    ownership: cluster.ownership,
+  })
+  expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('must not contain a credential value.')
+})
+
+it.each(['password-cluster', 'prod-secret', 'tokenizer-1', 'credentials-svc', 'cookie-shop', 'my-api-key', 'aws-access-key', 'private-key-store', 'bearer-x'])('withholds keyword-only DNS-valid cluster name %s', async (name) => {
+  const envelope = await golden()
+  envelope.data.clusters[0].name = name
+  expect(normalizeOpenKubesObservedState(envelope).clusters[0].name).toBe(withheld)
+})
+
+it('fixture mode withholds no values', async () => {
+  const snapshot = await fixtureSource.readSnapshot()
+  expect(JSON.stringify(snapshot)).not.toContain(withheld)
+  expect(snapshot.clusters).toHaveLength(4)
+  expect(snapshot.clusters[0].capabilities.map((item: JsonRecord) => item.name)).toEqual(['Identity', 'GitOps', 'Observability', 'Artifact Registry'])
+})
+
+it.each(['Identity', 'Networking', 'Foreign', 'Artifact Registry', 'a'.repeat(64)])('preserves words capability name %s', async (name) => {
+  const envelope = await golden()
+  const cluster = envelope.data.clusters[0]
+  cluster.capabilities.push({ id: 'cap-name', name, readiness: 'Ready', evidenceId: cluster.evidenceId, ownership: cluster.ownership })
+  expect(normalizeOpenKubesObservedState(envelope).clusters[0].capabilities[0].name).toBe(name)
+})
+
+it.each([undefined, null, 9, {}, [], '', 'UPPER', 'bad/id', 'bad id', 'a_', 'ａ', 'a\n', '-a', 'a-', 'a'.repeat(513), 'putty-user-key-file-3'])('rejects invalid environment identifier %s', async (id) => {
+  const envelope = await golden()
+  envelope.data.environment.id = id
+  const updateOwnership = (value: unknown) => {
+    if (!value || typeof value !== 'object') return
+    for (const [key, child] of Object.entries(value)) {
+      if (key === 'environmentId') (value as JsonRecord)[key] = id
+      else updateOwnership(child)
+    }
+  }
+  updateOwnership(envelope.data)
+  expect(() => normalizeOpenKubesObservedState(envelope)).toThrow()
+})
+
+it('withholds a cluster revision whose Evidence has a foreign source', async () => {
+  const envelope = await golden()
+  envelope.data.evidence[0].source = 'Foreign observer'
+  envelope.data.clusters[0].revision = 'arbitrary revision'
+  const snapshot = normalizeOpenKubesObservedState(envelope)
+  expect(snapshot.clusters[0].revision).toBe(withheld)
+  expect(snapshot.evidence[0].source).toBe(withheld)
+})
+
+it.each(['token-lab', 'secret-lab', 'cookie-shop'])('isolates keyword-only Claim name %s across tenants without an outage', async (name) => {
+  const envelope = await golden('kubevirt-claims')
+  assignClusterTenant(envelope, 'cluster-worker-east', 'A')
+  const foreign = structuredClone(envelope.data.clusters[1])
+  foreign.id = `cluster-${name}`
+  foreign.name = name
+  foreign.evidenceId = `ev-${name}-claim-readiness`
+  const evidence = structuredClone(envelope.data.evidence[1])
+  evidence.id = foreign.evidenceId
+  evidence.clusterId = foreign.id
+  evidence.title = `${name} cluster Claim readiness`
+  envelope.data.clusters.push(foreign)
+  envelope.data.evidence.push(evidence)
+  assignClusterTenant(envelope, foreign.id, 'B')
+  const snapshot = normalizeOpenKubesObservedState(envelope)
+  expect(snapshot.clusters.find((item: JsonRecord) => item.id === foreign.id).name).toBe(withheld)
+  const query = await startQuery(envelope)
+  const bff = await startBff(new OpenKubesObservedStateAdapter({ url: query, now: () => new Date(envelope.metadata.observedAt) }), async (request) => ({
+    ...await prototypeAuthorizer(request),
+    scope: { environmentId: envelope.data.environment.id, tenantIds: ['A'] },
+  }))
+  for (const path of ['session', 'overview', 'clusters']) {
+    const response = await fetch(`${bff}/api/console/v0/${path}`)
+    expect(response.status, path).toBe(200)
+    const body = await response.json()
+    expect(validateConsoleResponse(body), path).toEqual({ valid: true, errors: [] })
+    expect(JSON.stringify(body)).not.toContain(foreign.id)
+    if (path === 'clusters') expect(body.data.items.map((item: JsonRecord) => item.name)).toEqual(['worker-east'])
+  }
+  foreign.name = 'putty-user-key-file-3'
+  expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('must not contain a credential value')
 })

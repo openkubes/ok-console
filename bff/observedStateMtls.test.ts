@@ -93,7 +93,7 @@ describe('observed-state mTLS client profile', () => {
       now: () => new Date('2026-08-21T18:01:00Z'),
     }).readSnapshot()
 
-    expect(snapshot.sourceRevision).toBe('fixture-observer:42')
+    expect(snapshot.sourceRevision).toBe('kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633')
     expect(snapshot.clusters[0].name).toBe('ok-mgmt')
   })
 

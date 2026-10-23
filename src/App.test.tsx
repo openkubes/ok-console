@@ -209,7 +209,7 @@ describe('OpenKubes Console', () => {
     const provider = screen.getByRole('combobox', { name: 'Infrastructure provider' })
     expect(within(provider).getByRole('group', { name: /Sovereign & self-managed/i })).toBeInTheDocument()
     expect(within(provider).getByRole('group', { name: /Public cloud/i })).toBeInTheDocument()
-    for (const label of ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'VMware vSphere', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON', 'AWS', 'GCP', 'Azure']) {
+    for (const label of ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'VMware vSphere', 'Proxmox', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON', 'AWS', 'GCP', 'Azure']) {
       expect(within(provider).getByRole('option', { name: label })).toBeInTheDocument()
     }
     expect(screen.getByText(/Illustrative CAPI provider catalog · selection does not provision infrastructure/i)).toBeInTheDocument()

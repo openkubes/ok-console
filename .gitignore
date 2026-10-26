@@ -6,3 +6,24 @@ test-results/
 blob-report/
 .DS_Store
 *.local
+
+# W-JAX local demo runtime
+.wjax-local-logs/
+.wjax-local-processes.json
+Makefile.bak
+.demo-kubeconfig.json
+.demo-kubeconfig.json.bak
+wjax-reader.kubeconfig
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.bak
+
+# W-JAX demo local-only files
+demos/wjax-2026/.demo-kubeconfig.json*
+demos/wjax-2026/evidence.jsonl
+demos/wjax-2026/*.bak
+
+# W-JAX source/runtime separation
+.wjax-local-runtime/

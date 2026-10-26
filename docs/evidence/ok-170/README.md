@@ -1,13 +1,27 @@
 # OK-170 ok-shared development integration evidence
 
-Status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
+> **This document is not an execution approval.** Merging it authorizes no change on ok-shared. Every live step needs a separate, explicit approval of the hashed artifact package and a dated window. The Sovereign Cloud Days event on 2026-10-24 has ended; the recorded freeze (OK-170 comment 15171) prohibited deployment, promotion, rollout, server-side apply, ownership handoff, configuration, credential, certificate, RBAC or producer change, fault injection, negative live test, maintenance exercise or rollback before or during it, and the end of the event does not grant execution authority. Until Arash explicitly lifts the freeze, no ok-shared access of any kind is permitted, including read-only access and server dry-runs.
 
-This record supersedes the Phase-A-only acceptance wording below. The current
+## Post-event review package — planning only
+
+The event has ended. This package is for Arash’s separate review; no post-event execution or new live observation is claimed. The historical records below are dated evidence, not current deployment assertions.
+
+| Review entry | Contract |
+| --- | --- |
+| [Acceptance plan](acceptance-plan.md) | R1/R3–R6, D1–D10, final-candidate D4 reason/server-class mapping, pending D3/D5 freshness pass criteria, risks and artifact template |
+| [Maintenance procedure](maintenance-procedure.md) | Prospective steps, ConfigMap ordering/Q3-C/restore, bounded controls, recovery and closing handoff |
+| Merge dependencies | #127 → the pending ok-console trust-diagnostics PR (stacked on #127) → freshness → this docs PR; openkubes #452 independent |
+| Proposed window | Proposed 2026-10-28 through proposed 2026-10-30; proposed 09:00–13:30 UTC, proposed 270 min, only after explicit sign-off and freeze release. See plan’s allocation and roster; a slipped review requires a later proposed window and new approval. |
+| Approval scope | D9/D10 remain in principle. D8 needs a distinct bounded approval; if withheld, bootstrap evidence remains pending and the revised transition/ledger must be reviewed and re-hashed. |
+
+Historical status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
+
+This record supersedes the Phase-A-only acceptance wording below. That recorded
 development deployment is useful for recovery work, but it is not a completed
 live-integration claim. Independent review requires the predecessor tickets to
 reach GO and a fresh Phase-B evidence bundle before promotion.
 
-## Current Phase-B observation (2026-09-10)
+## Historical Phase-B observation (2026-09-10)
 
 - Console: 2/2 Ready on `ok-shared`, BreakGlass/OIDC/PostgreSQL profile;
   running digest `sha256:dc98054b520bb89b4b8aae1b77e1da8ffa86bbdf359efbeb9e350caa3a79261b`.
@@ -45,7 +59,7 @@ those remain operator/browser evidence items for the independent review.
 
 ## Identified target
 
-- Context: `ok-shared-admin@ok-shared`
+- Operator target: `the approved operator context`
 - Cluster: `ok-shared`
 - Purpose: shared OpenKubes development environment for the Console
 - Kubernetes: v1.34.1
@@ -128,7 +142,7 @@ revision `358945a641ce77b039b2dfd8e210c99c0c1b893b`.
 The guarded verifier completed successfully with:
 
 ```text
-Context: ok-shared-admin@ok-shared
+Operator target: approved operator context
 Namespace: openkubes-console
 Deployment: ok-console
 Desired / updated / available replicas: 2 / 2 / 2
@@ -148,14 +162,14 @@ default-deny and same-namespace-only preview policies were present.
 The verifier exercised `/health/live`, `/health/ready`, and the React root page
 through a temporary local port-forward. No Ingress, Secret, OIDC client,
 PostgreSQL database, certificate, producer, OpenKubes CRD, or mutation workflow
-was created. The preview remains deployed for bounded inspection; its existence
+was created. The historical record describes the preview as deployed for bounded inspection; its existence
 must not be described as live observed-state or production authentication
 evidence.
 
 For another bounded visual session:
 
 ```bash
-kubectl --context ok-shared-admin@ok-shared \
+kubectl \
   --namespace openkubes-console \
   port-forward service/ok-console 8787:8787
 ```

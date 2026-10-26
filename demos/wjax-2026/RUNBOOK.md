@@ -1,8 +1,8 @@
 # OpenKubes — W-JAX 2026 Live Demo Runbook v1.0
 
-**Event:** W-JAX 2026 · **Presentation:** 3 November 2026  
-**Repository:** `openkubes/ok-console` · **Branch baseline:** `feature/wjax-diagnostics-agent` · **Last verified commit:** `d25cfd8`  
-**Scope:** Local disposable kind cluster only. Not a production authorization service or OK-147 Runner.  
+**Event:** W-JAX 2026 · **Presentation:** 3 November 2026
+**Repository:** `openkubes/ok-console` · **Branch baseline:** `feature/wjax-diagnostics-agent` · **Last verified commit:** `d25cfd8`
+**Scope:** Local disposable kind cluster only. Not a production authorization service or OK-147 Runner.
 **Message:** **AI thinks. OpenKubes executes. Evidence proves.**
 
 ## 0. Operating rules

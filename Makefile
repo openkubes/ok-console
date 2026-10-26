@@ -22,3 +22,10 @@ wjax-demo-auth:
 .PHONY: wjax-demo-diagnose
 wjax-demo-diagnose:
 	@python3 "$(WJAX_CONSOLE_DIR)/scripts/wjax_launcher.py" diagnose
+
+
+.PHONY: wjax-demo-verify
+wjax-demo-verify:
+	python3 scripts/wjax_verify_recovery.py \
+	  --demo-dir ../openkubes-wjax-local-demo \
+	  --timeout 90

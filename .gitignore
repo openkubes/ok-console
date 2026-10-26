@@ -18,3 +18,4 @@ wjax-reader.kubeconfig
 # Python runtime artifacts
 __pycache__/
 *.py[cod]
+*.bak

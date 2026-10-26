@@ -67,9 +67,16 @@ def investigate(body):
     observed = deployment.get('observedGeneration')
     generation = deployment.get('generation')
     ready_pods = sum(p.get('ready') is True and p.get('phase') == 'Running' for p in pods)
-    healthy = desired == ready and ready_pods >= desired and generation == observed and desired > 0
+    # Two replicas are the independent W-JAX demo intent; spec.replicas is observed, not intent.
+    expected = 2
+    intent_drift = desired != expected
+    healthy = (not intent_drift and ready == expected and ready_pods >= expected
+               and generation == observed and generation is not None)
     symptoms = [] if healthy else [
-        f'Deployment ready replicas {ready}/{desired}; observed ready pods {ready_pods}; generation {observed}/{generation}'
+        (f'INTENT_DRIFT: configured replicas {desired}, expected {expected}'
+         if intent_drift else
+         f'READINESS_DRIFT: ready {ready}/{desired}, observed ready pods {ready_pods}; '
+         f'generation {observed}/{generation}')
     ]
     return {
         'invocation_id': inv, 'cluster': SUBJECT[0], 'namespace': SUBJECT[1], 'workload': SUBJECT[2],

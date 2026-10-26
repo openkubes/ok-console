@@ -17,7 +17,15 @@ from pathlib import Path
 from threading import Lock
 
 HOME = Path(__file__).resolve().parent
-KUBECONFIG = HOME / ".demo-kubeconfig.json"
+
+RUNTIME = Path(
+    os.environ.get(
+        "WJAX_DEMO_RUNTIME_DIR",
+        str(HOME),
+    )
+).expanduser().resolve()
+
+KUBECONFIG = RUNTIME / ".demo-kubeconfig.json"
 
 HOST, PORT = "127.0.0.1", 8788
 NAMESPACE = "wjax-demo"
@@ -43,7 +51,7 @@ def log(event, **fields):
     }
     EVENTS.append(item)
 
-    with (HOME / "evidence.jsonl").open("a", encoding="utf8") as f:
+    with (RUNTIME / "evidence.jsonl").open("a", encoding="utf8") as f:
         f.write(json.dumps(item, sort_keys=True) + "\n")
 
     return item

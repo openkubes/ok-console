@@ -24,3 +24,6 @@ __pycache__/
 demos/wjax-2026/.demo-kubeconfig.json*
 demos/wjax-2026/evidence.jsonl
 demos/wjax-2026/*.bak
+
+# W-JAX source/runtime separation
+.wjax-local-runtime/

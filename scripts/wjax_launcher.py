@@ -15,11 +15,12 @@ from pathlib import Path
 ROOT = Path(os.environ.get('WJAX_CONSOLE_DIR', Path(__file__).resolve().parents[1])).resolve()
 STATE = ROOT / '.wjax-local-processes.json'
 LOG_DIR = ROOT / '.wjax-local-logs'
-DEMO = Path(os.environ.get('WJAX_DEMO_DIR', ROOT.parent / 'openkubes-wjax-local-demo')).expanduser().resolve()
+DEMO = Path(os.environ.get('WJAX_DEMO_DIR', ROOT / 'demos' / 'wjax-2026')).expanduser().resolve()
+DEMO_RUNTIME = Path(os.environ.get('WJAX_DEMO_RUNTIME_DIR', ROOT / '.wjax-local-runtime')).expanduser().resolve()
 READER = Path(os.environ.get('WJAX_READER_DIR', ROOT.parent / 'wjax-console-kind')).expanduser().resolve()
 READER_CONFIG = Path(os.environ.get('WJAX_READER_KUBECONFIG', READER / 'wjax-reader.kubeconfig')).expanduser().resolve()
 PORTS = {'console': 8790, 'demo': 8788, 'reader': 8791, 'diagnostics': 8793}
-EXECUTOR_CONFIG = DEMO / '.demo-kubeconfig.json'
+EXECUTOR_CONFIG = DEMO_RUNTIME / '.demo-kubeconfig.json'
 KUBE_CONTEXT = (os.environ.get('WJAX_KUBE_CONTEXT') or 'kind-wjax-demo')
 NAMESPACE = 'wjax-demo'
 WORKLOAD = 'wjax-nginx'
@@ -187,6 +188,8 @@ def preflight():
             problems.append('Expected demo.py to bind port 8788; confirm demo server version')
     if (ROOT / 'vite.config.ts').is_file() and '/api/wjax-kind' not in (ROOT / 'vite.config.ts').read_text():
         problems.append('Vite proxy /api/wjax-kind missing from vite.config.ts')
+    if not DEMO_RUNTIME.is_dir():
+        problems.append(f'Demo runtime missing: {DEMO_RUNTIME}')
     if not endpoint('http://127.0.0.1:11434/api/tags'):
         problems.append('Ollama not reachable at 127.0.0.1:11434 (start ollama serve)')
     if not STATE.exists():
@@ -248,7 +251,7 @@ def start():
     definitions = [
         ('reader', [sys.executable, str(READER / 'kind_reader.py')], READER, {**os.environ, 'WJAX_READONLY_KUBECONFIG': str(READER_CONFIG)}, 'kind_reader.py'),
         ('diagnostics', [sys.executable, str(ROOT / 'scripts' / 'wjax_diagnostics.py')], ROOT, os.environ.copy(), 'wjax_diagnostics.py'),
-        ('demo', [sys.executable, str(DEMO / 'demo.py')], DEMO, {**os.environ, 'AI_MODE': 'ollama', 'OLLAMA_MODEL': os.getenv('WJAX_AI_MODEL', 'llama3.2:latest')}, 'demo.py'),
+        ('demo', [sys.executable, str(DEMO / 'demo.py')], DEMO, {**os.environ, 'AI_MODE': 'ollama', 'OLLAMA_MODEL': os.getenv('WJAX_AI_MODEL', 'llama3.2:latest'), 'WJAX_DEMO_RUNTIME_DIR': str(DEMO_RUNTIME)}, 'demo.py'),
         ('console', ['pnpm', 'dev', '--host', '127.0.0.1', '--port', '8790', '--strictPort'], ROOT, os.environ.copy(), 'pnpm'),
     ]
     entries = {}

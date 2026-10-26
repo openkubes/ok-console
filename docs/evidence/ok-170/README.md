@@ -59,7 +59,7 @@ those remain operator/browser evidence items for the independent review.
 
 ## Identified target
 
-- Operator target: <redacted>
+- Operator target: context named in the tracked verifier; value not repeated
 - Cluster: `ok-shared`
 - Purpose: shared OpenKubes development environment for the Console
 - Kubernetes: v1.34.1
@@ -96,9 +96,9 @@ port-forwarding rather than publishing an unauthenticated Ingress.
 
 **Historical preview commands — retired, not to be run.** The removed preview verifier formerly offered render-only and apply modes, including the OK_CONSOLE_APPLY flag. This record supplies no runnable preview procedure; use only a separately approved current package.
 
-The verifier refuses a different current context, refuses a pre-existing
-namespace it does not own, rejects unresolved placeholders or Secret objects,
-verifies rollout/image/security state, and exercises liveness, readiness and
+The retired verifier refused a different current context and a pre-existing
+namespace it did not own, rejected unresolved placeholders or Secret objects,
+verified rollout/image/security state, and exercised liveness, readiness and
 the Console root through a bounded local port-forward.
 
 ## Phase B blockers for live observed state

@@ -1,6 +1,6 @@
 # OK-170 ok-shared development integration evidence
 
-> **This document is not an execution approval.** Merging it authorizes no change on ok-shared. Every live step needs a separate, explicit approval of the hashed artifact package and a dated window. The Sovereign Cloud Days event on 2026-10-24 has ended; the recorded freeze (OK-170 comment 15171) prohibited deployment, promotion, rollout, server-side apply, ownership handoff, configuration, credential, certificate, RBAC or producer change, fault injection, negative live test, maintenance exercise or rollback before or during it, and the end of the event does not grant execution authority. Until Arash explicitly lifts the freeze, no ok-shared access of any kind is permitted, including read-only access and server dry-runs.
+> **This document is not an execution approval.** Merging it authorizes no change on ok-shared. Every live step needs a separate, explicit approval of the hashed artifact package and a dated window. The Sovereign Cloud Days event on 2026-10-24 has ended; the recorded freeze (OK-170 comment 15171) prohibited OK-170 deployment, promotion, rollout, server-side apply, ownership handoff, configuration, credential, certificate, RBAC or producer change, fault injection, negative live test, maintenance exercise or rollback before or during it, and the end of the event does not grant execution authority. Until Arash explicitly lifts the freeze, no ok-shared access of any kind is permitted, including read-only access and server dry-runs.
 
 ## Post-event review package — planning only
 
@@ -10,8 +10,8 @@ The event has ended. This package is for Arash’s separate review; no post-even
 | --- | --- |
 | [Acceptance plan](acceptance-plan.md) | R1/R3–R6, D1–D10, final-candidate D4 reason/server-class mapping, pending D3/D5 freshness pass criteria, risks and artifact template |
 | [Maintenance procedure](maintenance-procedure.md) | Prospective steps, ConfigMap ordering/Q3-C/restore, bounded controls, recovery and closing handoff |
-| Merge dependencies | #127 → the pending ok-console trust-diagnostics PR (stacked on #127) → freshness → this docs PR; openkubes #452 independent |
-| Proposed window | Proposed 2026-10-28 through proposed 2026-10-30; proposed 09:00–13:30 UTC, proposed 270 min, only after explicit sign-off and freeze release. See plan’s allocation and roster; a slipped review requires a later proposed window and new approval. |
+| [Prerequisites](prerequisites.md) | Complete dependency/owner/image-impact table, producer scope decision, readiness gate and count-derived window |
+| Proposed window | Earliest two working days after explicit readiness sign-off; all prerequisite merges, C1/P1 builds/hashes and package re-review required. Count-derived duration/roster in prerequisites; no fixed dates. |
 | Approval scope | D9/D10 remain in principle. D8 needs a distinct bounded approval; if withheld, bootstrap evidence remains pending and the revised transition/ledger must be reviewed and re-hashed. |
 
 Historical status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
@@ -59,7 +59,7 @@ those remain operator/browser evidence items for the independent review.
 
 ## Identified target
 
-- Operator target: `the approved operator context`
+- Operator target: <redacted>
 - Cluster: `ok-shared`
 - Purpose: shared OpenKubes development environment for the Console
 - Kubernetes: v1.34.1
@@ -94,17 +94,7 @@ policy. OIDC, PostgreSQL, local access and the observed-state producer are
 disabled; data is fixture-backed and read-only. Access is initially bounded to
 port-forwarding rather than publishing an unauthenticated Ingress.
 
-Run a render-only preflight:
-
-```bash
-./deploy/kubernetes/verify-ok-shared-preview.sh
-```
-
-After the PR is reviewed and merged, explicitly apply and verify:
-
-```bash
-OK_CONSOLE_APPLY=true ./deploy/kubernetes/verify-ok-shared-preview.sh
-```
+**Historical preview commands — retired, not to be run.** The removed preview verifier formerly offered render-only and apply modes, including the OK_CONSOLE_APPLY flag. This record supplies no runnable preview procedure; use only a separately approved current package.
 
 The verifier refuses a different current context, refuses a pre-existing
 namespace it does not own, rejects unresolved placeholders or Secret objects,
@@ -142,7 +132,7 @@ revision `358945a641ce77b039b2dfd8e210c99c0c1b893b`.
 The guarded verifier completed successfully with:
 
 ```text
-Operator target: approved operator context
+Context: <redacted>
 Namespace: openkubes-console
 Deployment: ok-console
 Desired / updated / available replicas: 2 / 2 / 2
@@ -166,13 +156,4 @@ was created. The historical record describes the preview as deployed for bounded
 must not be described as live observed-state or production authentication
 evidence.
 
-For another bounded visual session:
-
-```bash
-kubectl \
-  --namespace openkubes-console \
-  port-forward service/ok-console 8787:8787
-```
-
-Then open <http://127.0.0.1:8787>. Stopping the port-forward removes external
-access but leaves the verified preview workload running.
+**Historical port-forward — not to be run.** The retired preview used a temporary Service port-forward. Its former loopback URL and command are intentionally omitted; this history grants no access or execution authority.

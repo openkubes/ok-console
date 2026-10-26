@@ -133,6 +133,17 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   return <>
     <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div>}/>
+    {import.meta.env.VITE_WJAX_KIND_PREVIEW === 'true' && (
+      <section aria-label="W-JAX local kind lab" style={{ padding: '18px 20px', marginBottom: 18, border: '1px solid #65a5d255', borderRadius: 12, background: '#e8f5ff' }}>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div>
+            <strong style={{ color: '#15375b' }}>kind-wjax-demo · Local lab</strong>
+            <div style={{ marginTop: 5, color: '#37546c', fontSize: 13 }}>Live, read-only Kubernetes observation · Namespace wjax-demo · Not included in fixture cluster totals</div>
+          </div>
+          <a href="/wjax-kind.html" style={{ borderRadius: 8, padding: '10px 14px', color: '#fff', background: '#1059b2', textDecoration: 'none', fontWeight: 600 }}>View Deployments &amp; Pods →</a>
+        </div>
+      </section>
+    )}
     <div className="filter-bar"><label className="search-field"><Icon name="search"/><span className="sr-only">Search clusters</span><input placeholder="Search clusters"/></label><button className="filter-chip active">All · {data.clusters.length}</button><button className="filter-chip">Ready · {ready}</button><button className="filter-chip">Attention · {data.clusters.length - ready}</button></div>
     <section className="table-panel">
       <div className="table-head cluster-columns"><span>Cluster</span><span>Role & profile</span><span>Provider</span><span>Readiness</span><span>Evidence</span><span/></div>

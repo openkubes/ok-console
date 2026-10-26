@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/console/v0': 'http://127.0.0.1:8787',
+      '/api/wjax-kind': 'http://127.0.0.1:8791',
     },
   },
   test: {

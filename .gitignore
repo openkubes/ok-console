@@ -19,3 +19,8 @@ wjax-reader.kubeconfig
 __pycache__/
 *.py[cod]
 *.bak
+
+# W-JAX demo local-only files
+demos/wjax-2026/.demo-kubeconfig.json*
+demos/wjax-2026/evidence.jsonl
+demos/wjax-2026/*.bak

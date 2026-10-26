@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wjax-demo-executor
+  namespace: wjax-demo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: wjax-demo-executor
+  namespace: wjax-demo
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [wjax-nginx]
+    verbs: [get, patch, update]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wjax-demo-executor
+  namespace: wjax-demo
+subjects:
+  - kind: ServiceAccount
+    name: wjax-demo-executor
+    namespace: wjax-demo
+roleRef:
+  kind: Role
+  name: wjax-demo-executor
+  apiGroup: rbac.authorization.k8s.io

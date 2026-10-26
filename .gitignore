@@ -14,3 +14,7 @@ Makefile.bak
 .demo-kubeconfig.json
 .demo-kubeconfig.json.bak
 wjax-reader.kubeconfig
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]

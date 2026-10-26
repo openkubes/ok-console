@@ -18,3 +18,7 @@ wjax-demo-stop:
 
 wjax-demo-auth:
 	@WJAX_CONSOLE_DIR="$(WJAX_CONSOLE_DIR)" WJAX_DEMO_DIR="$(WJAX_DEMO_DIR)" WJAX_KUBE_CONTEXT="$(WJAX_KUBE_CONTEXT)" python3 "$(WJAX_CONSOLE_DIR)/scripts/wjax_launcher.py" auth
+
+.PHONY: wjax-demo-diagnose
+wjax-demo-diagnose:
+	@python3 "$(WJAX_CONSOLE_DIR)/scripts/wjax_launcher.py" diagnose

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 ROOT = Path(os.environ.get('WJAX_CONSOLE_DIR', Path(__file__).resolve().parents[1])).resolve()
@@ -17,7 +18,7 @@ LOG_DIR = ROOT / '.wjax-local-logs'
 DEMO = Path(os.environ.get('WJAX_DEMO_DIR', ROOT.parent / 'openkubes-wjax-local-demo')).expanduser().resolve()
 READER = Path(os.environ.get('WJAX_READER_DIR', ROOT.parent / 'wjax-console-kind')).expanduser().resolve()
 READER_CONFIG = Path(os.environ.get('WJAX_READER_KUBECONFIG', READER / 'wjax-reader.kubeconfig')).expanduser().resolve()
-PORTS = {'console': 8790, 'demo': 8788, 'reader': 8791}
+PORTS = {'console': 8790, 'demo': 8788, 'reader': 8791, 'diagnostics': 8793}
 EXECUTOR_CONFIG = DEMO / '.demo-kubeconfig.json'
 KUBE_CONTEXT = (os.environ.get('WJAX_KUBE_CONTEXT') or 'kind-wjax-demo')
 NAMESPACE = 'wjax-demo'
@@ -47,6 +48,35 @@ def endpoint(url):
             return r.status == 200
     except Exception:
         return False
+
+DIAGNOSTICS_URL = 'http://127.0.0.1:8793/v1/investigate_workload'
+DIAGNOSTICS_BODY = {'cluster': 'kind-wjax-demo', 'namespace': 'wjax-demo', 'workload': 'wjax-nginx', 'time_range': 'PT1H'}
+
+
+def diagnostics_probe(check_negative=False):
+    """Run a real read-only ADR-021 request, not a nonexistent GET healthcheck."""
+    def post(body):
+        request = urllib.request.Request(DIAGNOSTICS_URL, data=json.dumps(body).encode(),
+                                         headers={'Content-Type': 'application/json'}, method='POST')
+        try:
+            with urllib.request.urlopen(request, timeout=7) as response:
+                return response.status, json.load(response)
+        except urllib.error.HTTPError as err:
+            return err.code, json.load(err)
+    try:
+        code, payload = post(DIAGNOSTICS_BODY)
+        if code != 200 or any(payload.get(k) != v for k, v in DIAGNOSTICS_BODY.items() if k != 'time_range'):
+            return False
+        if not payload.get('invocation_id') or not isinstance(payload.get('evidence'), list):
+            return False
+        if not check_negative:
+            return True
+        forbidden = dict(DIAGNOSTICS_BODY, workload='other-workload')
+        negative_status, _ = post(forbidden)
+        return negative_status == 422
+    except (OSError, ValueError, KeyError, TimeoutError):
+        return False
+
 
 def owned_pid(pid, marker):
     if not alive(pid):
@@ -145,7 +175,7 @@ def refresh_executor_auth():
 
 def preflight():
     problems = []
-    for name, path in [('Console package.json', ROOT / 'package.json'), ('Vite config', ROOT / 'vite.config.ts'), ('Demo server', DEMO / 'demo.py'), ('Reader server', READER / 'kind_reader.py'), ('Reader kubeconfig', READER_CONFIG)]:
+    for name, path in [('Console package.json', ROOT / 'package.json'), ('Vite config', ROOT / 'vite.config.ts'), ('Demo server', DEMO / 'demo.py'), ('Reader server', READER / 'kind_reader.py'), ('Reader kubeconfig', READER_CONFIG), ('Diagnostics server', ROOT / 'scripts' / 'wjax_diagnostics.py')]:
         if not path.is_file():
             problems.append(f'{name} missing: {path}')
     for name, binary in [('pnpm', 'pnpm'), ('kubectl', 'kubectl')]:
@@ -187,15 +217,15 @@ def status():
         entry = data.get(name, {})
         pid = entry.get('pid')
         own = bool(pid and owned_pid(pid, entry.get('marker', '___never___')))
-        url = {'console': 'http://127.0.0.1:8790/wjax-kind.html', 'demo': 'http://127.0.0.1:8788/api/status', 'reader': 'http://127.0.0.1:8791/api/wjax-kind/snapshot'}[name]
-        print(f'{name:8} port={port} owned={own} process={"running" if own else "not owned"} http={"OK" if endpoint(url) else "UNAVAILABLE"}')
+        url = {'console': 'http://127.0.0.1:8790/wjax-kind.html', 'demo': 'http://127.0.0.1:8788/api/status', 'reader': 'http://127.0.0.1:8791/api/wjax-kind/snapshot', 'diagnostics': DIAGNOSTICS_URL}[name]
+        print(f'{name:8} port={port} owned={own} process={"running" if own else "not owned"} http={"OK" if (diagnostics_probe() if name == 'diagnostics' else endpoint(url)) else "UNAVAILABLE"}')
 
 def stop():
     data = load()
     if not data:
         print('No launcher-owned processes recorded.')
         return
-    for name in ('console', 'demo', 'reader'):
+    for name in ('console', 'demo', 'diagnostics', 'reader'):
         entry = data.get(name, {})
         pid = entry.get('pid')
         if not pid or not owned_pid(pid, entry.get('marker', '___never___')):
@@ -217,6 +247,7 @@ def start():
     LOG_DIR.mkdir(exist_ok=True)
     definitions = [
         ('reader', [sys.executable, str(READER / 'kind_reader.py')], READER, {**os.environ, 'WJAX_READONLY_KUBECONFIG': str(READER_CONFIG)}, 'kind_reader.py'),
+        ('diagnostics', [sys.executable, str(ROOT / 'scripts' / 'wjax_diagnostics.py')], ROOT, os.environ.copy(), 'wjax_diagnostics.py'),
         ('demo', [sys.executable, str(DEMO / 'demo.py')], DEMO, {**os.environ, 'AI_MODE': 'ollama', 'OLLAMA_MODEL': os.getenv('WJAX_AI_MODEL', 'llama3.2:latest')}, 'demo.py'),
         ('console', ['pnpm', 'dev', '--host', '127.0.0.1', '--port', '8790', '--strictPort'], ROOT, os.environ.copy(), 'pnpm'),
     ]
@@ -230,10 +261,10 @@ def start():
                 stream.close()
             entries[name] = {'pid': process.pid, 'marker': marker}
             STATE.write_text(json.dumps(entries, indent=2))
-        urls = {'reader':'http://127.0.0.1:8791/api/wjax-kind/snapshot','demo':'http://127.0.0.1:8788/api/status','console':'http://127.0.0.1:8790/wjax-kind.html'}
+        urls = {'reader':'http://127.0.0.1:8791/api/wjax-kind/snapshot','demo':'http://127.0.0.1:8788/api/status','console':'http://127.0.0.1:8790/wjax-kind.html', 'diagnostics':DIAGNOSTICS_URL}
         for name, url in urls.items():
             for _ in range(30):
-                if endpoint(url):
+                if (diagnostics_probe() if name == 'diagnostics' else endpoint(url)):
                     break
                 time.sleep(0.3)
             else:
@@ -242,6 +273,7 @@ def start():
         print(' Console: http://127.0.0.1:8790/#/clusters')
         print(' Live kind: http://127.0.0.1:8790/wjax-kind.html')
         print(' Agentic:  http://127.0.0.1:8788/')
+        print(' Diagnostics: http://127.0.0.1:8793/v1/investigate_workload')
         print(' Logs:', LOG_DIR)
         return 0
     except Exception as error:
@@ -259,7 +291,11 @@ if __name__ == '__main__':
         stop()
     elif action == 'status':
         status()
+    elif action == 'diagnose':
+        success = diagnostics_probe(check_negative=True)
+        print('ADR-021 local diagnostics (healthy subject + foreign workload rejection):', 'PASS' if success else 'FAIL')
+        sys.exit(0 if success else 1)
     elif action == 'auth':
         sys.exit(refresh_executor_auth())
     else:
-        raise SystemExit('Use: start | check | status | stop | auth')
+        raise SystemExit('Use: start | check | status | stop | auth | diagnose')

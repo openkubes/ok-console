@@ -1,0 +1,11 @@
+flowchart LR
+  A["Drift 0/0"] --> B["Read-only diagnosis"]
+  B --> C["Ollama assessment"]
+  C -. "Human initiates" .-> D["Ollama proposal"]
+  D --> E{"Policy"}
+  E -->|Denied| F["Blocked"]
+  E -->|Allowed| G{"Human approves exact digest?"}
+  G -->|No| F
+  G -->|Yes| H["Bounded apply"]
+  H --> I["Kubernetes 2/2"]
+  I --> J["Read-only verification"]

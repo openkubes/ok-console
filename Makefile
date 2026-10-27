@@ -2,8 +2,8 @@
 WJAX_CONSOLE_DIR ?= $(CURDIR)
 WJAX_DEMO_DIR ?= $(abspath $(CURDIR)/demos/wjax-2026)
 WJAX_DEMO_RUNTIME_DIR ?= $(abspath $(CURDIR)/.wjax-local-runtime)
-WJAX_READER_DIR ?= $(abspath $(CURDIR)/../wjax-console-kind)
-WJAX_READER_KUBECONFIG ?= $(WJAX_READER_DIR)/wjax-reader.kubeconfig
+WJAX_READER_DIR ?= $(WJAX_DEMO_DIR)/reader
+WJAX_READER_KUBECONFIG ?= $(WJAX_DEMO_RUNTIME_DIR)/wjax-reader.kubeconfig
 WJAX_AI_MODEL ?= llama3.2:latest
 WJAX_KUBE_CONTEXT ?= kind-wjax-demo
 

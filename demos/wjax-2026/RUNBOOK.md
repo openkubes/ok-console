@@ -130,9 +130,9 @@ import json
 import os
 from pathlib import Path
 runtime = Path(os.environ.get('WJAX_DEMO_RUNTIME_DIR', '.wjax-local-runtime')).expanduser()
-p = runtime / 'evidence.jsonl'
+path = runtime / 'evidence.jsonl'
 allowed = {'PROPOSAL_EVALUATED', 'HUMAN_APPROVED', 'EXECUTOR_APPLIED', 'KUBERNETES_OBSERVED', 'RECOVERY_VERIFIED', 'RECOVERY_VERIFICATION_FAILED'}
-for line in p.read_text().splitlines()[-40:]:
+for line in path.read_text().splitlines()[-40:]:
     item = json.loads(line)
     if item.get('event') in allowed:
         print(item.get('at'), item.get('event'), item.get('result', ''), item.get('digest', '')[:12])

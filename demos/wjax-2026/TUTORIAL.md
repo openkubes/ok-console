@@ -187,10 +187,10 @@ Defaults derive from the script location, so invoking the scripts from another d
 For independent read-only RBAC inspection:
 
 ```bash
-kubectl --kubeconfig .wjax-local-runtime/wjax-reader.kubeconfig auth can-i list pods -n wjax-demo
-kubectl --kubeconfig .wjax-local-runtime/wjax-reader.kubeconfig auth can-i patch deployments.apps/wjax-nginx -n wjax-demo
-kubectl --kubeconfig .wjax-local-runtime/.demo-kubeconfig.json auth can-i patch deployments.apps/wjax-nginx -n wjax-demo
-kubectl --kubeconfig .wjax-local-runtime/.demo-kubeconfig.json auth can-i patch deployments.apps/other-workload -n wjax-demo
+kubectl --kubeconfig "${WJAX_DEMO_RUNTIME_DIR:-.wjax-local-runtime}/wjax-reader.kubeconfig" auth can-i list pods -n wjax-demo
+kubectl --kubeconfig "${WJAX_DEMO_RUNTIME_DIR:-.wjax-local-runtime}/wjax-reader.kubeconfig" auth can-i patch deployments.apps/wjax-nginx -n wjax-demo
+kubectl --kubeconfig "${WJAX_DEMO_RUNTIME_DIR:-.wjax-local-runtime}/.demo-kubeconfig.json" auth can-i patch deployments.apps/wjax-nginx -n wjax-demo
+kubectl --kubeconfig "${WJAX_DEMO_RUNTIME_DIR:-.wjax-local-runtime}/.demo-kubeconfig.json" auth can-i patch deployments.apps/other-workload -n wjax-demo
 ```
 
 These query authorization without performing the proposed action. Expect `yes`, `no`, `yes`, `no`; `kubectl auth can-i` normally exits 1 for `no`, which is expected here.
@@ -387,9 +387,12 @@ To inspect event types without displaying credentials:
 python3 - <<'PY'
 import json
 import os
+import sys
 from pathlib import Path
 runtime = Path(os.environ.get('WJAX_DEMO_RUNTIME_DIR', '.wjax-local-runtime')).expanduser()
 path = runtime / 'evidence.jsonl'
+if not path.is_file():
+    sys.exit(f'No evidence file found: {path}. Check WJAX_DEMO_RUNTIME_DIR and whether this session has produced any events.')
 for line in path.read_text().splitlines()[-20:]:
     item = json.loads(line)
     print(item.get('event'), item.get('result', ''), item.get('digest', '')[:12])

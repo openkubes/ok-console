@@ -1,4 +1,4 @@
-# OpenKubes — W-JAX 2026 Live Demo Runbook v1.0
+# OpenKubes — W-JAX 2026 Live Demo Runbook v1.1
 
 **Event:** W-JAX 2026 · **Presentation:** 3 November 2026
 **Repository:** `openkubes/ok-console` · **Branch baseline:** `main` · **Last verified commit:** `778841c` (28 October 2026)
@@ -9,7 +9,8 @@
 
 - Run commands from the `ok-console` repository root, unless stated otherwise.
 - The **demo web UI** is at <http://127.0.0.1:8788/>. The **Console** is at <http://127.0.0.1:8790/#/clusters> and the **live kind view** at <http://127.0.0.1:8790/wjax-kind.html>.
-- The source is `demos/wjax-2026/`; runtime credentials and local evidence are in `.wjax-local-runtime/` (gitignored). The former `../openkubes-wjax-local-demo/` remains a fallback; **do not use it for the primary path**.
+- The source is `demos/wjax-2026/`; runtime credentials and local evidence are in `.wjax-local-runtime/` (gitignored), or in the session directory exported as `WJAX_DEMO_RUNTIME_DIR`.
+- After switching to a new session directory, export the **same** `WJAX_DEMO_RUNTIME_DIR` in every terminal used to provision credentials, start or check the services, rotate the Executor token, inspect evidence or run `make wjax-demo-verify`. Without the export, these operations default to `.wjax-local-runtime/` and may use old credentials or return a stale `ALREADY_VERIFIED`. Status, stop and diagnostics commands inspect the recorded or running services; they do not select a new runtime session.
 - Approval is a local human click, not authenticated enterprise authorization. `evidence.jsonl` is a local, mutable audit log, **not** signed or tamper-proof.
 - Diagnostics uses a local read-only provider with ADR-021-inspired contract, **not a deployed kagent integration**. Diagnosis → operation proposal is currently a **manual handoff**. Model output is not authorized execution.
 - Keep all demo HTTP services bound to loopback. Never expose them publicly or use a real production context.
@@ -20,7 +21,7 @@
 ### 1.1 Confirm the repository and safety boundary
 
 ```bash
-cd ~/temp/kubernauts/ok/ok-console
+cd /path/to/ok-console   # your local clone of openkubes/ok-console
 git status --short
 git branch --show-current
 kubectl config current-context
@@ -128,9 +129,12 @@ Inspect without revealing credentials:
 python3 - <<'PY'
 import json
 import os
+import sys
 from pathlib import Path
 runtime = Path(os.environ.get('WJAX_DEMO_RUNTIME_DIR', '.wjax-local-runtime')).expanduser()
 path = runtime / 'evidence.jsonl'
+if not path.is_file():
+    sys.exit(f'No evidence file found: {path}. Check WJAX_DEMO_RUNTIME_DIR and whether this session has produced any events.')
 allowed = {'PROPOSAL_EVALUATED', 'HUMAN_APPROVED', 'EXECUTOR_APPLIED', 'KUBERNETES_OBSERVED', 'RECOVERY_VERIFIED', 'RECOVERY_VERIFICATION_FAILED'}
 for line in path.read_text().splitlines()[-40:]:
     item = json.loads(line)
@@ -150,7 +154,7 @@ In the Agentic browser UI, click **Try forbidden production request**. Expect a 
 | Symptom | Safe response | What to say |
 |---|---|---|
 | Expired Reader or Executor credentials | Follow the [tutorial's new-session procedure](TUTORIAL.md#expired-credentials-and-service-troubleshooting) to provision both identities in a new private runtime directory, restart the services, then repeat `make wjax-demo-check` and `make wjax-demo-diagnose`. `make wjax-demo-auth` only rotates the Executor token. Never replace a demo kubeconfig with the admin kubeconfig. | “Reader and Executor credentials are separate and must both remain valid.” |
-| RBAC checks fail with valid credentials | Inspect the reported permissions against the checked-in demo Roles and RoleBindings. Token rotation does not repair an RBAC mismatch. | “The demo must pass its bounded-permission checks before execution.” |
+| RBAC checks fail with valid credentials | Inspect the reported permissions against the checked-in demo Roles and RoleBindings (`demos/wjax-2026/rbac.yaml`, `demos/wjax-2026/reader/rbac.yaml`). Token rotation does not repair an RBAC mismatch. Provisioning a new session re-applies the checked-in manifests; it does not remove additional external (Cluster)RoleBindings that grant unexpected permissions. | “The demo must pass its bounded-permission checks before execution.” |
 | Ollama not reachable / `/api/propose` returns `AI_UNAVAILABLE` | Check `ollama list` and whether its local service is running. Do not claim an AI result. If not quickly recoverable, show the already collected prior evidence and explain the expected flow. | “A failed AI assessment cannot bypass policy.” |
 | Drift changes to `0/0`, but the live reader or diagnostics does not update | Retry **Refresh live status**, `make wjax-demo-status` and `make wjax-demo-diagnose`; show the exact `kubectl --context kind-wjax-demo` result. | “Read-side availability is separate from the policy-controlled execution path.” |
 | Proposal denied or model returns an unexpected candidate | Do **not** change candidate, policy, or approval tokens by hand. Explain the fail-closed behavior; use the known baseline or a backup screenshot for the remainder. | “Unexpected model output is not trusted.” |
@@ -181,6 +185,8 @@ git ls-files | grep -E '(^|/)(\.demo-kubeconfig\.json|evidence\.jsonl)$' \
   && echo 'STOP: unexpected runtime file tracked' \
   || echo 'PASS: runtime files not tracked'
 ```
+
+Both demo tokens are requested for eight hours; server policy may shorten that lifetime. Provision a fresh stage session shortly before the talk and rerun `make wjax-demo-check` and `make wjax-demo-diagnose` immediately before going on stage. Do not rely on tokens created the evening before.
 
 Make sure the laptop is powered, the local Ollama model is cached, the demo browser tabs are open, terminal history does not show tokens, and no update/rebuild is running. **Do not delete the kind cluster or the evidence log before the talk.**
 

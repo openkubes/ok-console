@@ -4,7 +4,7 @@
 
 **Hands-on tutorial · W-JAX 2026 · macOS · allow 45–60 minutes plus downloads**
 
-This guide starts from a fresh clone on `docs/wjax-agentic-operations-tutorial`. You explicitly create the cluster, namespace and workload, provision two separate identities, start Ollama, approve the repair and verify Kubernetes observations. There is no bootstrap command. The frozen `wjax-2026-demo-v1.0` tag is historical; leave it unchanged.
+This guide starts from a fresh clone of the maintained `main` branch. You explicitly create the cluster, namespace and workload, provision two separate identities, start Ollama, approve the repair and verify Kubernetes observations. There is no bootstrap command. The frozen `wjax-2026-demo-v1.0` tag is historical; leave it unchanged.
 
 The recovery sequence is **`0/0 → Ollama → Policy → Human Approval → Executor → 2/2 → READY_VERIFIED`**. Run the drift exercise only in your new disposable lab. If you already have a healthy `wjax-nginx`, inspect it and skip the drift/recovery exercise unless you deliberately choose to run a new rehearsal; setup never resets it.
 
@@ -69,7 +69,7 @@ The install supplies Colima and the Docker client. `colima start` allocates four
 ```bash
 git clone https://github.com/openkubes/ok-console.git
 cd ok-console
-git switch docs/wjax-agentic-operations-tutorial
+git switch main
 pnpm install --frozen-lockfile
 ```
 

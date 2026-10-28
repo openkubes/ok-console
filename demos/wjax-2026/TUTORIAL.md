@@ -377,6 +377,8 @@ On a newly approved execution, expect an evidence record like this (actual times
 
 The verifier performs read-only GETs with the dedicated Executor credential (it does not switch to the Reader identity). The verification correlates the latest `EXECUTOR_APPLIED` event with a prior matching human approval, then checks the Deployment UID, reconciled generation, two desired/ready/available replicas, and `nginx:1.27.5-alpine` image. When verification has already succeeded for the latest apply, `ALREADY_VERIFIED` is expected and no duplicate record is written.
 
+The separate verifier writes its final result to the terminal and `evidence.jsonl`; it does not add that record to the browser's event list. **Refresh live status** updates the observed replica counts, but the UI may still show `APPLY_SUBMITTED_NOT_READY` from the original execution even after verification succeeds. Use the CLI output and the evidence file for the final verification result.
+
 **Recorded in the local October 27, 2026 rehearsal:** generation `2/2`, desired/ready/available `2/2/2`, image match `true`, result `READY_VERIFIED`. The retained log contains proposal evaluation, human approval, apply submission and recovery verification in that order. This is evidence about a *specific local run*, not a claim of production-grade attestation.
 
 To inspect event types without displaying credentials:
@@ -384,8 +386,10 @@ To inspect event types without displaying credentials:
 ```bash
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
-path = Path('.wjax-local-runtime/evidence.jsonl')
+runtime = Path(os.environ.get('WJAX_DEMO_RUNTIME_DIR', '.wjax-local-runtime')).expanduser()
+path = runtime / 'evidence.jsonl'
 for line in path.read_text().splitlines()[-20:]:
     item = json.loads(line)
     print(item.get('event'), item.get('result', ''), item.get('digest', '')[:12])

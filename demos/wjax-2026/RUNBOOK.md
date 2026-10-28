@@ -1,7 +1,7 @@
 # OpenKubes — W-JAX 2026 Live Demo Runbook v1.0
 
 **Event:** W-JAX 2026 · **Presentation:** 3 November 2026
-**Repository:** `openkubes/ok-console` · **Branch baseline:** `feature/wjax-diagnostics-agent` · **Last verified commit:** `d25cfd8`
+**Repository:** `openkubes/ok-console` · **Branch baseline:** `main` · **Last verified commit:** `778841c` (28 October 2026)
 **Scope:** Local disposable kind cluster only. Not a production authorization service or OK-147 Runner.
 **Message:** **AI thinks. OpenKubes executes. Evidence proves.**
 
@@ -41,7 +41,9 @@ make wjax-demo-diagnose
 
 Expected: executor's named-deployment get/patch/update and namespace-scoped create are allowed; named delete, namespace delete, and patch on foreign deployments are denied. All **four** services report HTTP OK. Diagnostics reports **PASS** for the healthy subject and foreign-workload rejection.
 
-If the service is already running, **do not start a duplicate**: use `make wjax-demo-status`. To restart only launcher-owned services, use `make wjax-demo-stop` and then repeat check/start. If the executor token has expired, run `make wjax-demo-auth` and repeat the preflight; this requests a token for the *existing* demo ServiceAccount using the configured local issuer context.
+If the service is already running, **do not start a duplicate**: use `make wjax-demo-status`. To restart only launcher-owned services, use `make wjax-demo-stop` and then repeat check/start.
+
+For expired credentials, follow the [tutorial's new-session procedure](TUTORIAL.md#expired-credentials-and-service-troubleshooting): select a new private runtime directory, provision both the Reader and Executor, then restart the services with that directory exported. This preserves the previous credentials and evidence. `make wjax-demo-auth` is an explicit Executor-only rotation that replaces the token in its existing file; it does not renew the Reader. Use it only when that rotation is intended.
 
 ### 1.3 Browser tabs (open in advance)
 
@@ -118,13 +120,17 @@ make wjax-demo-verify
 
 On a *new* approved execution, the verifier waits up to 90 seconds and appends `RECOVERY_VERIFIED` only if it observes a matching deployment UID, reconciled generation, image `nginx:1.27.5-alpine`, desired `2`, ready `2`, and available `2`. If a prior success already belongs to the **latest** `EXECUTOR_APPLIED`, it prints `ALREADY_VERIFIED` and does not duplicate the terminal event.
 
+The separate verifier writes its final result to the terminal and `evidence.jsonl`; it does not add that record to the browser's event list. **Refresh live status** updates the observed replica counts, but the UI may still show `APPLY_SUBMITTED_NOT_READY` from the original execution even after verification succeeds. Use the CLI output and the evidence file for the final verification result.
+
 Inspect without revealing credentials:
 
 ```bash
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
-p = Path('.wjax-local-runtime/evidence.jsonl')
+runtime = Path(os.environ.get('WJAX_DEMO_RUNTIME_DIR', '.wjax-local-runtime')).expanduser()
+p = runtime / 'evidence.jsonl'
 allowed = {'PROPOSAL_EVALUATED', 'HUMAN_APPROVED', 'EXECUTOR_APPLIED', 'KUBERNETES_OBSERVED', 'RECOVERY_VERIFIED', 'RECOVERY_VERIFICATION_FAILED'}
 for line in p.read_text().splitlines()[-40:]:
     item = json.loads(line)
@@ -143,7 +149,8 @@ In the Agentic browser UI, click **Try forbidden production request**. Expect a 
 
 | Symptom | Safe response | What to say |
 |---|---|---|
-| `make wjax-demo-check` fails for token/RBAC | Run `make wjax-demo-auth`, then repeat `make wjax-demo-check`. Never replace demo kubeconfig with the admin kubeconfig. | “Executor credentials are constrained and must pass a preflight.” |
+| Expired Reader or Executor credentials | Follow the [tutorial's new-session procedure](TUTORIAL.md#expired-credentials-and-service-troubleshooting) to provision both identities in a new private runtime directory, restart the services, then repeat `make wjax-demo-check` and `make wjax-demo-diagnose`. `make wjax-demo-auth` only rotates the Executor token. Never replace a demo kubeconfig with the admin kubeconfig. | “Reader and Executor credentials are separate and must both remain valid.” |
+| RBAC checks fail with valid credentials | Inspect the reported permissions against the checked-in demo Roles and RoleBindings. Token rotation does not repair an RBAC mismatch. | “The demo must pass its bounded-permission checks before execution.” |
 | Ollama not reachable / `/api/propose` returns `AI_UNAVAILABLE` | Check `ollama list` and whether its local service is running. Do not claim an AI result. If not quickly recoverable, show the already collected prior evidence and explain the expected flow. | “A failed AI assessment cannot bypass policy.” |
 | Drift changes to `0/0`, but the live reader or diagnostics does not update | Retry **Refresh live status**, `make wjax-demo-status` and `make wjax-demo-diagnose`; show the exact `kubectl --context kind-wjax-demo` result. | “Read-side availability is separate from the policy-controlled execution path.” |
 | Proposal denied or model returns an unexpected candidate | Do **not** change candidate, policy, or approval tokens by hand. Explain the fail-closed behavior; use the known baseline or a backup screenshot for the remainder. | “Unexpected model output is not trusted.” |
@@ -179,8 +186,8 @@ Make sure the laptop is powered, the local Ollama model is cached, the demo brow
 
 ## 5. Release and documentation notes
 
-- This runbook documents the known, locally verified flow at `d25cfd8`; it does not imply the current branch was merged into `main`.
-- Existing `demos/wjax-2026/README.md` contains **legacy standalone** setup instructions (`./setup.sh`, credential location, port `8787`); for the integrated portable demo, **follow this runbook and root `Makefile` instead**. The readme can be refreshed in a separate documentation-only change.
+- This runbook follows the integrated lab on `main`, with the recovery flow locally verified at `778841c` on 28 October 2026. The frozen `wjax-2026-demo-v1.0` tag remains a historical snapshot.
+- The [demo README](README.md) points to [TUTORIAL.md](TUTORIAL.md) for fresh-clone setup. Use this runbook for rehearsals and the repository-root `Makefile` for the integrated local services.
 - `make wjax-demo-verify` is a separate manual verification step. The demo's read-only provider is **not** a deployed kagent integration, and `MANUAL_REVIEW_REQUIRED` is advisory, not an autonomous execution authorization.
 - Do not confuse the bounded local ServiceAccount with an enterprise-level authorization policy or signed evidence.
 

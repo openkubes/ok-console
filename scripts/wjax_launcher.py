@@ -119,7 +119,7 @@ def executor_check():
         else:
             # kubectl auth can-i may return exit code 0 for "no"; inspect response.
             actual = result.returncode == 0 and result.stdout.strip() == 'yes'
-        if actual != expected or (not expected and result.returncode not in (0, 1)):
+        if actual != expected or (not expected and (result.returncode not in (0, 1) or result.stdout.strip() != 'no')):
             failures.append(f'{label}: expected {"yes" if expected else "no"}, got {result.stdout.strip() or result.stderr.strip() or "command failed"}')
         else:
             print(f'  {label}: PASS')
@@ -135,6 +135,14 @@ def refresh_executor_auth():
     """Explicit token rotation only. No role, workload or context changes."""
     if not EXECUTOR_CONFIG.is_file():
         print(f'Executor kubeconfig missing: {EXECUTOR_CONFIG}', file=sys.stderr)
+        return 1
+    # Validate the exact local issuer before TokenRequest (a Kubernetes mutation).
+    if EXECUTOR_CONFIG.is_symlink() or KUBE_CONTEXT != 'kind-wjax-demo':
+        print('Refusing symlinked credentials or a foreign issuer context', file=sys.stderr)
+        return 1
+    guard = run_command([sys.executable, str(DEMO / 'setup_identity.py'), 'validate'])
+    if guard.returncode:
+        print('Local kind validation failed; no token requested', file=sys.stderr)
         return 1
     # Ensure issuer context is available before requesting a token.
     try:

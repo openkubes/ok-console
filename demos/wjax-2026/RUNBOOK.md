@@ -186,7 +186,9 @@ git ls-files | grep -E '(^|/)(\.demo-kubeconfig\.json|evidence\.jsonl)$' \
   || echo 'PASS: runtime files not tracked'
 ```
 
-Both demo tokens are requested for eight hours; server policy may shorten that lifetime. Provision a fresh stage session shortly before the talk and rerun `make wjax-demo-check` and `make wjax-demo-diagnose` immediately before going on stage. Do not rely on tokens created the evening before.
+Both demo tokens are requested for eight hours; server policy may shorten that lifetime. Provision a fresh stage session shortly before the talk using the [tutorial's new-session procedure](TUTORIAL.md#expired-credentials-and-service-troubleshooting). Do not rely on tokens created the evening before.
+
+After provisioning, keep the same `WJAX_DEMO_RUNTIME_DIR` exported and run `make wjax-demo-stop`, then `make wjax-demo` to restart the services with the new session. The Reader and demo Executor select their kubeconfig paths at startup; `make wjax-demo-check` validates the selected runtime directory but does not change the paths used by running services. After the restart, run `make wjax-demo-check` and `make wjax-demo-diagnose` immediately before going on stage.
 
 Make sure the laptop is powered, the local Ollama model is cached, the demo browser tabs are open, terminal history does not show tokens, and no update/rebuild is running. **Do not delete the kind cluster or the evidence log before the talk.**
 

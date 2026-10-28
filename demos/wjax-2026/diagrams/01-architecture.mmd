@@ -1,0 +1,13 @@
+flowchart TD
+  K["kind / nginx Deployment"] --> R["Read-only Kubernetes Reader"]
+  R --> D["Local Python Diagnostics Provider"]
+  D --> A["Ollama Assessment: advisory only"]
+  A -. "Manual handoff" .-> I["Human-initiated intent"]
+  I --> P["Ollama candidate proposal"]
+  P --> V{"Deterministic policy"}
+  V -->|Denied| X["No execution"]
+  V -->|Allowed| H["Explicit human approval"]
+  H --> E["Namespace-bounded executor"]
+  E --> K
+  K --> O["Independent read-only verification"]
+  O --> L["Local JSONL evidence"]

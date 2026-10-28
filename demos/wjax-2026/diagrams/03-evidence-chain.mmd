@@ -1,0 +1,7 @@
+flowchart TD
+  P["PROPOSAL_EVALUATED\nCandidate digest"] --> A["HUMAN_APPROVED\nSame digest"]
+  A --> X["EXECUTOR_APPLIED\nKubernetes observation"]
+  X --> R["Recovery verifier\nRead-only kubectl"]
+  R --> V{"UID / generation / replicas / image match?"}
+  V -->|Yes| Y["RECOVERY_VERIFIED"]
+  V -->|No| N["RECOVERY_VERIFICATION_FAILED"]

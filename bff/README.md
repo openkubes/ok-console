@@ -297,6 +297,7 @@ The real-source path consumes the versioned read-only query envelope
 `observed.openkubes.io/v0alpha2` / `ConsoleObservedState`. Every cluster,
 capability, placement and evidence object carries `ownership`
 (`environmentId`, `tenantId`), and metrics arrive as one bucket per owner.
+Ownership must contain exactly `environmentId` and `tenantId`; unknown ownership keys are rejected.
 The BFF rejects an envelope with missing or inconsistent ownership, duplicate
 ids or unresolved or cross-owner references, then filters every object to the
 tenants the session may see (its tenants intersected with

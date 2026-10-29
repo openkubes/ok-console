@@ -46,10 +46,10 @@ export const overviewProjection = (snapshot) => ({
   workloadClaims: { ...snapshot.metrics.workloadClaims },
   openFindings: { ...snapshot.metrics.openFindings },
   managementPlane: optionalClusterSummary(snapshot.clusters.find((cluster) => cluster.role === 'Management plane')),
-  recentPlacements: snapshot.placements.map((placement) => ({
+  recentPlacements: snapshot.placements.filter((placement) => snapshot.clusters.some((cluster) => cluster.id === placement.targetClusterId)).map((placement) => ({
     id: placement.id,
     name: placement.name,
-    targetCluster: placement.targetCluster,
+    targetCluster: snapshot.clusters.find((cluster) => cluster.id === placement.targetClusterId)?.name,
     readiness: placement.readiness,
     evidenceId: placement.evidenceId,
   })),

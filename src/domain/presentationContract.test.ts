@@ -9,6 +9,7 @@ import contractIncompatible from '../../contracts/presentation/v0alpha1/examples
 import schema from '../../contracts/presentation/v0alpha1/schema.json'
 import {
   PRESENTATION_CONTRACT_VERSION,
+  CONSOLE_ERROR_REASONS,
   validateConsoleResponse,
 } from './presentationContract'
 
@@ -34,6 +35,21 @@ describe('Presentation Contract v0alpha1', () => {
     const apiVersion = schema.$defs.apiVersion as { const: string }
     expect(apiVersion.const).toBe(PRESENTATION_CONTRACT_VERSION)
     expect(schema.$id).toContain('/console/v0alpha1/')
+  })
+
+  it('accepts optional safe source reasons and declares their closed schema enum', () => {
+    const reasons = CONSOLE_ERROR_REASONS
+    expect(schema.$defs.errorResponse.properties.error.properties.reason.enum).toEqual(reasons)
+    expect(schema.$defs.errorResponse.properties.error.required).not.toContain('reason')
+    for (const reason of reasons) {
+      expect(validateConsoleResponse({ ...sourceUnavailable, error: { ...sourceUnavailable.error, reason } })).toEqual({ valid: true, errors: [] })
+    }
+  })
+
+  it.each(['UNKNOWN_REASON', 'password=canary-private /secret/cert.pem', 42, {}, null, undefined])('rejects invalid optional error reasons %#', (reason) => {
+    const result = validateConsoleResponse({ ...sourceUnavailable, error: { ...sourceUnavailable.error, reason } })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('error.reason is not supported')
   })
 
   it('fails closed for an unknown contract version', () => {

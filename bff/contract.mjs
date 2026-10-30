@@ -57,6 +57,7 @@ export const errorResponse = (code, message, retryable, correlationId, extra = {
     message,
     retryable,
     ...(extra.retryAfterSeconds ? { retryAfterSeconds: extra.retryAfterSeconds } : {}),
+    ...(extra.reason ? { reason: extra.reason } : {}),
     ...(extra.details?.length ? { details: extra.details } : {}),
   },
   meta: { contractVersion: CONTRACT_VERSION, correlationId },

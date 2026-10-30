@@ -1,39 +1,33 @@
 // @vitest-environment node
+import './test-fixtures/failureCapture'
 
+import { X509Certificate } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:https'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
 import { createObservedStateSource } from './source.mjs'
+import { issueTestCertificate } from './test-fixtures/certificates.mjs'
+import { classifySourceFailure } from './adapters/sourceFailure.mjs'
 
 const root = mkdtempSync(join(tmpdir(), 'ok-console-mtls-'))
 let server: Server
 let port: number
-
 const openssl = (...arguments_: string[]) => execFileSync('openssl', arguments_, { stdio: 'ignore' })
 
 const issue = (name: string, ca: string, usage: string, san: string) => {
   openssl('genrsa', '-out', join(root, `${name}.key`), '2048')
   openssl('req', '-new', '-key', join(root, `${name}.key`), '-subj', `/CN=${name}`, '-out', join(root, `${name}.csr`))
-  writeFileSync(join(root, `${name}.ext`), `extendedKeyUsage=${usage}\nsubjectAltName=${san}\n`, 'utf8')
-  openssl(
-    'x509', '-req', '-in', join(root, `${name}.csr`),
-    '-CA', join(root, `${ca}.crt`), '-CAkey', join(root, `${ca}.key`),
-    '-CAcreateserial', '-days', '1', '-sha256', '-extfile', join(root, `${name}.ext`),
-    '-out', join(root, `${name}.crt`),
-  )
+  issueTestCertificate({ root, name, issuer: ca, extensions: `extendedKeyUsage=${usage}\nsubjectAltName=${san}\n` })
 }
 
 const createCa = (name: string) => {
   openssl('genrsa', '-out', join(root, `${name}.key`), '2048')
-  openssl(
-    'req', '-x509', '-new', '-key', join(root, `${name}.key`), '-sha256', '-days', '1',
-    '-subj', `/CN=${name}`, '-addext', 'basicConstraints=critical,CA:TRUE',
-    '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-out', join(root, `${name}.crt`),
-  )
+  openssl('req', '-new', '-key', join(root, `${name}.key`), '-subj', `/CN=${name}`, '-out', join(root, `${name}.csr`))
+  issueTestCertificate({ root, name, issuer: name, selfSigned: true, extensions: 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' })
 }
 
 beforeAll(async () => {
@@ -91,7 +85,10 @@ describe('observed-state mTLS client profile', () => {
   it('presents the Console workload identity and verifies the producer', async () => {
     const snapshot = await createObservedStateSource(environment(), {
       now: () => new Date('2026-08-21T18:01:00Z'),
-    }).readSnapshot()
+    }).readSnapshot().catch((error: unknown) => {
+      console.error(JSON.stringify({ test: 'verified-mtls-source', ...classifySourceFailure(error) }))
+      throw error
+    })
 
     expect(snapshot.sourceRevision).toBe('kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633')
     expect(snapshot.clusters[0].name).toBe('ok-mgmt')
@@ -107,4 +104,19 @@ describe('observed-state mTLS client profile', () => {
     await expect(createObservedStateSource(untrusted).readSnapshot()).rejects.toThrow()
     await expect(createObservedStateSource(environment('127.0.0.1')).readSnapshot()).rejects.toThrow()
   })
+})
+
+it('gives every observed-state TLS fixture a wide validity margin', () => {
+  const now = Date.now()
+  for (const name of ['trusted-ca', 'rogue-ca', 'localhost', 'console-bff']) {
+    const cert = new X509Certificate(readFileSync(join(root, name + '.crt')))
+    expect(Date.parse(cert.validFrom), name).toBeLessThan(now - 3600000)
+    expect(Date.parse(cert.validTo), name).toBeGreaterThan(now + 3600000)
+  }
+})
+
+it('rejects generated healthy fixtures that lack the shared validity margin', () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2080-01-01T00:00:00Z'))
+  try { expect(() => issue('margin-invalid', 'trusted-ca', 'serverAuth', 'DNS:localhost')).toThrow('Healthy fixture lacks the required validity margin.') }
+  finally { clock.mockRestore() }
 })

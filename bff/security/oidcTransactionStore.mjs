@@ -1,3 +1,4 @@
+import { pgQuery } from './pgFailure.mjs'
 import { randomBytes } from 'node:crypto'
 import { digestSessionValue, opaqueSessionValue, validSessionString } from './session.mjs'
 
@@ -29,8 +30,8 @@ const validPayload = (value) => value
   && validSessionString(value.nonce)
 
 export class OidcTransactionStoreError extends Error {
-  constructor() {
-    super('OIDC transaction store operation failed.')
+  constructor(cause) {
+    super('OIDC transaction store operation failed.', { cause })
     this.name = 'OidcTransactionStoreError'
   }
 }
@@ -51,7 +52,7 @@ export class PostgresOidcTransactionStore {
     try {
       const reference = opaqueSessionValue(this.random)
       const envelope = this.codec.encrypt(payload)
-      await this.pool.query(`
+      await pgQuery(this.pool, `
         INSERT INTO ok_console.oidc_transactions (
           transaction_digest, payload_envelope, key_id, deployment_epoch, expires_at
         ) VALUES ($1, $2, $3, $4, clock_timestamp() + make_interval(secs => $5))`, [
@@ -59,8 +60,8 @@ export class PostgresOidcTransactionStore {
         this.deploymentEpoch, TRANSACTION_LIFETIME_SECONDS,
       ])
       return { cookie: oidcTransactionCookie(reference) }
-    } catch {
-      throw new OidcTransactionStoreError()
+    } catch (error) {
+      throw new OidcTransactionStoreError(error)
     }
   }
 
@@ -68,7 +69,7 @@ export class PostgresOidcTransactionStore {
     const reference = readCookie(cookieHeader)
     if (!reference) return null
     try {
-      const result = await this.pool.query(`
+      const result = await pgQuery(this.pool, `
         DELETE FROM ok_console.oidc_transactions
         WHERE transaction_digest = $1
           AND deployment_epoch = $2
@@ -81,15 +82,15 @@ export class PostgresOidcTransactionStore {
       })
       if (!validPayload(payload)) throw new OidcTransactionStoreError()
       return payload
-    } catch {
-      throw new OidcTransactionStoreError()
+    } catch (error) {
+      throw new OidcTransactionStoreError(error)
     }
   }
 
   async purgeExpired(limit = 500) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new OidcTransactionStoreError()
     try {
-      const result = await this.pool.query(`
+      const result = await pgQuery(this.pool, `
         DELETE FROM ok_console.oidc_transactions
         WHERE transaction_digest IN (
           SELECT transaction_digest FROM ok_console.oidc_transactions
@@ -97,8 +98,8 @@ export class PostgresOidcTransactionStore {
           ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED
         )`, [limit])
       return result.rowCount ?? 0
-    } catch {
-      throw new OidcTransactionStoreError()
+    } catch (error) {
+      throw new OidcTransactionStoreError(error)
     }
   }
 }

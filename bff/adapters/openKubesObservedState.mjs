@@ -423,9 +423,38 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
     if (!sameOwnership(reference.ownership, item.ownership)) throw new Error('Observed state contains a cross-owner Evidence reference.')
   }
 
-  const ageMs = now().getTime() - observedTime
+  const nowMs = now().getTime()
+  const ageMs = nowMs - observedTime
   if (ageMs < -MAX_FUTURE_SKEW_MS) throw new Error('Observed-state timestamp is too far in the future.')
   const stale = ageMs > staleAfterMs
+  const validEvidence = evidence.filter((item) => timestamp(item.observedAt))
+  for (const item of validEvidence) {
+    const itemAgeMs = nowMs - Date.parse(item.observedAt)
+    item.freshness = stale || itemAgeMs < -MAX_FUTURE_SKEW_MS
+      || (item.classification === 'Current' && itemAgeMs > staleAfterMs) ? 'Stale' : 'Current'
+  }
+  const affectedTenants = new Set(evidence.filter((item) => !timestamp(item.observedAt) || item.freshness === 'Stale').map((item) => item.ownership.tenantId))
+  for (const bucket of metrics) {
+    if (stale || affectedTenants.has(bucket.ownership.tenantId)) {
+      for (const category of ['capabilities', 'workloadClaims']) {
+        for (const field of ['ready', 'pending', 'failed', 'unknown']) bucket[category][field] = null
+      }
+      bucket.openFindings.total = null
+      bucket.openFindings.critical = null
+    }
+  }
+  const currentEvidenceIds = new Set(validEvidence.filter((item) => item.freshness === 'Current').map((item) => item.id))
+  const downgradeReadiness = (item) => {
+    if (!currentEvidenceIds.has(item.evidenceId)) item.readiness = 'Unknown'
+  }
+  for (const cluster of clusters) {
+    downgradeReadiness(cluster)
+    if (!currentEvidenceIds.has(cluster.evidenceId)) {
+      for (const stage of cluster.lifecycle) stage.state = 'Unknown'
+    }
+    cluster.capabilities.forEach(downgradeReadiness)
+  }
+  placements.forEach(downgradeReadiness)
   if (Object.prototype.hasOwnProperty.call(metadata, 'partial') && typeof metadata.partial !== 'boolean') {
     throw new ObservedStateContractError('$.metadata.partial must be a boolean when present.')
   }
@@ -442,7 +471,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
     placements,
     // Validate the complete identity/ownership graph above, then make only invalid
     // Evidence unavailable. Existing references resolve to 404, never fabricated time.
-    evidence: evidence.filter((item) => timestamp(item.observedAt)),
+    evidence: validEvidence,
     sourceHealth: {
       freshness: stale ? 'Stale' : 'Current',
       warnings: [

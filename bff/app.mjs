@@ -110,6 +110,18 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
   let freshness = snapshot.sourceHealth?.freshness ?? 'Current'
 
   if (failure === 'stale') {
+    snapshot = structuredClone(snapshot)
+    for (const cluster of snapshot.clusters) {
+      cluster.readiness = 'Unknown'
+      for (const capability of cluster.capabilities) capability.readiness = 'Unknown'
+      for (const stage of cluster.lifecycle) stage.state = 'Unknown'
+    }
+    for (const placement of snapshot.placements) placement.readiness = 'Unknown'
+    for (const category of ['capabilities', 'workloadClaims']) {
+      for (const field of ['ready', 'pending', 'failed', 'unknown']) snapshot.metrics[category][field] = null
+    }
+    snapshot.metrics.openFindings.total = null
+    snapshot.metrics.openFindings.critical = null
     freshness = 'Stale'
     warnings.push({ code: 'SOURCE_STALE', message: 'The local failure injector marked this observation stale.' })
   }
@@ -151,10 +163,16 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     const id = decodeURIComponent(evidenceMatch[1])
     const evidence = snapshot.evidence.find((item) => item.id === id)
     if (!evidence) throw new ConsoleBffError(404, 'NOT_FOUND', 'The requested evidence reference was not found.')
+    const evidenceStale = freshness === 'Stale' || evidence.freshness === 'Stale'
     const evidenceMeta = responseMeta({
       ...meta,
       observedAt: evidence.observedAt,
-      warnings: [...warnings, { code: 'REDACTED', message: 'Private evidence payload is not included in the presentation response.' }],
+      freshness: evidenceStale ? 'Stale' : 'Current',
+      warnings: [
+        ...warnings,
+        ...(evidence.freshness === 'Stale' && freshness === 'Current' ? [{ code: 'SOURCE_STALE', message: 'This Evidence is outside the configured freshness window.' }] : []),
+        { code: 'REDACTED', message: 'Private evidence payload is not included in the presentation response.' },
+      ],
     })
     return successResponse('EvidenceReference', evidenceProjection(evidence), evidenceMeta)
   }

@@ -49,6 +49,8 @@ const listen = async (server: Server) => {
 
 const observedEnvelope = async (metadata: JsonRecord = {}) => {
   const fixture = await fixtureSource.readSnapshot()
+  // Internal consumer verdicts are not fields in the producer query contract.
+  for (const item of fixture.evidence) delete item.freshness
   return {
     apiVersion: 'observed.openkubes.io/v0alpha2',
     kind: 'ConsoleObservedState',
@@ -203,6 +205,7 @@ describe('OpenKubes observed-state query adapter', () => {
 
   it('preserves metric buckets and unavailable metric leaves', async () => {
     const envelope = await observedEnvelope() as unknown as MutableEnvelope
+    for (const item of envelope.data.evidence) item.observedAt = envelope.metadata.observedAt
     envelope.data.metrics[0].capabilities = {
       total: null,
       ready: 0,
@@ -503,10 +506,10 @@ describe('OpenKubes observed-state query adapter', () => {
       item.id = evidenceIds.get(item.id)!
       item.clusterId = clusterIds.get(item.clusterId)!
     }
-    const snapshot = normalizeOpenKubesObservedState(envelope)
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now: () => new Date(envelope.metadata.observedAt) })
     expect(snapshot.clusters).toEqual(envelope.data.clusters)
     expect(snapshot.placements).toEqual(envelope.data.placements)
-    expect(snapshot.evidence).toEqual(envelope.data.evidence)
+    expect(snapshot.evidence).toEqual(envelope.data.evidence.map((item, index) => ({ ...item, freshness: index === 3 ? 'Stale' : 'Current' })))
   })
 
   it.each(['evidenceId', 'clusterId', 'targetClusterId'])('rejects keyword-named dangling %s on raw values', async (field) => {
@@ -720,8 +723,8 @@ const startGoldenBff = (source: OpenKubesObservedStateAdapter) => startBff(sourc
 }))
 const golden = async (mode = 'hosting-external') => {
   const fixtures = JSON.parse(await readFile(new URL('./openKubesObservedState.fixtures.json', import.meta.url), 'utf8'))
-  expect(fixtures.producerRevision).toBe('ad351c9')
-  expect(fixtures.producerSha256).toBe('b0eed6638f4065123e91b8f761dee3b8f8c3f7327b032d207dca730599371359')
+  expect(fixtures.producerRevision).toBe('1b0739f')
+  expect(fixtures.producerSha256).toBe('e798f2dca87405ef9dfc93dd81c519396d5252f2ff678602304788261c8ccf39')
   return structuredClone(fixtures.snapshots[mode])
 }
 const parentAt = (object: JsonRecord, path: string) => {
@@ -757,14 +760,31 @@ const displayCases = [
 ] as const
 
 describe('typed producer output contract', () => {
+  it('G3 real producer hosting-external output ages external Evidence at the default threshold with an offset clock', async () => {
+    const envelope = await golden('hosting-external')
+    // 90 seconds after the producer finished, expressed with a real UTC offset.
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now: () => new Date('2026-10-22T14:01:34+02:00') })
+    expect(snapshot.sourceHealth.freshness).toBe('Current')
+    // Synthetic read-start times from test-fixtures/regenerate-observed-state.py's 2 s step clock.
+    expect(snapshot.observedAt).toBe('2026-10-22T12:00:04Z')
+    expect(snapshot.evidence.filter((item: JsonRecord) => item.clusterId === 'cluster-ok-shared')
+      .map((item: JsonRecord) => item.observedAt)).toEqual(['2026-10-22T12:00:00Z', '2026-10-22T12:00:02Z'])
+    expect(snapshot.clusters.map((item: JsonRecord) => [item.name, item.readiness])).toEqual([
+      ['ok-mgmt', 'Unknown'], ['ok-shared', 'Ready'], ['ok-ai', 'Unknown'], ['ok-infra', 'Unknown'],
+    ])
+    expect(snapshot.evidence.filter((item: JsonRecord) => item.source === 'Operator-provided read-only observation bundle')
+      .map((item: JsonRecord) => item.freshness)).toEqual(['Stale', 'Stale', 'Stale'])
+    expect(snapshot.placements[0].readiness).toBe('Ready')
+  })
+
   it.each(['hosting-cluster', 'hosting-external', 'kubevirt-claims'])('accepts pinned producer %s with no grammar withholding', async (mode) => {
     const envelope = await golden(mode)
-    const snapshot = normalizeOpenKubesObservedState(envelope, { now: () => new Date(envelope.metadata.observedAt) })
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now: () => new Date(envelope.metadata.observedAt), staleAfterMs: 30 * 86400000 })
     expect(JSON.stringify(snapshot)).not.toContain(withheld)
     expect(snapshot.evidence).toHaveLength(envelope.data.evidence.length)
     for (const field of ['clusters', 'placements', 'environment'] as const) expect(snapshot[field]).toEqual(envelope.data[field])
     for (const [index, evidence] of snapshot.evidence.entries()) {
-      expect(evidence).toEqual({ ...envelope.data.evidence[index], summary: 'Evidence summary withheld by the Console redaction boundary.', redacted: true })
+      expect(evidence).toEqual({ ...envelope.data.evidence[index], summary: 'Evidence summary withheld by the Console redaction boundary.', redacted: true, freshness: 'Current' })
     }
     const bff = await startGoldenBff(new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now: () => new Date(envelope.metadata.observedAt) }))
     for (const path of ['session', 'overview', 'clusters', ...snapshot.evidence.map((item: JsonRecord) => `evidence/${item.id}`)]) {
@@ -931,7 +951,7 @@ describe('typed producer output contract', () => {
     const yaml = await readFile(new URL('../deploy/kubernetes/overlays/ok-shared-live/producer-cluster-observations.yaml', import.meta.url), 'utf8')
     const observations = JSON.parse(yaml.split('observations.json: |\n')[1])
     const envelope = await golden()
-    const snapshot = normalizeOpenKubesObservedState(envelope)
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now: () => new Date(envelope.metadata.observedAt), staleAfterMs: 30 * 86400000 })
     for (const item of observations.clusters) {
       expect(item).not.toHaveProperty('revision')
       const cluster = snapshot.clusters.find((cluster: JsonRecord) => cluster.name === item.name)

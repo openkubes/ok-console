@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
+import { accessSync, constants } from 'node:fs'
 import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -242,17 +243,77 @@ case "\${1:-}" in
 esac
 `
 
+const findExecutable = (name: string) => {
+  for (const directory of (process.env.PATH ?? '').split(':')) {
+    const candidate = join(directory, name)
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Continue searching PATH when this entry is missing or not executable.
+    }
+  }
+  return undefined
+}
+
+const resolveExecutable = (name: string) => {
+  const candidate = findExecutable(name)
+  if (!candidate) throw new Error(`Required host executable is unavailable: ${name}`)
+  return candidate
+}
+
+const timeoutStub = `#!${process.execPath}
+const fs = require('node:fs')
+const { spawn } = require('node:child_process')
+const args = process.argv.slice(2)
+const duration = args.find((value) => /^\\d+s$/.test(value))
+if (duration === '29s' && process.env.KUBECTL_SCENARIO === 'main-capture-helper-fail') {
+  fs.writeFileSync(process.env.CAPTURE_OUTER_MARKER, 'outer-helper-failed\\n')
+  process.exit(42)
+}
+if (duration === '29s') fs.appendFileSync(process.env.CAPTURE_OUTER_MARKER, 'capture-started\\n')
+if (!duration) process.exit(125)
+const nativeTimeout = ${JSON.stringify(findExecutable('timeout') ?? '')}
+if (nativeTimeout) {
+  const native = spawn(nativeTimeout, args, { stdio: 'inherit' })
+  native.on('error', () => process.exit(127))
+  native.on('close', (code, signal) => process.exit(code ?? (signal ? 128 : 0)))
+} else {
+const command = args.slice(args.indexOf(duration) + 1)
+if (!command.length) process.exit(125)
+const child = spawn(command[0], command.slice(1), { stdio: 'inherit' })
+let timedOut = false
+let killTimer
+const timeout = setTimeout(() => {
+  timedOut = true
+  child.kill('SIGTERM')
+  killTimer = setTimeout(() => child.kill('SIGKILL'), 1000)
+}, Number(duration.slice(0, -1)) * 1000)
+child.on('error', () => process.exit(127))
+child.on('close', (code, signal) => {
+  clearTimeout(timeout)
+  clearTimeout(killTimer)
+  process.exit(timedOut ? 124 : (code ?? (signal ? 128 : 0)))
+})
+}
+`
+
 const createIsolatedToolDirectory = async (name: string, omitted: string) => {
   const directory = join(fixtureDirectory, name)
   await mkdir(directory)
   const tools = new Map([
-    ['bash', '/bin/bash'],
-    ['dirname', '/usr/bin/dirname'],
-    ['mktemp', '/usr/bin/mktemp'],
-    ['rm', '/usr/bin/rm'],
-    ['sed', '/usr/bin/sed'],
-    ['grep', '/usr/bin/grep'],
-    ['awk', '/usr/bin/awk'],
+    ['bash', resolveExecutable('bash')],
+    ['node', process.execPath],
+    ['dirname', resolveExecutable('dirname')],
+    ['mktemp', resolveExecutable('mktemp')],
+    ['rm', resolveExecutable('rm')],
+    ['sed', resolveExecutable('sed')],
+    ['grep', resolveExecutable('grep')],
+    ['awk', resolveExecutable('awk')],
+    ['head', resolveExecutable('head')],
+    ['date', resolveExecutable('date')],
+    ['wc', resolveExecutable('wc')],
+    ['cat', resolveExecutable('cat')],
     ['docker', join(fixtureDirectory, 'docker')],
     ['kind', join(fixtureDirectory, 'kind')],
     ['kubectl', join(fixtureDirectory, 'kubectl')],
@@ -268,6 +329,9 @@ const createIsolatedToolDirectory = async (name: string, omitted: string) => {
 }
 
 beforeAll(async () => {
+  const bash = await exec('bash', ['-c', 'printf "%s.%s\\n" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'])
+  const [bashMajor, bashMinor] = bash.stdout.trim().split('.').map(Number)
+  expect(bashMajor > 4 || (bashMajor === 4 && bashMinor >= 4), `Tests require Bash 4.4 or newer; found ${bash.stdout.trim()}. On macOS install Homebrew Bash and put it first on PATH.`).toBe(true)
   fixtureDirectory = await mkdtemp(join(tmpdir(), 'ok-console-ok200-'))
   const files = new Map([
     ['kubectl', kubectlStub],
@@ -277,17 +341,7 @@ beforeAll(async () => {
     ['git', gitStub],
     ['curl', curlStub],
     ['capture-recorder', captureRecorderStub],
-    ['timeout', `#!/usr/bin/env bash
-set -Eeuo pipefail
-if [[ "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
-  printf 'capture-started\\n' >> "\${CAPTURE_OUTER_MARKER}"
-fi
-if [[ "\${KUBECTL_SCENARIO}" == main-capture-helper-fail && "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
-  printf 'outer-helper-failed\\n' >"\${CAPTURE_OUTER_MARKER}"
-  exit 42
-fi
-exec /usr/bin/timeout "$@"
-`],
+    ['timeout', timeoutStub],
     ['sleep', '#!/usr/bin/env bash\nif [[ "${KUBECTL_SCENARIO}" == main-forward-exit ]]; then /bin/sleep 0.1; fi\n'],
   ])
   await Promise.all([...files].map(([name, contents]) => writeFile(join(fixtureDirectory, name), contents)))
@@ -414,6 +468,18 @@ const runMain = async (
 const cleanupFailureArtifact = async (failure: { stderr?: string }) => {
   const directory = failure.stderr?.match(/^Failure diagnostics: (.+)$/m)?.[1]
   if (directory) await rm(directory, { recursive: true, force: true })
+}
+
+const procCountersAvailable = () => {
+  if (process.platform === 'darwin') return false
+  if (process.platform !== 'linux') throw new Error(`Unsupported test platform for OK-200 capture: ${process.platform}`)
+  const source = process.env.OK200_PROC_NET_NETSTAT || '/proc/net/netstat'
+  try {
+    accessSync(source, constants.R_OK)
+    return true
+  } catch {
+    return false
+  }
 }
 
 const expectNoKubectlOrDockerCalls = async (env: NodeJS.ProcessEnv) => {
@@ -670,8 +736,13 @@ main "$@"
       expect(capture).toContain('error: kubectl was unable to forward the requested port (details omitted)')
       expect(capture).not.toMatch(/planted-|Authorization|https:|apiVersion/i)
       const netstat = await readFile(join(directory!, 'netstat.txt'), 'utf8')
-      expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
-      expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      if (procCountersAvailable()) {
+        expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+        expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      } else {
+        expect(netstat).toMatch(/^start TcpExt ListenOverflows=unavailable ListenDrops=unavailable$/m)
+        expect(netstat).toMatch(/^delta TcpExt ListenOverflows=unavailable ListenDrops=unavailable$/m)
+      }
       await cleanupFailureArtifact(failure)
     })
   })

@@ -43,7 +43,7 @@ capture_failure() {
     return 0
   fi
   if [[ -x "${failure_capture_helper}" ]]; then
-    failure_artifact_dir="$(mktemp -d -t ok-console-ok200-failure.XXXXXX 2>/dev/null)"
+    failure_artifact_dir="$(mktemp -d "${TMPDIR:-/tmp}/ok-console-ok200-failure.XXXXXX" 2>/dev/null)"
     if [[ -n "${failure_artifact_dir}" ]]; then
       timeout --signal=TERM --kill-after=1s 29s "${failure_capture_helper}" capture \
         "${failure_artifact_dir}" \
@@ -246,8 +246,8 @@ main() {
   expected_revision="${OK_CONSOLE_EXPECTED_REVISION:-${source_revision}}"
   default_image="ok-console:ok-169-${short_revision}"
   candidate_image="${OK_CONSOLE_IMAGE:-${default_image}}"
-  rendered_manifest="$(mktemp -t ok-console-ok169.XXXXXX.yaml)"
-  port_forward_log="$(mktemp -t ok-console-ok169-port-forward.XXXXXX.log)"
+  rendered_manifest="$(mktemp "${TMPDIR:-/tmp}/ok-console-ok169.yaml.XXXXXX")"
+  port_forward_log="$(mktemp "${TMPDIR:-/tmp}/ok-console-ok169-port-forward.log.XXXXXX")"
 [[ -x "${failure_capture_helper}" ]] || {
   echo 'Required local Kind failure-capture helper is missing or not executable.' >&2
   exit 1

@@ -13,6 +13,14 @@ const jsonResponse = (body: unknown, status = 200) =>
   })
 
 describe('BffConsoleAdapter', () => {
+  it.each(['Current', 'Stale'] as const)('maps Evidence freshness %s into the browser model', async freshness => {
+    const response = structuredClone(evidenceReference)
+    response.meta.freshness = freshness
+    const fetcher = vi.fn(async () => jsonResponse(response)) as typeof fetch
+    expect(await new BffConsoleAdapter('/api/console/v0', fetcher).getEvidence(response.data.id))
+      .toMatchObject({ outcome: response.data.outcome, freshness })
+  })
+
   it('labels hosting deployment placements as observations and loads their evidence', async () => {
     const overview = structuredClone(platformOverview)
     overview.data.recentPlacements = [{

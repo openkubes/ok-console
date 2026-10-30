@@ -3,8 +3,10 @@ import { OpenKubesObservedStateAdapter } from './adapters/openKubesObservedState
 import { createObservedStateMtlsFetchFromFiles } from './adapters/mtlsFetch.mjs'
 
 const positiveInteger = (value, fallback, name) => {
-  const parsed = Number.parseInt(value ?? String(fallback), 10)
+  const text = value ?? String(fallback)
+  const parsed = /^[0-9]+$/.exec(text)?.[0] === text ? Number(text) : NaN
   if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${name} must be a positive integer.`)
+  if (parsed > 2147483647) throw new Error(`${name} must be at most 2147483647.`)
   return parsed
 }
 

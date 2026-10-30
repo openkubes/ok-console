@@ -15,7 +15,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   if (cluster) {
     const evidence = data.evidence.find((item) => item.id === cluster.evidenceId)
     return {
-      text: `${cluster.name} is currently shown as ${cluster.readiness}. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's current observation.${evidence ? ` Evidence: ${evidence.title} (${evidence.outcome}).` : ''}`,
+      text: `${cluster.name} is currently shown as ${cluster.readiness}. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's current observation.${evidence ? ` Evidence: ${evidence.title} (${evidence.freshness === 'Stale' ? `Last observed: ${evidence.outcome}` : evidence.outcome}).` : ''}`,
       evidence,
     }
   }
@@ -23,7 +23,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   const ready = data.clusters.filter((item) => item.readiness === 'Ready').length
   const nonReady = data.clusters.length - ready
   return {
-    text: `The Console currently observes ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${(data.freshness ?? 'Unknown').toLowerCase()}.${data.warnings?.length ? ` Note: ${data.warnings[0]}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
+    text: `The Console currently observes ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${(data.evidence.some((item) => item.freshness === 'Stale') ? 'Stale' : data.freshness ?? 'Unknown').toLowerCase()}.${data.warnings?.length ? ` Note: ${data.warnings[0]}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
   }
 }
 

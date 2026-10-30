@@ -1,12 +1,12 @@
 {
-  "producerRevision": "ad351c9",
-  "producerSha256": "b0eed6638f4065123e91b8f761dee3b8f8c3f7327b032d207dca730599371359",
+  "producerRevision": "1b0739f",
+  "producerSha256": "e798f2dca87405ef9dfc93dd81c519396d5252f2ff678602304788261c8ccf39",
   "snapshots": {
     "hosting-cluster": {
       "apiVersion": "observed.openkubes.io/v0alpha2",
       "kind": "ConsoleObservedState",
       "metadata": {
-        "observedAt": "2026-10-22T12:00:00Z",
+        "observedAt": "2026-10-22T12:00:04Z",
         "sourceRevision": "kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633",
         "partial": true
       },
@@ -172,7 +172,7 @@
             "clusterId": "cluster-ok-shared",
             "contract": "Deployment/apps/v1",
             "revision": "resourceVersion:31452633;replicas:2/2",
-            "observedAt": "2026-10-22T12:00:00Z",
+            "observedAt": "2026-10-22T12:00:02Z",
             "source": "Authenticated hosting-cluster Kubernetes API",
             "summary": "Available replicas: 2; desired replicas: 2.",
             "classification": "Current",
@@ -188,7 +188,7 @@
       "apiVersion": "observed.openkubes.io/v0alpha2",
       "kind": "ConsoleObservedState",
       "metadata": {
-        "observedAt": "2026-10-22T12:00:00Z",
+        "observedAt": "2026-10-22T12:00:04Z",
         "sourceRevision": "kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633",
         "partial": true
       },
@@ -411,7 +411,7 @@
             "clusterId": "cluster-ok-shared",
             "contract": "Deployment/apps/v1",
             "revision": "resourceVersion:31452633;replicas:2/2",
-            "observedAt": "2026-10-22T12:00:00Z",
+            "observedAt": "2026-10-22T12:00:02Z",
             "source": "Authenticated hosting-cluster Kubernetes API",
             "summary": "Available replicas: 2; desired replicas: 2.",
             "classification": "Current",
@@ -461,7 +461,7 @@
       "apiVersion": "observed.openkubes.io/v0alpha2",
       "kind": "ConsoleObservedState",
       "metadata": {
-        "observedAt": "2026-10-22T12:00:00Z",
+        "observedAt": "2026-10-22T12:00:02Z",
         "sourceRevision": "kubevirtclusterclaims:42",
         "partial": true
       },
@@ -607,7 +607,7 @@
             "clusterId": "cluster-worker-east",
             "contract": "KubeVirtClusterClaim/v1alpha1",
             "revision": "resourceVersion:43",
-            "observedAt": "2026-10-22T11:00:00Z",
+            "observedAt": "2026-10-22T12:00:00Z",
             "source": "OpenKubes management-plane Kubernetes API",
             "summary": "The OpenKubes cluster Claim reports Ready=True.",
             "classification": "Current",

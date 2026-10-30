@@ -76,6 +76,7 @@ const evidenceFromContract = (response: EvidenceReferenceResponse): EvidenceRef 
   observedAt: response.data.observedAt,
   source: response.data.source,
   summary: response.data.summary,
+  freshness: response.meta.freshness,
   immutable: response.data.classification === 'Immutable',
 })
 

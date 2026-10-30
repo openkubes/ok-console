@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto'
+import { boundedCorrelation, boundedMs, currentLifecycle, startErrorCode } from '../diagnostics.mjs'
+import { pgQuery, pgConnect } from './pgFailure.mjs'
 import { SECURITY_CONTRACT_VERSION, authorizeSecurityContext } from './authorization.mjs'
 import { SessionEnvelopeError } from './envelope.mjs'
 import {
@@ -21,8 +23,8 @@ const ACTIVE_PREDICATE = `
   AND absolute_expires_at > clock_timestamp()`
 
 export class SessionStoreError extends Error {
-  constructor(code) {
-    super('Console session store operation failed.')
+  constructor(code, cause) {
+    super('Console session store operation failed.', { cause })
     this.name = 'SessionStoreError'
     this.code = code
   }
@@ -98,8 +100,10 @@ const publicIssue = ({ values, context, maxAgeSeconds }) => ({
 
 const normalizeStoreFailure = (error) => {
   if (error instanceof SessionStoreError) return error
-  if (error?.code === '23505') return new SessionStoreError('SESSION_COLLISION')
-  return new SessionStoreError('STORE_UNAVAILABLE')
+  if (error?.code === '23505') return new SessionStoreError('SESSION_COLLISION', error)
+  const failure = new SessionStoreError('STORE_UNAVAILABLE', error)
+  if (error?.step === 'SESSION_ROTATE_COMMIT' || error?.step === 'SESSION_REVOKE_COMMIT') failure.step = error.step
+  return failure
 }
 
 export class PostgresSessionStore {
@@ -128,11 +132,11 @@ export class PostgresSessionStore {
     validateSessionCreationInput({ subject, scope, permissions })
     assertStoreInput({ authorizationRevision, deploymentEpoch: this.deploymentEpoch })
     try {
-      const clock = await this.pool.query('SELECT clock_timestamp() AS database_now')
+      const clock = await pgQuery(this.pool, 'SELECT clock_timestamp() AS database_now')
       const lifetime = this.lifetimesFor(subject.method)
       const values = issueValues({ random: this.random, lifetime, databaseNow: clock.rows[0].database_now })
       const envelope = this.codec.encrypt({ subject, scope, permissions })
-      const result = await this.pool.query(`
+      const result = await pgQuery(this.pool, `
         INSERT INTO ok_console.sessions (
           session_digest, session_family_digest, context_envelope, key_id, csrf_digest,
           authentication_method, authorization_revision, deployment_epoch,
@@ -164,7 +168,7 @@ export class PostgresSessionStore {
     const digest = digestSessionValue(sessionId)
     try {
       const result = touch
-        ? await this.pool.query(`
+        ? await pgQuery(this.pool, `
           UPDATE ok_console.sessions
           SET idle_expires_at = LEAST(
             clock_timestamp() + make_interval(secs => idle_lifetime_ms / 1000.0),
@@ -172,7 +176,7 @@ export class PostgresSessionStore {
           )
           WHERE ${ACTIVE_PREDICATE}
           RETURNING *`, [digest, this.deploymentEpoch])
-        : await this.pool.query(`
+        : await pgQuery(this.pool, `
           SELECT * FROM ok_console.sessions
           WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch])
       return result.rows[0] ? rowContext(result.rows[0], this.codec) : null
@@ -184,17 +188,18 @@ export class PostgresSessionStore {
   async rotate(cookieHeader) {
     const oldSessionId = readSessionCookie(cookieHeader)
     if (!oldSessionId) return null
-    const client = await this.pool.connect().catch((error) => { throw normalizeStoreFailure(error) })
+    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
+    let failure
     try {
-      await client.query('BEGIN')
-      const selected = await client.query(`
+      await pgQuery(client, 'BEGIN')
+      const selected = await pgQuery(client, `
         SELECT *, clock_timestamp() AS database_now
         FROM ok_console.sessions
         WHERE ${ACTIVE_PREDICATE}
         FOR UPDATE`, [digestSessionValue(oldSessionId), this.deploymentEpoch])
       const row = selected.rows[0]
       if (!row) {
-        await client.query('ROLLBACK')
+        await pgQuery(client, 'ROLLBACK')
         return null
       }
       const oldContext = rowContext(row, this.codec)
@@ -207,11 +212,11 @@ export class PostgresSessionStore {
       const csrfToken = opaqueSessionValue(this.random)
       const newDigest = digestSessionValue(newSessionId)
       const envelope = this.codec.encrypt(payload)
-      await client.query(`
+      await pgQuery(client, `
         UPDATE ok_console.sessions
         SET revoked_at = clock_timestamp(), revoke_reason = 'ROTATED'
         WHERE session_digest = $1`, [row.session_digest])
-      const inserted = await client.query(`
+      const inserted = await pgQuery(client, `
         INSERT INTO ok_console.sessions (
           session_digest, session_family_digest, context_envelope, key_id, csrf_digest,
           authentication_method, authorization_revision, deployment_epoch,
@@ -231,16 +236,19 @@ export class PostgresSessionStore {
         row.idle_expires_at,
         row.absolute_expires_at,
       ])
-      await client.query('COMMIT')
+      await pgQuery(client, 'COMMIT').catch((error) => {
+        error.step = 'SESSION_ROTATE_COMMIT'
+        throw error
+      })
       const values = { sessionId: newSessionId, csrfToken }
       const context = rowContext(inserted.rows[0], this.codec)
       const remainingSeconds = Math.max(0, Math.floor((asDate(row.absolute_expires_at).getTime() - asDate(row.database_now).getTime()) / 1_000))
       return publicIssue({ values, context, maxAgeSeconds: remainingSeconds })
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {})
+      failure = error
       throw normalizeStoreFailure(error)
     } finally {
-      client.release()
+      client.release(failure)
     }
   }
 
@@ -248,30 +256,34 @@ export class PostgresSessionStore {
     const sessionId = readSessionCookie(cookieHeader)
     if (!sessionId) return false
     if (!validSessionString(reason)) throw new SessionStoreError('INVALID_INPUT')
-    const client = await this.pool.connect().catch((error) => { throw normalizeStoreFailure(error) })
+    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
+    let failure
     try {
-      await client.query('BEGIN')
-      const selected = await client.query(`
+      await pgQuery(client, 'BEGIN')
+      const selected = await pgQuery(client, `
         SELECT session_family_digest
         FROM ok_console.sessions
         WHERE session_digest = $1 AND deployment_epoch = $2
         FOR UPDATE`, [digestSessionValue(sessionId), this.deploymentEpoch])
       if (!selected.rows[0]) {
-        await client.query('ROLLBACK')
+        await pgQuery(client, 'ROLLBACK')
         return false
       }
-      await client.query(`
+      await pgQuery(client, `
         UPDATE ok_console.sessions
         SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
             revoke_reason = COALESCE(revoke_reason, $2)
         WHERE session_family_digest = $1`, [selected.rows[0].session_family_digest, reason])
-      await client.query('COMMIT')
+      await pgQuery(client, 'COMMIT').catch((error) => {
+        error.step = 'SESSION_REVOKE_COMMIT'
+        throw error
+      })
       return true
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {})
+      failure = error
       throw normalizeStoreFailure(error)
     } finally {
-      client.release()
+      client.release(failure)
     }
   }
 
@@ -301,9 +313,10 @@ export class PostgresSessionStore {
   }
 
   async purgeExpired(limit = 500) {
+    const started = performance.now()
     if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new SessionStoreError('INVALID_INPUT')
     try {
-      const result = await this.pool.query(`
+      const result = await pgQuery(this.pool, `
         DELETE FROM ok_console.sessions
         WHERE session_digest IN (
           SELECT session_digest
@@ -318,7 +331,11 @@ export class PostgresSessionStore {
         RETURNING session_digest`, [limit])
       return result.rowCount ?? 0
     } catch (error) {
-      throw normalizeStoreFailure(error)
+      const lifecycle = currentLifecycle()
+      console.error(JSON.stringify({ stage: lifecycle?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(lifecycle?.correlationId), event: 'SESSION_FAILED', cause: 'SESSION_PURGE', errorCode: startErrorCode(error), elapsedMs: boundedMs(performance.now() - started) }))
+      const failure = normalizeStoreFailure(error)
+      lifecycle?.recordFailure(failure)
+      throw failure
     }
   }
 }

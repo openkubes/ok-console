@@ -222,3 +222,16 @@ cosign verify \
 
 A mutable discovery tag is never a deployment identity. Publication here means
 **development candidate**, not stable or production-ready release.
+
+## PostgreSQL query deadlines
+
+PostgreSQL client reads use `OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS` (default statement timeout + `1000` ms,
+integer `250..61000` ms; explicit values must exceed statement timeout), passed as pg `query_timeout`. This bounds queries even
+when the server stops responding after startup. Server-side
+`OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS` determines the default client timeout
+by adding 1000 ms; an explicit client timeout must exceed it. Pool acquisition uses
+`OK_CONSOLE_POSTGRES_CONNECT_TIMEOUT_MS`; idle connections use
+`OK_CONSOLE_POSTGRES_IDLE_TIMEOUT_MS`, and `OK_CONSOLE_POSTGRES_POOL_MAX` bounds
+pool slots, including in-flight connects. See the BFF diagnostic vocabulary for
+`PG_QUERY_TIMEOUT` (no reply within query_timeout), `PG_STATEMENT_TIMEOUT`
+(SQLSTATE 57014), `PG_CONNECT_TIMEOUT` and `PG_POOL_TIMEOUT`.

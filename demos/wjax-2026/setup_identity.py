@@ -147,6 +147,13 @@ def remove_owned_file(directory, name, original):
         os.unlink(name, dir_fd=directory)
 
 
+def token_duration():
+    value = os.environ.get('WJAX_TOKEN_DURATION', '72h')
+    if value not in ('8h', '24h', '48h', '72h'):
+        raise ValueError('WJAX_TOKEN_DURATION must be 8h, 24h, 48h or 72h')
+    return value
+
+
 def setup(identity):
     path = output_path(identity)
     legacy = (HERE / '.demo-kubeconfig.json' if identity == 'executor'
@@ -169,7 +176,7 @@ def setup(identity):
             manifest = HERE / ('rbac.yaml' if identity == 'executor' else 'reader/rbac.yaml')
             run(['kubectl', '--context', CONTEXT, '-n', NS, 'apply', '-f', str(manifest)])
             sa = 'wjax-demo-executor' if identity == 'executor' else 'wjax-console-reader'
-            token = run(['kubectl', '--context', CONTEXT, '-n', NS, 'create', 'token', sa, '--duration=8h'])
+            token = run(['kubectl', '--context', CONTEXT, '-n', NS, 'create', 'token', sa, '--duration=' + token_duration()])
             if not token:
                 raise RuntimeError('TokenRequest returned an empty token')
             cfg = {'apiVersion': 'v1', 'kind': 'Config',
@@ -192,7 +199,7 @@ def setup(identity):
         if fd is not None:
             os.close(fd)
         os.close(directory)
-    print(f'{identity} setup PASS: {path} (requested token duration: 8h)')
+    print(f'{identity} setup PASS: {path} (requested token duration: {token_duration()})')
     print('No application Deployment was modified.')
 
 

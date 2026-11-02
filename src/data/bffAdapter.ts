@@ -5,6 +5,7 @@ import type {
   ConsoleErrorResponse,
   EvidenceReferenceResponse,
   PlatformOverviewResponse,
+  ClusterDetailResponse,
 } from '../domain/presentationContract'
 import {
   PRESENTATION_CONTRACT_VERSION,
@@ -12,19 +13,6 @@ import {
 } from '../domain/presentationContract'
 import type { Cluster, ConsoleDataPort, EvidenceRef, PlatformSnapshot } from '../domain/contracts'
 import { curatedAgents } from './agentCatalog'
-
-const observedKagentDeployment = {
-  id: 'agent-deployment-kagent-cluster-inspector',
-  name: 'cluster-inspector',
-  agentId: 'agent-kagent-platform-operator',
-  agentName: 'Kagent Platform Operator',
-  version: 'v0.9.12',
-  cluster: 'ok-kagent',
-  namespace: 'kagent',
-  readiness: 'Ready' as const,
-  authority: 'diagnostics.read',
-  evidenceId: 'ev-kagent-cluster-inspector-ready',
-}
 
 type FetchLike = typeof fetch
 
@@ -168,53 +156,36 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       presentationVersion: PRESENTATION_CONTRACT_VERSION,
       source: 'bff',
       freshness: overview.meta.freshness,
+      clusterListFreshness: clusters.meta.freshness,
       warnings: [
         ...(overview.meta.warnings?.map((warning) => warning.message) ?? []),
         ...(unavailableEvidence > 0 ? [`${unavailableEvidence} evidence reference${unavailableEvidence === 1 ? '' : 's'} could not be loaded (${[...new Set(evidenceFailures)].join(', ')}).`] : []),
       ],
       overview: overview.data,
-      clusters: clusters.data.items.map(clusterFromSummary),
+      clusters: clusters.data.items.map(cluster => ({ ...clusterFromSummary(cluster), freshness: clusters.meta.freshness })),
       capabilities: [],
       claims: overview.data.recentPlacements.map((placement) => ({
         id: placement.id,
         name: placement.name,
         kind: placement.id.startsWith('observed-deployment-') ? 'Observed Deployment' : 'WorkloadClaim',
         owner: placement.id.startsWith('observed-deployment-') ? 'Hosting cluster' : 'Platform team',
-        intent: placement.id.startsWith('observed-deployment-') ? 'Current Kubernetes Deployment observed through the hosting-cluster API.' : 'Read-only placement projection',
+        intent: placement.id.startsWith('observed-deployment-') ? 'Kubernetes Deployment observed through the hosting-cluster API.' : 'Read-only placement projection',
         targetCluster: placement.targetCluster,
         readiness: placement.readiness,
         requiredCapabilities: [],
         decision: `Observed placement on ${placement.targetCluster}`,
         evidenceId: placement.evidenceId,
       })),
-      agents: curatedAgents,
-      agentDeployments: [observedKagentDeployment],
-      evidence: [
-        ...evidence.filter((item): item is EvidenceRef => item !== undefined),
-        {
-          id: 'ev-kagent-cluster-inspector-ready',
-          title: 'Kagent cluster inspector readiness',
-          type: 'Observation',
-          outcome: 'Ready',
-          cluster: 'ok-kagent',
-          contract: 'agents.openkubes.io/v1alpha1',
-          revision: 'kagent:0.9.12;deployment:cluster-inspector',
-          observedAt: overview.meta.observedAt,
-          source: 'Operator-provided Kagent observation',
-          summary: 'The cluster-inspector Agent is Ready on the dedicated ok-kagent cluster with read-only diagnostics authority.',
-          immutable: false,
-        },
-      ],
+      agents: curatedAgents.map(agent => ({ ...agent, deployments: 0 })),
+      agentDeployments: [],
+      evidence: evidence.filter((item): item is EvidenceRef => item !== undefined),
     }
   }
 
   async getCluster(id: string): Promise<Cluster | undefined> {
     try {
-      const response = await this.request<{
-        kind: 'ClusterDetail'
-        data: ClusterDetailData
-      }>(`/clusters/${encodeURIComponent(id)}`, 'ClusterDetail')
-      return clusterFromDetail(response.data)
+      const response = await this.request<ClusterDetailResponse>(`/clusters/${encodeURIComponent(id)}`, 'ClusterDetail')
+      return { ...clusterFromDetail(response.data), freshness: response.meta.freshness }
     } catch (error) {
       if (error instanceof ConsoleDataError && error.code === 'NOT_FOUND') return undefined
       throw error

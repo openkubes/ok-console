@@ -40,6 +40,7 @@ export interface Capability {
 }
 
 export interface Cluster {
+  freshness?: Freshness
   id: string
   name: string
   role: 'Management plane' | 'Infrastructure plane' | 'Workload cluster'
@@ -119,6 +120,7 @@ export interface PlatformSnapshot {
   presentationVersion: typeof PRESENTATION_CONTRACT_VERSION
   source?: 'fixture' | 'bff'
   freshness?: Freshness
+  clusterListFreshness?: Freshness
   warnings?: string[]
   overview?: PlatformOverviewData
   clusters: Cluster[]

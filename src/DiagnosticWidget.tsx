@@ -15,7 +15,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   if (cluster) {
     const evidence = data.evidence.find((item) => item.id === cluster.evidenceId)
     return {
-      text: `${cluster.name} is currently shown as ${cluster.readiness}. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's current observation.${evidence ? ` Evidence: ${evidence.title} (${evidence.freshness === 'Stale' ? `Last observed: ${evidence.outcome}` : evidence.outcome}).` : ''}`,
+      text: `${cluster.name} is currently shown as ${cluster.readiness}. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidence.title} (${evidence.freshness === 'Stale' ? `Last observed: ${evidence.outcome}` : evidence.outcome}).` : ''}`,
       evidence,
     }
   }

@@ -183,6 +183,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .tabs button { padding: 10px 13px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; }
 .tabs button.active { border-bottom-color: var(--blue); color: var(--blue); }
 .detail-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 15px; }
+.observation-label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.observation-label .live-dot { flex-shrink: 0; }
 .live-label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .lifecycle { margin-top: 12px; }
 .lifecycle-step { position: relative; display: grid; grid-template-columns: 29px 1fr auto; gap: 11px; padding: 11px 0; }

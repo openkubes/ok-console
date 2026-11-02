@@ -13,7 +13,7 @@ const jsonResponse = (body: unknown, status = 200) =>
   })
 
 describe('BffConsoleAdapter', () => {
-  it.each(['Current', 'Stale'] as const)('maps Evidence freshness %s into the browser model', async freshness => {
+  it.each(['Current', 'Stale', 'Unknown'] as const)('maps Evidence freshness %s into the browser model', async freshness => {
     const response = structuredClone(evidenceReference)
     response.meta.freshness = freshness
     const fetcher = vi.fn(async () => jsonResponse(response)) as typeof fetch
@@ -51,6 +51,11 @@ describe('BffConsoleAdapter', () => {
     const snapshot = await adapter.getSnapshot()
 
     expect(snapshot.source).toBe('bff')
+    expect(snapshot.agentDeployments).toEqual([])
+    expect(snapshot.evidence.map(item => item.id)).toEqual([evidenceReference.data.id, evidenceReference.data.id, evidenceReference.data.id])
+    expect(snapshot.agents.every(agent => agent.deployments === 0)).toBe(true)
+    expect(snapshot.clusterListFreshness).toBe(clusterList.meta.freshness)
+    expect(snapshot.clusters[0].freshness).toBe(clusterList.meta.freshness)
     expect(snapshot.overview?.clusters.total).toBe(4)
     expect(snapshot.clusters.map((cluster) => cluster.name)).toEqual(['ok-mgmt', 'edge-07'])
     expect(snapshot.clusters[0]).toMatchObject({ role: 'Management plane', version: 'v1.32.6', capabilityCount: 4 })
@@ -68,6 +73,7 @@ describe('BffConsoleAdapter', () => {
     const cluster = await adapter.getCluster('cluster-ok-ai')
 
     expect(cluster).toMatchObject({
+      freshness: clusterDetail.meta.freshness,
       name: 'ok-ai',
       version: 'v1.32.6',
       capabilities: ['cap-observability'],

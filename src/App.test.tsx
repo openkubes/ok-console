@@ -435,8 +435,8 @@ describe('OpenKubes Console', () => {
       expect(screen.queryByText('Endpoint observed through the management plane')).not.toBeInTheDocument()
       release()
       if (status === 'resolved') {
-        expect(await screen.findByText('Endpoint observed through the management plane')).toBeInTheDocument()
-        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0)
+        expect(await screen.findByText('Last observed: Endpoint observed through the management plane')).toBeInTheDocument()
+        expect(document.querySelector('.title-actions .status')).toHaveTextContent('Unknown')
         expect(screen.getByText(/rev-new/)).toBeInTheDocument()
       } else {
         expect(await screen.findByRole('alert')).toHaveTextContent('Cluster detail is unavailable')
@@ -510,7 +510,7 @@ describe('OpenKubes Console', () => {
     expect(screen.getByRole('dialog', { name: 'OK AI Diagnostic preview' })).toBeInTheDocument()
     expect(screen.getByText(/no live AI service or cluster actions are connected/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
-    expect(await screen.findByText(/ok-shared is currently shown as Pending/i)).toBeInTheDocument()
+    expect(await screen.findByText(/ok-shared: Fixture snapshot.*Last observed: Pending/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /View evidence · Shared services convergence/i }))
     expect(await screen.findByRole('heading', { name: 'Shared services convergence' })).toBeInTheDocument()
   })

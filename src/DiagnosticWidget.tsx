@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { EvidenceRef, PlatformSnapshot } from './domain/contracts'
+import { clusterPresentation, evidencePresentation, overviewPresentation } from './observationPresentation'
 
 interface Message {
   id: number
@@ -12,29 +13,40 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   const normalized = question.toLowerCase()
   const cluster = data.clusters.find((item) => normalized.includes(item.name.toLowerCase()))
 
+  const summary = overviewPresentation(data)
   if (cluster) {
-    const evidence = data.evidence.find((item) => item.id === cluster.evidenceId)
+    const evidence = data.evidence.find((item) => item.id === cluster.evidenceId && (item.cluster === cluster.id || item.cluster === cluster.name))
+    const presentation = clusterPresentation(cluster, data)
+    const basis = evidence && evidencePresentation(evidence, data.source !== 'bff')
     return {
-      text: `${cluster.name} is currently shown as ${cluster.readiness}. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidence.title} (${evidence.freshness === 'Stale' ? `Last observed: ${evidence.outcome}` : evidence.outcome}).` : ''}`,
+      text: `${cluster.name}: ${presentation.current && !summary.current ? 'Last observed' : presentation.label}. ${presentation.current && summary.current ? cluster.readiness : `Last observed: ${cluster.readiness}` }. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidence.title} (${basis?.current && summary.current ? evidence.outcome : `${basis?.current ? 'Last observed' : basis?.label}; last observed outcome: ${evidence.outcome}`} ).` : ''}`,
       evidence,
     }
   }
 
-  const ready = data.clusters.filter((item) => item.readiness === 'Ready').length
+  const ready = data.clusters.filter((item) => item.readiness === 'Ready' && clusterPresentation(item, data).current).length
   const nonReady = data.clusters.length - ready
   return {
-    text: `The Console currently observes ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${(data.evidence.some((item) => item.freshness === 'Stale') ? 'Stale' : data.freshness ?? 'Unknown').toLowerCase()}.${data.warnings?.length ? ` Note: ${data.warnings[0]}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
+    text: `The Console displays ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${summary.current ? 'current' : summary.label.replace(/\.$/, '')}.${data.warnings?.length ? ` Note: ${data.warnings[0]}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
   }
 }
 
 export default function DiagnosticWidget({ data, openEvidence }: { data: PlatformSnapshot; openEvidence: (item: EvidenceRef) => void }) {
+  const summary = overviewPresentation(data)
+  const rank = summary.verdict === 'Unknown' ? 3 : summary.verdict === 'Stale' ? 2 : summary.current ? 0 : 1
+  const [previousRank, setPreviousRank] = useState(rank)
   const [isOpen, setIsOpen] = useState(false)
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState<Message[]>([{
     id: 0,
     role: 'assistant',
-    text: 'Hi, I’m the OK AI Diagnostic preview. I can summarize the cluster observations and evidence currently shown in this Console. I’m read-only; no live AI service or cluster actions are connected.',
+    text: 'Hi, I’m the OK AI Diagnostic preview. I can summarize the cluster observations and evidence shown in this Console. I’m read-only; no live AI service or cluster actions are connected.',
   }])
+
+  if (rank !== previousRank) {
+    setPreviousRank(rank)
+    if (rank > previousRank) setMessages([{ id: 0, role: 'assistant', text: 'Earlier answers were cleared because the data they used is no longer current.' }])
+  }
 
   const ask = (value: string) => {
     const prompt = value.trim()

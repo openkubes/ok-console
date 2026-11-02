@@ -87,7 +87,7 @@ h3 { font-size: 17px; }
 .environment > span:last-child { display: flex; flex-direction: column; }
 .environment small { color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .environment strong { font-size: 11px; }
-.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(24,155,80,.12); }
+.live-dot, .session-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(24,155,80,.12); }
 .mobile-menu { display: none; border: 0; background: transparent; cursor: pointer; }
 .nav-scrim { display: none; }
 
@@ -184,7 +184,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .tabs button.active { border-bottom-color: var(--blue); color: var(--blue); }
 .detail-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 15px; }
 .observation-label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
-.observation-label .live-dot { flex-shrink: 0; }
+.observation-label .live-dot, .session-dot { flex-shrink: 0; }
 .live-label { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .lifecycle { margin-top: 12px; }
 .lifecycle-step { position: relative; display: grid; grid-template-columns: 29px 1fr auto; gap: 11px; padding: 11px 0; }

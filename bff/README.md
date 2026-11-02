@@ -474,7 +474,7 @@ failures carry the reached stage, correlation ID (or OTHER), fixed event
 OIDC_START_FAILED and a closed cause naming the start step: TRANSACTION_STORE,
 AUDIT, AUTHORIZATION_URL, PKCE or OTHER. Discovery runs only at startup. A separate
 errorCode selects the deepest defined own data code in a cycle-bounded chain of Error causes, retaining an outer code when deeper causes have none. Parsed IdP JSON is never followed as a cause or a source of codes:
-ECONNREFUSED, ENOTFOUND, EAI_AGAIN, ECONNRESET, 57P01, 53300, 28P01,
+ECONNREFUSED, ENOTFOUND, EAI_AGAIN, ECONNRESET, 53300, 28P01,
 PG_CONNECT_TIMEOUT, PG_CONNECTION_TERMINATED, PG_POOL_TIMEOUT, PG_QUERY_TIMEOUT, PG_STATEMENT_TIMEOUT, PG_LOCK_TIMEOUT, PG_IDLE_TRANSACTION_TIMEOUT,
 OAUTH_TIMEOUT, OAUTH_INVALID_RESPONSE, OAUTH_RESPONSE_BODY_ERROR,
 AUDIT_INPUT_INVALID, PG_UNIQUE_VIOLATION (23505), PG_CHECK_VIOLATION (23514),

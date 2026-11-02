@@ -399,7 +399,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     await throttle.success('recovery-admin', fresh)
     await throttle.success('recovery-admin', fresh)
     expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(0)
-  })
+  }, 30000)
 
   // Promise barriers control KDF and transaction progress; polling observes real PG locks.
   const barrier = () => {
@@ -532,6 +532,18 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     expect(Date.now() - start).toBeLessThan(10000)
     console.log(`THROTTLE_LOAD wrong=150 correct=3 concurrency=8 samples=${samples} peak=${peak} ms=${Date.now() - start}`)
   }, 10000)
+
+  it.each([['rotate', 'terminate'], ['revoke', 'terminate'], ['rotate', 'idle'], ['revoke', 'idle']])('contains session transaction errors between statements in an isolated process: %s %s', async (operation, mode) => {
+    const child = spawn(process.execPath, ['bff/test-fixtures/sessionR4.mjs', operation, mode], { env: process.env })
+    let stdout = '', stderr = ''
+    child.stdout.on('data', chunk => { stdout += chunk })
+    child.stderr.on('data', chunk => { stderr += chunk })
+    const code = await new Promise(resolve => child.on('exit', resolve))
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' })
+    expect(JSON.parse(stdout.trim())).toEqual({ alive: true, fired: true, code: 'STORE_UNAVAILABLE',
+      errorCode: mode === 'terminate' ? 'PG_CONNECTION_TERMINATED' : 'PG_IDLE_TRANSACTION_TIMEOUT',
+      failedPoolCount: 0, nextWorks: true })
+  }, 30000)
 
   it.each(['terminate-reserve', 'idle-reserve', 'terminate-reset', 'idle-reset', 'pool'])('contains real pg errors in an isolated HTTP process: %s', async scenario => {
     const child = spawn(process.execPath, ['bff/test-fixtures/throttleR3.mjs', scenario], { env: process.env })

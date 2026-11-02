@@ -31,12 +31,14 @@ const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [accou
 let handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.invalid' })
 let runtime
 if (scenario === 'pool') {
-  const files = { url: connectionString, keys: JSON.stringify({ key: Buffer.alloc(32, 1).toString('base64') }) }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(connectionString).hostname)
+  // The injected pool already owns transport. Supply a valid runtime profile for either host type.
+  const files = { url: connectionString, ca: 'test-only injected pool CA', keys: JSON.stringify({ key: Buffer.alloc(32, 1).toString('base64') }) }
   runtime = await createSessionRuntime({ env: {
     OK_CONSOLE_SESSION_STORE_MODE: 'postgres', OK_CONSOLE_ORIGIN: 'https://console.invalid', OK_CONSOLE_ENVIRONMENT_ID: 'prod',
     OK_CONSOLE_TENANT_ID: 'platform', OK_CONSOLE_SESSION_EPOCH: 'epoch', OK_CONSOLE_AUTHORIZATION_REVISION: 'revision',
     OK_CONSOLE_SESSION_ENVELOPE_PRIMARY_KEY_ID: 'key', OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE: '/keys', OK_CONSOLE_POSTGRES_URL_FILE: '/url',
-    OK_CONSOLE_POSTGRES_ALLOW_INSECURE_LOOPBACK: 'true',
+    OK_CONSOLE_POSTGRES_ALLOW_INSECURE_LOOPBACK: String(loopback), OK_CONSOLE_POSTGRES_CA_FILE: '/ca',
   }, fileReader: async path => Buffer.from(files[path.slice(1)]), poolFactory: () => pool })
   await pool.query('SELECT 1')
   const idle = await pool.connect(), pid = idle.processID

@@ -1,10 +1,11 @@
 // @vitest-environment node
+import { EventEmitter } from 'node:events'
 import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { createLocalAccessVerifier, PostgresLocalAccessThrottle } from './localAccess.mjs'
 
 const pepper = Buffer.alloc(32, 6)
-const fixture = ({ locked = 'both', updated = 'both', fail = '', timeout = '300' } = {}) => {
+const fixture = ({ locked = 'both', updated = 'both', fail = '', timeout = '300', lockTimeout = '0', idleTimeout = '0' } = {}) => {
   const queries: { sql: string, args: unknown[] }[] = []
   const release = vi.fn()
   const error = new Error('client failed')
@@ -12,17 +13,18 @@ const fixture = ({ locked = 'both', updated = 'both', fail = '', timeout = '300'
     queries.push({ sql, args })
     if (fail && sql.includes(fail)) throw error
     const keys = [throttle.digest('reader'), throttle.globalDigest()].sort()
-    if (sql.includes('pg_settings')) return { rows: [{ statement_timeout: timeout, now: '1700000000123456' }] }
+    if (sql.includes('pg_settings')) return { rows: [{ statement_timeout: timeout, lock_timeout: lockTimeout, idle_timeout: idleTimeout }] }
     const rows = (mode: string) => (mode === 'one' ? keys.slice(0, 1) : mode === 'foreign' ? [keys[0], 'foreign'] : mode === 'duplicate' ? [keys[0], keys[0]] : keys)
-      .map(principal_digest => ({ principal_digest, window: '1700000000123456', blocked: mode === 'blocked' }))
+      .map(principal_digest => ({ principal_digest, window: '1700000000123456', block_token: mode === 'blocked' ? '1800000000000000' : null }))
+    if (sql.includes('AS now')) return { rows: [{ now: '1700000000123456' }] }
     if (sql.includes('FOR UPDATE')) return { rows: rows(locked) }
     if (sql.includes('RETURNING')) return { rows: rows(updated), rowCount: updated === 'count' ? 1 : rows(updated).length }
     return { rows: [], rowCount: 0 }
   })
-  const client = { query, release }
+  const client = Object.assign(new EventEmitter(), { query, release })
   const pool = { query: vi.fn(async () => ({ rows: [] })), connect: vi.fn(async () => client) }
   const throttle = new PostgresLocalAccessThrottle({ pool, pepper })
-  return { throttle, queries, pool, release, error }
+  return { throttle, queries, pool, client, release, error }
 }
 
 describe('reservation exact-row and transaction guards', () => {
@@ -62,11 +64,57 @@ describe('reservation exact-row and transaction guards', () => {
   })
 
   it.each([
-    ['1', ['0ms', '0ms']], ['0', ['1000ms', '5000ms']], ['10000', ['1000ms', '5000ms']],
+    ['1', ['1ms', '1ms']], ['0', ['1000ms', '5000ms']], ['10000', ['1000ms', '5000ms']],
   ])('bounds transaction timeouts with statement_timeout=%s', async (timeout, expected) => {
     const { throttle, queries } = fixture({ timeout })
     await throttle.reserve('reader')
     expect(queries.find(q => q.sql.includes('set_config'))?.args).toEqual(expected)
+  })
+
+  it('preserves stricter server timeouts', async () => {
+    const { throttle, queries } = fixture({ timeout: '5000', lockTimeout: '60', idleTimeout: '120' })
+    await throttle.reserve('reader')
+    expect(queries.find(q => q.sql.includes('set_config'))?.args).toEqual(['60ms', '120ms'])
+  })
+
+  it.each(['SELECT', 'COMMIT', 'release'])('keeps the first asynchronous error through %s and removes its listener after release', async point => {
+    const { throttle, client, release } = fixture()
+    const failure = Object.assign(new Error('private'), { code: '25P03' })
+    if (point === 'release') release.mockImplementation(() => {
+      expect(client.listenerCount('error')).toBe(1)
+      client.emit('error', failure)
+    })
+    else throttle.afterStatement = async ({ sql }: { sql: string }) => {
+      if (sql.startsWith(point)) {
+        client.emit('error', failure)
+        throw new Error('generic later rejection')
+      }
+    }
+    await expect(throttle.reserve('reader')).rejects.toMatchObject({ code: 'PG_IDLE_TRANSACTION_TIMEOUT' })
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(client.listenerCount('error')).toBe(0)
+  })
+
+  it('refuses a resolved statement with a recorded error before transaction work continues', async () => {
+    const { throttle, client } = fixture()
+    const continuation = vi.fn()
+    throttle.afterStatement = async ({ sql }: { sql: string }) => {
+      if (sql === 'test statement') client.emit('error', Object.assign(new Error('idle'), { code: '25P03' }))
+    }
+    await expect(throttle.transaction(async (checked: { query: (sql: string) => Promise<unknown> }) => {
+      await checked.query('test statement')
+      continuation()
+    })).rejects.toMatchObject({ code: 'PG_IDLE_TRANSACTION_TIMEOUT' })
+    expect(continuation).not.toHaveBeenCalled()
+  })
+
+  it('sends no statement after a transaction has recorded an asynchronous failure', async () => {
+    const { throttle, client, queries } = fixture()
+    await expect(throttle.transaction(async (checked: { query: (sql: string) => Promise<unknown> }) => {
+      client.emit('error', Object.assign(new Error('terminated'), { code: '57P01' }))
+      await checked.query('must never be sent')
+    })).rejects.toMatchObject({ code: 'PG_CONNECTION_TERMINATED' })
+    expect(queries.some(q => q.sql === 'must never be sent')).toBe(false)
   })
 
   it('locks success in the same SQL order and refuses missing keys', async () => {

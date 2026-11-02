@@ -1,6 +1,6 @@
 import { createHmac, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
-import { pgConnect, pgQuery } from './pgFailure.mjs'
+import { classifyPgError, pgConnect, pgQuery } from './pgFailure.mjs'
 
 const scrypt = promisify(nodeScrypt)
 const KDF = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1_024 * 1_024 }
@@ -29,11 +29,13 @@ const holdsBoth = (result, digests) => result.rows.length === 2
   && result.rows.every(row => digests.includes(row.principal_digest))
 
 export class PostgresLocalAccessThrottle {
-  constructor({ pool, pepper }) {
+  constructor({ pool, pepper, afterStatement }) {
     if (typeof pool?.query !== 'function' || typeof pool?.connect !== 'function'
       || !Buffer.isBuffer(pepper) || pepper.length < 32) throw new LocalAccessError('INVALID_CONFIGURATION')
     this.pool = pool
     this.pepper = pepper
+    // Injection seam for scheduling failures; runtime configuration never supplies it.
+    this.afterStatement = afterStatement
   }
 
   digest(username) {
@@ -46,29 +48,50 @@ export class PostgresLocalAccessThrottle {
 
   async transaction(operation) {
     const client = await pgConnect(this.pool)
-    let failure
+    let failure, result
+    const recordFailure = error => { failure ??= classifyPgError(error) }
+    client.on('error', recordFailure)
+    const checked = { query: async (...args) => {
+      try {
+        if (failure) throw failure
+        const value = await pgQuery(client, ...args)
+        await this.afterStatement?.({ client, sql: args[0] })
+        if (failure) throw failure
+        return value
+      } catch (error) {
+        recordFailure(error)
+        throw failure
+      }
+    } }
     try {
-      await pgQuery(client, 'BEGIN ISOLATION LEVEL READ COMMITTED')
-      const settings = await pgQuery(client, `
+      await checked.query('BEGIN ISOLATION LEVEL READ COMMITTED')
+      const settings = await checked.query(`
         SELECT setting::bigint AS statement_timeout,
-          floor(extract(epoch FROM clock_timestamp()) * 1e6)::bigint AS now
+          (SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout') AS lock_timeout,
+          (SELECT setting::bigint FROM pg_settings WHERE name = 'idle_in_transaction_session_timeout') AS idle_timeout
         FROM pg_settings WHERE name = 'statement_timeout'`)
-      const { statement_timeout: statementTimeout, now } = settings.rows[0]
-      const cap = Number(statementTimeout) > 0 ? Number(statementTimeout) - 1 : Infinity
-      await pgQuery(client, `SELECT set_config('lock_timeout', $1, true),
+      const { statement_timeout: statementTimeout, lock_timeout: lockTimeout, idle_timeout: idleTimeout } = settings.rows[0]
+      const cap = Number(statementTimeout) > 0 ? Math.max(1, Number(statementTimeout) - 1) : Infinity
+      const configured = value => Number(value) > 0 ? Number(value) : Infinity
+      await checked.query(`SELECT set_config('lock_timeout', $1, true),
         set_config('idle_in_transaction_session_timeout', $2, true)`,
-      [`${Math.min(LOCK_TIMEOUT_MS, cap)}ms`, `${Math.min(IDLE_IN_TRANSACTION_TIMEOUT_MS, cap)}ms`])
-      const result = await operation(client, now)
-      // Only a normal blocked result uses ROLLBACK. Errors destroy the client:
-      // queuing another query after a client-side timeout can hang the pool.
-      await pgQuery(client, result?.blocked ? 'ROLLBACK' : 'COMMIT')
-      return result
+      [`${Math.min(LOCK_TIMEOUT_MS, cap, configured(lockTimeout))}ms`, `${Math.min(IDLE_IN_TRANSACTION_TIMEOUT_MS, cap, configured(idleTimeout))}ms`])
+      result = await operation(checked)
+      // Refused successes commit their global release; only a blocked reserve rolls back.
+      await checked.query(result?.blocked ? 'ROLLBACK' : 'COMMIT')
     } catch (error) {
-      failure = error
-      throw error
+      recordFailure(error)
     } finally {
-      client.release(failure)
+      try { client.release(failure) } catch (error) { recordFailure(error) }
+      finally { client.removeListener('error', recordFailure) }
     }
+    if (failure) throw failure
+    return result
+  }
+
+  async instant(client) {
+    const result = await pgQuery(client, `SELECT floor(extract(epoch FROM clock_timestamp()) * 1e6)::bigint AS now`)
+    return result.rows[0].now
   }
 
   async reserve(username) {
@@ -79,20 +102,21 @@ export class PostgresLocalAccessThrottle {
       SELECT principal_digest FROM ok_console.local_access_throttle
       WHERE principal_digest = ANY($1::text[]) AND blocked_until > clock_timestamp()`, [digests])
     if (precheck.rows.length) return { blocked: true }
-    return this.transaction(async (client, now) => {
+    return this.transaction(async (client) => {
       await pgQuery(client, `
         INSERT INTO ok_console.local_access_throttle
           (principal_digest, failures, window_started_at, blocked_until)
-        SELECT principal_digest, 0, to_timestamp($2::numeric / 1e6), NULL
+        SELECT principal_digest, 0, clock_timestamp(), NULL
         FROM unnest($1::text[]) AS input(principal_digest) ORDER BY principal_digest
-        ON CONFLICT (principal_digest) DO NOTHING`, [digests, now])
+        ON CONFLICT (principal_digest) DO NOTHING`, [digests])
       const prior = await pgQuery(client, `
-        SELECT principal_digest, blocked_until > to_timestamp($2::numeric / 1e6) AS blocked
+        SELECT principal_digest, floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token
         FROM ok_console.local_access_throttle
-        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests, now])
+        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
       // No retry: refuse before KDF if either expected row vanished or is foreign.
       if (!holdsBoth(prior, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-      if (prior.rows.some((row) => row.blocked)) return { blocked: true }
+      const now = await this.instant(client)
+      if (prior.rows.some(row => row.block_token != null && BigInt(row.block_token) > BigInt(now))) return { blocked: true }
       const lockedDigests = prior.rows.map(row => row.principal_digest)
       const reserved = await pgQuery(client, `
         UPDATE ok_console.local_access_throttle SET
@@ -101,9 +125,11 @@ export class PostgresLocalAccessThrottle {
           blocked_until = CASE WHEN (CASE WHEN window_started_at < to_timestamp($3::numeric / 1e6) - interval '15 minutes' THEN 1 ELSE failures + 1 END) >= CASE WHEN principal_digest = $2 THEN 50 ELSE 5 END THEN to_timestamp($3::numeric / 1e6) + interval '15 minutes' ELSE blocked_until END,
           updated_at = to_timestamp($3::numeric / 1e6)
         WHERE principal_digest = ANY($1::text[])
-        RETURNING principal_digest, floor(extract(epoch FROM window_started_at) * 1e6)::bigint AS window`, [lockedDigests, globalDigest, now])
+        RETURNING principal_digest, floor(extract(epoch FROM window_started_at) * 1e6)::bigint AS window,
+          floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token`, [lockedDigests, globalDigest, now])
       if (reserved.rowCount !== 2 || !holdsBoth(reserved, lockedDigests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-      return { blocked: false, globalWindow: reserved.rows.find((row) => row.principal_digest === globalDigest).window }
+      return { blocked: false, globalWindow: reserved.rows.find((row) => row.principal_digest === globalDigest).window,
+        principalBlock: reserved.rows.find(row => row.principal_digest !== globalDigest).block_token }
     })
   }
 
@@ -111,13 +137,18 @@ export class PostgresLocalAccessThrottle {
     const principalDigest = this.digest(username)
     const globalDigest = this.globalDigest()
     const digests = [principalDigest, globalDigest].sort()
-    return this.transaction(async (client, now) => {
+    return this.transaction(async (client) => {
       const locked = await pgQuery(client, `
-        SELECT principal_digest FROM ok_console.local_access_throttle
+        SELECT principal_digest, floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token
+        FROM ok_console.local_access_throttle
         WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
       if (!holdsBoth(locked, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-      // A correct credential resets this principal, including newer attempts.
-      await pgQuery(client, `UPDATE ok_console.local_access_throttle SET
+      const now = await this.instant(client)
+      const principal = locked.rows.find(row => row.principal_digest === principalDigest)
+      const refused = principal.block_token != null && BigInt(principal.block_token) > BigInt(now)
+        && principal.block_token !== reservation.principalBlock
+      // Only a block owned by this reservation may be reset while active.
+      if (!refused) await pgQuery(client, `UPDATE ok_console.local_access_throttle SET
         failures = 0, blocked_until = NULL, window_started_at = to_timestamp($2::numeric / 1e6),
         updated_at = to_timestamp($2::numeric / 1e6) WHERE principal_digest = $1`, [principalDigest, now])
       await pgQuery(client, `
@@ -127,6 +158,7 @@ export class PostgresLocalAccessThrottle {
           updated_at = to_timestamp($3::numeric / 1e6)
         WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
       [globalDigest, reservation.globalWindow, now])
+      return { refused }
     })
   }
 }
@@ -178,7 +210,11 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
       await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'INVALID_CREDENTIAL', correlationId: input.correlationId }))
       throw new LocalAccessError()
     }
-    await run('THROTTLE_RESET', () => throttle.success(username, reservation))
+    const outcome = await run('THROTTLE_RESET', () => throttle.success(username, reservation))
+    if (outcome?.refused) {
+      await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
+      throw new LocalAccessError()
+    }
     const issued = await run('SESSION_STORE', () => sessionStore.create({
       subject: { id: account.identityId, providerId: 'local', subjectId: account.username, displayName: account.displayName, method: mode, assurance: ['Password', 'ExceptionalAccess'] },
       scope: { environmentId: account.environmentId, tenantIds: [...account.tenantIds] },

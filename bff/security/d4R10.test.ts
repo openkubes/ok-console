@@ -81,7 +81,7 @@ it.each([['refused', 'ECONNREFUSED'], ['silent', 'OAUTH_TIMEOUT'], ['badstate', 
   expect(JSON.parse(result.lines[0])).toMatchObject({ cause: 'TOKEN_EXCHANGE', errorCode: code })
 }, 15000)
 it('K8g injected-error J4 SQLSTATE 57014 maps by code, never message; other SQLSTATE codes survive', async () => {
-  for (const [code, message, expected] of [['57014', 'private unrelated text', 'PG_STATEMENT_TIMEOUT'], ['57P01', 'canceling statement due to statement timeout', '57P01'], [undefined, 'canceling statement due to statement timeout', null]]) {
+  for (const [code, message, expected] of [['57014', 'private unrelated text', 'PG_STATEMENT_TIMEOUT'], ['57P01', 'canceling statement due to statement timeout', 'PG_CONNECTION_TERMINATED'], [undefined, 'canceling statement due to statement timeout', null]]) {
     const error = Object.assign(new Error(message), code ? { code } : {})
     const actual = await pgQuery({ query: async () => { throw error } }).catch(error => startErrorCode(error))
     expect(actual).toBe(expected)

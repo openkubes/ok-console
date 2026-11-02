@@ -4,6 +4,8 @@ import { pgConnect, pgQuery } from './pgFailure.mjs'
 
 const scrypt = promisify(nodeScrypt)
 const KDF = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1_024 * 1_024 }
+const LOCK_TIMEOUT_MS = 1000
+const IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000
 const DUMMY_SALT = Buffer.alloc(16, 91)
 const DUMMY_VERIFIER = Buffer.alloc(32, 173)
 
@@ -21,80 +23,110 @@ export class LocalAccessError extends Error {
   }
 }
 
+// Check both identity and cardinality: a foreign or duplicated row is not a reservation.
+const holdsBoth = (result, digests) => result.rows.length === 2
+  && new Set(result.rows.map(row => row.principal_digest)).size === 2
+  && result.rows.every(row => digests.includes(row.principal_digest))
+
 export class PostgresLocalAccessThrottle {
   constructor({ pool, pepper }) {
-    if (!pool?.query || !Buffer.isBuffer(pepper) || pepper.length < 32) throw new LocalAccessError('INVALID_CONFIGURATION')
+    if (typeof pool?.query !== 'function' || typeof pool?.connect !== 'function'
+      || !Buffer.isBuffer(pepper) || pepper.length < 32) throw new LocalAccessError('INVALID_CONFIGURATION')
     this.pool = pool
     this.pepper = pepper
   }
 
   digest(username) {
-    return createHmac('sha256', this.pepper).update(username).digest('base64url')
+    return createHmac('sha256', this.pepper).update(`throttle:principal:${username}`).digest('base64url')
+  }
+
+  globalDigest() {
+    return createHmac('sha256', this.pepper).update('throttle:global').digest('base64url')
   }
 
   async transaction(operation) {
     const client = await pgConnect(this.pool)
-    let rollbackError
+    let failure
     try {
-      await pgQuery(client, 'BEGIN')
-      const result = await operation(client)
-      // A blocked reservation also rolls back any newly seeded zero-count rows.
+      await pgQuery(client, 'BEGIN ISOLATION LEVEL READ COMMITTED')
+      const settings = await pgQuery(client, `
+        SELECT setting::bigint AS statement_timeout,
+          floor(extract(epoch FROM clock_timestamp()) * 1e6)::bigint AS now
+        FROM pg_settings WHERE name = 'statement_timeout'`)
+      const { statement_timeout: statementTimeout, now } = settings.rows[0]
+      const cap = Number(statementTimeout) > 0 ? Number(statementTimeout) - 1 : Infinity
+      await pgQuery(client, `SELECT set_config('lock_timeout', $1, true),
+        set_config('idle_in_transaction_session_timeout', $2, true)`,
+      [`${Math.min(LOCK_TIMEOUT_MS, cap)}ms`, `${Math.min(IDLE_IN_TRANSACTION_TIMEOUT_MS, cap)}ms`])
+      const result = await operation(client, now)
+      // Only a normal blocked result uses ROLLBACK. Errors destroy the client:
+      // queuing another query after a client-side timeout can hang the pool.
       await pgQuery(client, result?.blocked ? 'ROLLBACK' : 'COMMIT')
       return result
     } catch (error) {
-      try { await pgQuery(client, 'ROLLBACK') } catch (cause) { rollbackError = cause }
+      failure = error
       throw error
     } finally {
-      client.release(rollbackError)
+      client.release(failure)
     }
   }
 
   async reserve(username) {
-    const globalDigest = this.digest('__global__')
-    const digests = [...new Set([this.digest(username), globalDigest])].sort()
-    if (digests.length !== 2) throw new LocalAccessError('INVALID_CONFIGURATION')
-    return this.transaction(async (client) => {
-      // Consistent lock order also covers concurrent creation of missing rows.
+    const globalDigest = this.globalDigest()
+    const digests = [this.digest(username), globalDigest].sort()
+    // Reject known blocks without acquiring the shared global row lock.
+    const precheck = await pgQuery(this.pool, `
+      SELECT principal_digest FROM ok_console.local_access_throttle
+      WHERE principal_digest = ANY($1::text[]) AND blocked_until > clock_timestamp()`, [digests])
+    if (precheck.rows.length) return { blocked: true }
+    return this.transaction(async (client, now) => {
       await pgQuery(client, `
         INSERT INTO ok_console.local_access_throttle
           (principal_digest, failures, window_started_at, blocked_until)
-        SELECT principal_digest, 0, clock_timestamp(), NULL
+        SELECT principal_digest, 0, to_timestamp($2::numeric / 1e6), NULL
         FROM unnest($1::text[]) AS input(principal_digest) ORDER BY principal_digest
-        ON CONFLICT (principal_digest) DO NOTHING`, [digests])
+        ON CONFLICT (principal_digest) DO NOTHING`, [digests, now])
       const prior = await pgQuery(client, `
-        SELECT principal_digest, blocked_until > clock_timestamp() AS blocked
+        SELECT principal_digest, blocked_until > to_timestamp($2::numeric / 1e6) AS blocked
         FROM ok_console.local_access_throttle
-        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
-      // Blocked attempts neither increment counters nor move the block deadline.
+        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests, now])
+      // No retry: refuse before KDF if either expected row vanished or is foreign.
+      if (!holdsBoth(prior, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
       if (prior.rows.some((row) => row.blocked)) return { blocked: true }
+      const lockedDigests = prior.rows.map(row => row.principal_digest)
       const reserved = await pgQuery(client, `
         UPDATE ok_console.local_access_throttle SET
-          failures = CASE WHEN window_started_at < clock_timestamp() - interval '15 minutes' THEN 1 ELSE failures + 1 END,
-          window_started_at = CASE WHEN window_started_at < clock_timestamp() - interval '15 minutes' THEN clock_timestamp() ELSE window_started_at END,
-          blocked_until = CASE WHEN (CASE WHEN window_started_at < clock_timestamp() - interval '15 minutes' THEN 1 ELSE failures + 1 END) >= CASE WHEN principal_digest = $2 THEN 50 ELSE 5 END THEN clock_timestamp() + interval '15 minutes' ELSE blocked_until END,
-          updated_at = clock_timestamp()
+          failures = CASE WHEN window_started_at < to_timestamp($3::numeric / 1e6) - interval '15 minutes' THEN 1 ELSE failures + 1 END,
+          window_started_at = CASE WHEN window_started_at < to_timestamp($3::numeric / 1e6) - interval '15 minutes' THEN to_timestamp($3::numeric / 1e6) ELSE window_started_at END,
+          blocked_until = CASE WHEN (CASE WHEN window_started_at < to_timestamp($3::numeric / 1e6) - interval '15 minutes' THEN 1 ELSE failures + 1 END) >= CASE WHEN principal_digest = $2 THEN 50 ELSE 5 END THEN to_timestamp($3::numeric / 1e6) + interval '15 minutes' ELSE blocked_until END,
+          updated_at = to_timestamp($3::numeric / 1e6)
         WHERE principal_digest = ANY($1::text[])
-        RETURNING principal_digest, window_started_at::text AS window`, [digests, globalDigest])
+        RETURNING principal_digest, floor(extract(epoch FROM window_started_at) * 1e6)::bigint AS window`, [lockedDigests, globalDigest, now])
+      if (reserved.rowCount !== 2 || !holdsBoth(reserved, lockedDigests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
       return { blocked: false, globalWindow: reserved.rows.find((row) => row.principal_digest === globalDigest).window }
     })
   }
 
   async success(username, reservation) {
-    return this.transaction(async (client) => {
-      // Lock in reserve's order before deleting/updating either row.
-      await pgQuery(client, `
+    const principalDigest = this.digest(username)
+    const globalDigest = this.globalDigest()
+    const digests = [principalDigest, globalDigest].sort()
+    return this.transaction(async (client, now) => {
+      const locked = await pgQuery(client, `
         SELECT principal_digest FROM ok_console.local_access_throttle
-        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`,
-      [[this.digest(username), this.digest('__global__')]])
-      await pgQuery(client, 'DELETE FROM ok_console.local_access_throttle WHERE principal_digest = $1', [this.digest(username)])
-      // Keep the exact PostgreSQL timestamp text: JS Date would lose microseconds.
+        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
+      if (!holdsBoth(locked, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      // A correct credential resets this principal, including newer attempts.
+      await pgQuery(client, `UPDATE ok_console.local_access_throttle SET
+        failures = 0, blocked_until = NULL, window_started_at = to_timestamp($2::numeric / 1e6),
+        updated_at = to_timestamp($2::numeric / 1e6) WHERE principal_digest = $1`, [principalDigest, now])
       await pgQuery(client, `
         UPDATE ok_console.local_access_throttle SET
           failures = GREATEST(failures - 1, 0),
           blocked_until = CASE WHEN failures - 1 < 50 THEN NULL ELSE blocked_until END,
-          updated_at = clock_timestamp()
-        WHERE principal_digest = $1 AND window_started_at = $2::timestamptz`,
-      [this.digest('__global__'), reservation.globalWindow])
+          updated_at = to_timestamp($3::numeric / 1e6)
+        WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
+      [globalDigest, reservation.globalWindow, now])
     })
   }
 }

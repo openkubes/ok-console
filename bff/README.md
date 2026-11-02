@@ -241,17 +241,34 @@ throttling shared by all BFF replicas. Five failed attempts in a 15-minute
 window block that principal for 15 minutes; 50 failures across rotating
 principals also activate a shared global bucket. The digest is HMAC-peppered so
 the table does not disclose configured usernames. Before password derivation, a
-transaction locks both rows in digest order, checks their previous block state,
-and durably reserves one attempt on each. A reservation error refuses access
-before any password work. The internal global-bucket name is reserved; attempts
-that alias it fail unavailable before derivation. Already-blocked attempts are audited as THROTTLED
-without incrementing counters or extending the deadline. A wrong password keeps
-the reservation; it is not counted twice. Success atomically deletes the
-principal row and releases one global count only in the reserved window (never
-below zero), clearing a threshold block if the remaining count is below 50.
-A release error refuses access before session creation and keeps the reservation.
-In-flight attempts and failed dependencies can therefore conservatively consume
-budget; successful logins do not. Edge/IP rate limiting remains
+lock-free SELECT rejects known blocks. Otherwise a READ COMMITTED transaction
+locks both rows in digest order, requires exactly both expected keys, checks the
+block state again, and updates only those locked keys. Both returned rows must
+match before COMMIT; any mismatch refuses without retry or password work.
+Already-blocked attempts are audited as THROTTLED without counting or extending
+the deadline. Transactions use one captured database instant and bounded lock
+(1000 ms) and idle-in-transaction (5000 ms) timeouts, each capped below a positive
+statement timeout. A timeout or uncertain COMMIT refuses access.
+
+A wrong password keeps its reservation. A credential verdict (INVALID_CREDENTIAL
+or success) requires a committed reservation on both rows. Success resets the
+principal row in place unconditionally; a later correct login intentionally
+resets counts from concurrent attempts of that same principal. Success releases
+one global count only in the reserved window, identified by numeric epoch
+microseconds independently of DateStyle or TimeZone, never below zero. It clears
+a threshold block when the remaining count is below 50. In-flight correct logins
+hold one unit of budget until they finish: at global 49, two concurrent correct
+logins can produce one 200 and one 401 THROTTLED. A failed release refuses session
+creation and retains the budget for the window.
+
+Principal HMAC inputs use `throttle:principal:` and the global bucket uses
+`throttle:global`; `__global__` and its normalized aliases are ordinary usernames.
+Rollout note: this domain separation resets effective budgets once for the
+15-minute window. Old and new replicas use different buckets during a mixed
+rollout, so roll all replicas together. No migration or physical row cleanup is
+required; old buckets cease affecting active budgets within 15 minutes.
+
+Edge/IP rate limiting remains
 a deployment control because the BFF does not invent trust in proxy headers.
 
 Every attempt requires a 12–512 character operational reason and writes

@@ -259,12 +259,12 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       await pool.query(`
         INSERT INTO ok_console.local_access_throttle (principal_digest, failures, window_started_at)
         SELECT unnest($1::text[]), 0, clock_timestamp()`,
-      [[throttle.digest('__global__'), throttle.digest('recovery-admin')]])
+      [[throttle.globalDigest(), throttle.digest('recovery-admin')]])
       await locker.query('BEGIN')
-      await locker.query('SELECT * FROM ok_console.local_access_throttle WHERE principal_digest = $1 FOR UPDATE', [throttle.digest(lockedPrincipal)])
+      await locker.query('SELECT * FROM ok_console.local_access_throttle WHERE principal_digest = $1 FOR UPDATE', [lockedPrincipal === '__global__' ? throttle.globalDigest() : throttle.digest(lockedPrincipal)])
       for (const password of ['wrong', 'correct']) {
         await expect(verify(localInput(password))).rejects.toMatchObject({
-          code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'THROTTLE_RESERVE', cause: { code: 'PG_STATEMENT_TIMEOUT' },
+          code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'THROTTLE_RESERVE', cause: { code: expect.stringMatching(/^(55P03|PG_STATEMENT_TIMEOUT)$/) },
         })
         const address = server.address() as { port: number }
         const response = await fetch(`http://127.0.0.1:${address.port}/api/console/v0/auth/local`, {
@@ -276,8 +276,8 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
         expect(await response.json()).toMatchObject({ error: { code: 'LOCAL_ACCESS_UNAVAILABLE' } })
       }
       expect(log.mock.calls.map(call => JSON.parse(call[0]))).toEqual([
-        expect.objectContaining({ cause: 'THROTTLE_RESERVE', errorCode: 'PG_STATEMENT_TIMEOUT' }),
-        expect.objectContaining({ cause: 'THROTTLE_RESERVE', errorCode: 'PG_STATEMENT_TIMEOUT' }),
+        expect.objectContaining({ cause: 'THROTTLE_RESERVE', errorCode: expect.stringMatching(/^(OTHER|PG_STATEMENT_TIMEOUT)$/) }),
+        expect.objectContaining({ cause: 'THROTTLE_RESERVE', errorCode: expect.stringMatching(/^(OTHER|PG_STATEMENT_TIMEOUT)$/) }),
       ])
       expect(derive).not.toHaveBeenCalled()
       expect(create).not.toHaveBeenCalled()
@@ -313,13 +313,13 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       authorizationRevision: 'revision',
       derive: async () => {
         await locker.query('BEGIN')
-        await locker.query('SELECT * FROM ok_console.local_access_throttle WHERE principal_digest = $1 FOR UPDATE', [throttle.digest('__global__')])
+        await locker.query('SELECT * FROM ok_console.local_access_throttle WHERE principal_digest = $1 FOR UPDATE', [throttle.globalDigest()])
         return Buffer.alloc(32, 2)
       },
     })
     try {
       await expect(verify(localInput('correct'))).rejects.toMatchObject({
-        code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'THROTTLE_RESET', cause: { code: 'PG_STATEMENT_TIMEOUT' },
+        code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'THROTTLE_RESET', cause: { code: expect.stringMatching(/^(55P03|PG_STATEMENT_TIMEOUT)$/) },
       })
       expect(create).not.toHaveBeenCalled()
       await locker.query('ROLLBACK')
@@ -357,18 +357,18 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     expect(principal.filter(item => !item.blocked)).toHaveLength(5)
     const rotating = await Promise.all(Array.from({ length: 55 }, (_, i) => throttle.reserve(`rotating-${i}`)))
     expect(rotating.filter(item => !item.blocked)).toHaveLength(45)
-    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('__global__')])).rows[0].failures).toBe(50)
+    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(50)
   })
 
-  it('fails closed before password work when a principal aliases the internal global bucket', async () => {
+  it('counts and audits global-name aliases as ordinary principals', async () => {
     const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
-    const { verify, derive, create } = localVerifier(throttle)
-    await expect(verify({ ...localInput('correct'), username: '__global__' })).rejects.toMatchObject({
-      code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'THROTTLE_RESERVE',
-    })
-    expect(derive).not.toHaveBeenCalled()
-    expect(create).not.toHaveBeenCalled()
-    expect((await pool.query('SELECT count(*)::int AS count FROM ok_console.local_access_throttle')).rows[0].count).toBe(0)
+    const { verify, derive, audit } = localVerifier(throttle)
+    for (const username of ['__global__', '＿＿ＧＬＯＢＡＬ＿＿']) {
+      await expect(verify({ ...localInput(), username })).rejects.toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' })
+    }
+    expect(derive).toHaveBeenCalledTimes(2)
+    expect(audit).toHaveBeenLastCalledWith(expect.objectContaining({ principal: '__global__', cause: 'INVALID_CREDENTIAL' }))
+    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle')).rows.map(row => row.failures)).toEqual([2, 2])
   })
 
   it('50 successful logins release global budget and never block', async () => {
@@ -377,7 +377,10 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     for (let i = 0; i < 50; i++) await expect(verify(localInput('correct'))).resolves.toHaveProperty('cookie')
     expect(create).toHaveBeenCalledTimes(50)
     expect((await pool.query('SELECT principal_digest, failures, blocked_until FROM ok_console.local_access_throttle')).rows)
-      .toEqual([{ principal_digest: throttle.digest('__global__'), failures: 0, blocked_until: null }])
+      .toEqual(expect.arrayContaining([
+        { principal_digest: throttle.globalDigest(), failures: 0, blocked_until: null },
+        { principal_digest: throttle.digest('recovery-admin'), failures: 0, blocked_until: null },
+      ]))
   })
 
   it('releases a successful threshold reservation and never decrements another window', async () => {
@@ -385,16 +388,148 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     for (let i = 0; i < 49; i++) await throttle.reserve(`principal-${i}`)
     const reservation = await throttle.reserve('recovery-admin')
     await throttle.success('recovery-admin', reservation)
-    expect((await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('__global__')])).rows[0])
+    expect((await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0])
       .toEqual({ failures: 49, blocked_until: null })
     await pool.query("UPDATE ok_console.local_access_throttle SET window_started_at = clock_timestamp() - interval '16 minutes', blocked_until = NULL")
     const fresh = await throttle.reserve('recovery-admin')
     await throttle.success('recovery-admin', reservation)
-    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('__global__')])).rows[0].failures).toBe(1)
+    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(1)
     await throttle.success('recovery-admin', fresh)
     await throttle.success('recovery-admin', fresh)
-    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('__global__')])).rows[0].failures).toBe(0)
+    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(0)
   })
+
+  // Promise barriers control KDF and transaction progress; polling observes real PG locks.
+  const barrier = () => {
+    let resolve!: () => void
+    const promise = new Promise<void>(r => { resolve = r })
+    return { promise, resolve }
+  }
+  const waitForReserveLock = async () => {
+    const deadline = Date.now() + 800
+    while (Date.now() < deadline) {
+      const result = await pool.query(`SELECT 1 FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND query LIKE '%ORDER BY principal_digest FOR UPDATE%'
+          AND pid <> pg_backend_pid()`)
+      if (result.rowCount) return
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+    throw new Error('reserve did not queue on the ordered locking SELECT')
+  }
+
+  it.each(['reset', 'blocked', 'delete'])('queued reserve versus concurrent success: %s', async action => {
+    const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
+    for (let i = 0; i < 4; i++) await throttle.reserve('recovery-admin')
+    const locker = await pool.connect()
+    const { verify, derive, audit } = localVerifier(throttle)
+    let pending: Promise<unknown> | undefined
+    try {
+      await locker.query('BEGIN ISOLATION LEVEL READ COMMITTED')
+      await locker.query(`SELECT principal_digest FROM ok_console.local_access_throttle
+        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`,
+      [[throttle.digest('recovery-admin'), throttle.globalDigest()].sort()])
+      pending = verify(localInput()).catch(error => error)
+      await waitForReserveLock()
+      if (action === 'delete') {
+        await locker.query('DELETE FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')])
+      } else if (action === 'reset') {
+        await locker.query(`UPDATE ok_console.local_access_throttle SET failures = 0, blocked_until = NULL,
+          window_started_at = clock_timestamp() WHERE principal_digest = $1`, [throttle.digest('recovery-admin')])
+        await locker.query('UPDATE ok_console.local_access_throttle SET failures = failures - 1 WHERE principal_digest = $1', [throttle.globalDigest()])
+      } else {
+        await locker.query(`UPDATE ok_console.local_access_throttle SET failures = 5,
+          blocked_until = clock_timestamp() + interval '15 minutes' WHERE principal_digest = $1`, [throttle.digest('recovery-admin')])
+      }
+      await locker.query('COMMIT')
+      const result = await pending
+      if (action === 'delete') {
+        expect(result).toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'THROTTLE_RESERVE' })
+        expect(derive).not.toHaveBeenCalled()
+        expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle')).rows).toEqual([{ failures: 4 }])
+      } else {
+        expect(result).toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' })
+        expect(derive).toHaveBeenCalledTimes(action === 'reset' ? 1 : 0)
+        expect(audit).toHaveBeenLastCalledWith(expect.objectContaining({ cause: action === 'reset' ? 'INVALID_CREDENTIAL' : 'THROTTLED' }))
+        expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')])).rows[0].failures).toBe(action === 'reset' ? 1 : 5)
+      }
+    } finally {
+      await locker.query('ROLLBACK'); locker.release(); await pending
+    }
+  })
+
+  it.each([
+    ['Postgres, MDY', 'America/Havana'], ['SQL, DMY', 'Asia/Kolkata'], ['ISO, MDY', 'UTC'],
+  ])('releases 50 successes under DateStyle %s / %s and permits the next', async (style, zone) => {
+    const settingsPool = new pg.Pool({ connectionString, options: `-c DateStyle=${style.replaceAll(' ', '')} -c TimeZone=${zone}` })
+    try {
+      const throttle = new PostgresLocalAccessThrottle({ pool: settingsPool, pepper: Buffer.alloc(32, 5) })
+      const { verify } = localVerifier(throttle)
+      for (let i = 0; i < 50; i++) await expect(verify(localInput('correct'))).resolves.toHaveProperty('cookie')
+      expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(0)
+      await expect(verify(localInput('correct'))).resolves.toHaveProperty('cookie')
+    } finally { await settingsPool.end() }
+  })
+
+  it('audits a blocked attempt promptly while the global row lock is held', async () => {
+    const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
+    for (let i = 0; i < 5; i++) await throttle.reserve('recovery-admin')
+    const locker = await pool.connect()
+    const { verify, derive, audit } = localVerifier(throttle)
+    try {
+      await locker.query('BEGIN')
+      await locker.query('SELECT 1 FROM ok_console.local_access_throttle WHERE principal_digest = $1 FOR UPDATE', [throttle.globalDigest()])
+      const start = Date.now()
+      await expect(verify(localInput())).rejects.toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' })
+      expect(Date.now() - start).toBeLessThan(300)
+      expect(derive).not.toHaveBeenCalled()
+      expect(audit).toHaveBeenCalledWith(expect.objectContaining({ cause: 'THROTTLED' }))
+    } finally { await locker.query('ROLLBACK'); locker.release() }
+  })
+
+  it('holds in-flight correct budget at global 49 until KDF finishes', async () => {
+    const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
+    for (let i = 0; i < 49; i++) await throttle.reserve(`unknown-${i}`)
+    const entered = barrier(), finish = barrier()
+    const audit = vi.fn(async () => {})
+    const verify = createLocalAccessVerifier({ mode: 'BreakGlass', accounts: [localAccount], throttle,
+      sessionStore: { create: () => issue() }, audit, derive: async () => { entered.resolve(); await finish.promise; return Buffer.alloc(32, 2) } })
+    const first = verify(localInput('correct'))
+    try {
+      await entered.promise
+      await expect(verify(localInput('correct'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' })
+      expect(audit).toHaveBeenLastCalledWith(expect.objectContaining({ cause: 'THROTTLED' }))
+      expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(50)
+    } finally { finish.resolve(); await first }
+    expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(49)
+  })
+
+  it('caps peak principal counts at 5 and preserves each block deadline during 150 wrong and 3 correct logins', async () => {
+    const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
+    const { verify } = localVerifier(throttle)
+    const jobs = Array.from({ length: 150 }, () => 'wrong')
+    for (const at of [0, 40, 80]) jobs.splice(at, 0, 'correct')
+    let next = 0, peak = 0, lastDeadline: number | null = null, samples = 0
+    const sample = async () => {
+      const row = (await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')])).rows[0]
+      if (!row) return
+      samples++; peak = Math.max(peak, row.failures)
+      expect(row.failures).toBeLessThanOrEqual(5)
+      const deadline = row.blocked_until?.getTime() ?? null
+      if (lastDeadline !== null && deadline !== null) expect(deadline).toBe(lastDeadline)
+      lastDeadline = deadline
+    }
+    const start = Date.now()
+    await Promise.all(Array.from({ length: 8 }, async () => {
+      while (next < jobs.length) {
+        const password = jobs[next++]
+        try { await verify(localInput(password)) } catch (error) { expect(error).toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' }) }
+        await sample()
+      }
+    }))
+    expect(samples).toBeGreaterThan(0); expect(peak).toBe(5)
+    expect(Date.now() - start).toBeLessThan(10000)
+    console.log(`THROTTLE_LOAD wrong=150 correct=3 concurrency=8 samples=${samples} peak=${peak} ms=${Date.now() - start}`)
+  }, 10000)
 
   it('persists credential-free exceptional-access audit Evidence using database time', async () => {
     const audit = new PostgresLocalAccessAudit({ pool, pepper: Buffer.alloc(32, 5) })

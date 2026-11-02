@@ -132,7 +132,7 @@ export interface PlatformSnapshot {
 }
 
 export interface ConsoleDataPort {
-  getSnapshot(): Promise<PlatformSnapshot>
-  getCluster(id: string): Promise<Cluster | undefined>
-  getEvidence(id: string): Promise<EvidenceRef | undefined>
+  getSnapshot(controller?: AbortController): Promise<PlatformSnapshot>
+  getCluster(id: string, controller?: AbortController): Promise<Cluster | undefined>
+  getEvidence(id: string, controller?: AbortController): Promise<EvidenceRef | undefined>
 }

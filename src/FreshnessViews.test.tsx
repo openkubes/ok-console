@@ -17,7 +17,7 @@ const auth: ConsoleAuthClient = {
   startOidc: vi.fn(), authenticateLocal: vi.fn(), logout: vi.fn(),
 }
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
-const historyNote = 'Earlier answers were cleared because the data they used is no longer current.'
+const historyNote = /Earlier answer, based on data observed at/
 function textOf(scope: ParentNode) {
   const walker = document.createTreeWalker(scope as Node, NodeFilter.SHOW_TEXT)
   const parts: string[] = []
@@ -26,7 +26,7 @@ function textOf(scope: ParentNode) {
 }
 function noCurrency(scope: ParentNode = document.body) {
   // The required history note explicitly denies currency; it is the sole permitted occurrence.
-  expect(textOf(scope).replaceAll(historyNote, '')).not.toMatch(/\bcurrent(ly)?\b/i)
+  expect(textOf(scope)).not.toMatch(/\bcurrent(ly)?\b/i)
   expect(scope.querySelectorAll('.live-dot')).toHaveLength(0)
 }
 function fresh(scope: ParentNode = document.body) {
@@ -122,7 +122,7 @@ for (const view of ['overview', 'clusters', 'detail']) {
   it(`${view}: immutable basis is a dated historical receipt`, async () => {
     await mount(view, 'Current', { immutable: true })
     widget()
-    noCurrency()
+    noCurrency(document.querySelector(view === 'overview' ? '.cluster-card' : 'main')!)
     expect(document.querySelector('main')).toHaveTextContent(/Immutable receipt.*2026/)
   })
 }
@@ -185,7 +185,7 @@ it('polls at 30 seconds while visible; failures immediately retain only Last obs
   await advance(30_000)
   expect(getSnapshot).toHaveBeenCalledTimes(2)
   noCurrency()
-  expect(screen.getByText(historyNote)).toBeVisible()
+  expect(screen.getAllByText(historyNote)[0]).toBeVisible()
   expect(screen.queryByText(/Observation freshness is current/)).toBeNull()
   await advance(30_000)
   fresh()
@@ -233,6 +233,7 @@ for (const late of ['success', 'failure'] as const) {
     navigate()
     navigate(); await act(async () => {})
     await act(async () => { if (late === 'success') resolve({ ...snapshot, freshness: 'Stale' }); else reject(new Error('older failure')) })
+    await act(async () => {})
     fresh(document.querySelector('.snapshot')!)
   })
 }
@@ -254,24 +255,25 @@ it('detail cap only clears for Evidence in a snapshot requested after detail arr
   await act(async () => {})
   await act(async () => { resolve(snapshot) })
   noCurrency(document.querySelector('.evidence-card')!)
-  // Visibility fetch starts after the detail response and clears the Evidence cap.
+  vi.mocked(consoleData.getCluster).mockResolvedValue({ ...snapshot.clusters[0], freshness: 'Current' })
+  // A fresh snapshot and re-requested detail recover together.
   fireEvent(document, new Event('visibilitychange'))
   await waitFor(() => fresh(document.querySelector('.evidence-card')!))
 })
-it('failed refetch demotes an already-open drawer and clears widget history', async () => {
+it('failed refetch demotes an already-open drawer and retains widget answers as history', async () => {
   const { getSnapshot } = await mount('drawer')
   widget(); fresh()
   getSnapshot.mockRejectedValueOnce(new Error('offline'))
   navigate(); await act(async () => {})
   noCurrency()
-  expect(screen.getByText(historyNote)).toBeVisible()
+  expect(screen.getAllByText(historyNote)[0]).toBeVisible()
 })
 it('Overview deduplicates affected clusters and placements by id', async () => {
   const { getSnapshot, snapshot } = await mount('overview', 'Stale', { mixed: true })
   const duplicated = { ...snapshot, clusters: [...snapshot.clusters, ...snapshot.clusters], claims: [...snapshot.claims, ...snapshot.claims] }
   getSnapshot.mockResolvedValueOnce(duplicated)
   navigate(); await act(async () => {})
-  expect(document.querySelector('.snapshot')).toHaveTextContent('1 items stale, 1 unavailable')
+  expect(document.querySelector('.snapshot')).toHaveTextContent('1 item stale, 1 unavailable')
 })
 
 for (const verdict of ['Stale', 'Unknown'] as const) {
@@ -303,6 +305,7 @@ it('Unknown Detail cap survives a newer Stale snapshot; only later Current Evide
   getSnapshot.mockResolvedValueOnce(staleEvidence)
   fireEvent(document, new Event('visibilitychange')); await act(async () => {})
   expect(document.querySelector('.evidence-card')).toHaveTextContent('Observation unavailable')
+  vi.mocked(consoleData.getCluster).mockResolvedValue({ ...snapshot.clusters[0], freshness: 'Current' })
   getSnapshot.mockResolvedValueOnce(snapshot)
   fireEvent(document, new Event('visibilitychange')); await act(async () => {})
   fresh(document.querySelector('.evidence-card')!)
@@ -321,4 +324,145 @@ it('ceiling timeout demotes between poll ticks after a navigation refresh', asyn
   getSnapshot.mockImplementation(() => new Promise<PlatformSnapshot>(() => {}))
   await advance(59_999); fresh()
   await advance(1); noCurrency()
+})
+
+it('R3 detail refresh follows each snapshot generation, changes Ready to Failed, and recovers without reopening', async () => {
+  await timers()
+  const { snapshot, getSnapshot } = await mount('detail')
+  const failed = { ...snapshot, clusters: snapshot.clusters.map(c => ({ ...c, readiness: 'Failed' as const })), evidence: snapshot.evidence.map(e => ({ ...e, outcome: 'Failed' as const })) }
+  const failedDetail = { ...snapshot.clusters[0], readiness: 'Failed' as const, lifecycle: [{ label: 'Producer lifecycle', state: 'Failed' as const, detail: 'Hosting workload Failed' }] }
+  getSnapshot.mockResolvedValue(failed)
+  vi.mocked(consoleData.getCluster).mockResolvedValue(failedDetail)
+  await advance(30_000)
+  expect(document.querySelector('.title-actions .status')).toHaveTextContent('Failed')
+  expect(document.querySelector('.lifecycle .status')).toHaveTextContent('Failed')
+  expect(document.querySelector('.evidence-card')).toHaveTextContent('Failed')
+  fresh(document.querySelector('main')!)
+  vi.mocked(consoleData.getCluster).mockRejectedValueOnce(new Error('detail offline'))
+  await advance(30_000)
+  noCurrency(document.querySelector('main')!)
+  expect(document.querySelector('.evidence-card')).toHaveTextContent('Last observed: Failed')
+  getSnapshot.mockResolvedValue(snapshot)
+  vi.mocked(consoleData.getCluster).mockResolvedValue({ ...snapshot.clusters[0], lifecycle: [{ label: 'Recovered lifecycle', state: 'Ready', detail: 'Recovered' }] })
+  await advance(30_000)
+  fresh(document.querySelector('main')!)
+  expect(document.querySelector('.title-actions .status')).toHaveTextContent('Ready')
+})
+it.each(['unchanged', 'Failed'])('R3 widget retains %s earlier answers without currency across fresh generations', async state => {
+  await timers()
+  const { snapshot, getSnapshot } = await mount()
+  widget()
+  fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
+  const old = [...document.querySelectorAll('.diagnostic-message.assistant')].slice(1)
+  getSnapshot.mockResolvedValue({ ...snapshot, clusters: snapshot.clusters.map(c => ({ ...c, readiness: state === 'Failed' ? 'Failed' : c.readiness })) })
+  await advance(30_000)
+  for (const answer of old) {
+    expect(answer).toHaveTextContent('Earlier answer, based on data observed at')
+    noCurrency(answer)
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Platform status' }))
+  expect(document.querySelector('.diagnostic-message.assistant:last-child')).toHaveTextContent(/\bcurrent\b/i)
+})
+it('R3 polling stops at four minutes idle, focus does not restart it, and input resumes immediately', async () => {
+  await timers()
+  const { getSnapshot } = await mount()
+  await advance(240_000)
+  const stopped = getSnapshot.mock.calls.length
+  await advance(120_000)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped)
+  fireEvent(window, new Event('focus')); await act(async () => {})
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 1)
+  await advance(60_000)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 1)
+  fireEvent.keyDown(window, { key: 'Shift' }); await act(async () => {})
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 2)
+  await advance(30_000)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 3)
+})
+it('R3 one in-flight refresh coalesces many triggers into one follow-up', async () => {
+  const { getSnapshot, snapshot } = await mount()
+  let resolve!: (value: PlatformSnapshot) => void
+  getSnapshot.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  navigate(); navigate(); navigate()
+  expect(getSnapshot).toHaveBeenCalledTimes(2)
+  await act(async () => { resolve(snapshot) })
+  expect(getSnapshot).toHaveBeenCalledTimes(3)
+})
+it('R3 Retry clears the error, renders loading, and double-click cannot overlap', async () => {
+  window.history.replaceState(null, '', '#/overview')
+  let resolve!: (value: PlatformSnapshot) => void
+  const getSnapshot = vi.spyOn(consoleData, 'getSnapshot').mockRejectedValueOnce(new Error('offline')).mockImplementation(() => new Promise(done => { resolve = done }))
+  render(<App auth={auth}/>); await act(async () => {})
+  const retry = screen.getByRole('button', { name: 'Retry safely' })
+  fireEvent.click(retry); fireEvent.click(retry)
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.getByText('Loading contract-aligned platform view…')).toBeVisible()
+  expect(getSnapshot).toHaveBeenCalledTimes(2)
+  await act(async () => { resolve({ ...structuredClone((await import('./data/fixtures')).platformFixture), source: 'bff' }) })
+})
+it('R3 session-ended response clears data and stops polling', async () => {
+  await timers()
+  const { getSnapshot } = await mount('detail')
+  getSnapshot.mockRejectedValueOnce(new (await import('./data/bffAdapter')).ConsoleDataError('ended', 'UNAUTHENTICATED', false))
+  await advance(30_000)
+  expect(screen.getByText('Your session ended. Sign in again.')).toBeVisible()
+  expect(screen.queryByText('Lifecycle posture')).toBeNull()
+  const calls = getSnapshot.mock.calls.length
+  await advance(120_000)
+  expect(getSnapshot).toHaveBeenCalledTimes(calls)
+})
+it('R3 ceiling suppresses every numeric metric and note', async () => {
+  await timers()
+  const { getSnapshot } = await mount()
+  getSnapshot.mockImplementation(() => new Promise(() => {}))
+  await advance(60_000)
+  for (const card of document.querySelectorAll('.metric')) {
+    expect(card.querySelector('strong')).toHaveTextContent(/^Unavailable$/)
+    expect(card.querySelector('small')).toHaveTextContent(/^Unavailable$/)
+  }
+})
+it.each(['focus', 'online', 'visibilitychange'])('R3 %s demotes on a wall-clock gap even while monotonic time is frozen', async event => {
+  const { getSnapshot } = await mount()
+  getSnapshot.mockImplementation(() => new Promise(() => {}))
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3600_000)
+  fireEvent(event === 'visibilitychange' ? document : window, new Event(event))
+  noCurrency(document.querySelector('.snapshot')!)
+  vi.mocked(Date.now).mockReturnValue(0)
+  fireEvent(window, new Event('focus'))
+  noCurrency(document.querySelector('.snapshot')!)
+})
+it('R3 mutable Overview remains Current with immutable receipts present', async () => {
+  const { snapshot, getSnapshot } = await mount()
+  getSnapshot.mockResolvedValueOnce({ ...snapshot, evidence: [...snapshot.evidence, { ...snapshot.evidence[0], id: 'receipt', immutable: true, freshness: 'Stale' }] })
+  navigate(); await act(async () => {})
+  fresh(document.querySelector('.snapshot')!)
+  expect(screen.getByText(/Immutable Evidence receipts are retained separately/)).toBeVisible()
+})
+it('R3 detail has its own ceiling even when a newer snapshot has succeeded', async () => {
+  await timers()
+  await mount('detail')
+  vi.mocked(consoleData.getCluster).mockImplementation(() => new Promise(() => {}))
+  await advance(60_000)
+  noCurrency(document.querySelector('main')!)
+  expect(document.querySelector('.title-actions .status')).toHaveTextContent('Unknown')
+  expect(document.querySelector('.evidence-card')).toHaveTextContent('Last observed: Ready')
+})
+it('R3 new Shell READINESS uses the effective detail; printed lines remain a transcript', async () => {
+  await timers()
+  const { snapshot, getSnapshot } = await mount('detail')
+  fireEvent.click(screen.getByRole('button', { name: 'Open Shell' }))
+  const input = screen.getByRole('textbox', { name: 'Command or question' })
+  const run = () => {
+    fireEvent.change(input, { target: { value: 'evidence' } })
+    fireEvent.submit(input.closest('form')!)
+  }
+  run()
+  const original = document.querySelector('.terminal-output')?.textContent
+  const failed = { ...snapshot, clusters: snapshot.clusters.map(c => ({ ...c, readiness: 'Failed' as const })), evidence: snapshot.evidence.map(e => ({ ...e, outcome: 'Failed' as const })) }
+  getSnapshot.mockResolvedValue(failed)
+  vi.mocked(consoleData.getCluster).mockResolvedValue(failed.clusters[0])
+  await advance(30_000)
+  run()
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('READINESS Failed (Current observation)')
+  expect(document.querySelector('.terminal-output')?.textContent).toContain(original!)
 })

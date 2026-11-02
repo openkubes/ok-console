@@ -1,11 +1,14 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import type { EvidenceRef, PlatformSnapshot } from './domain/contracts'
-import { clusterPresentation, evidencePresentation, overviewPresentation } from './observationPresentation'
+import { clusterPresentation, evidencePresentation, overviewPresentation, observedText } from './observationPresentation'
 
 interface Message {
   id: number
   role: 'assistant' | 'user'
   text: string
+  generation?: number
+  observedAt?: string
+  historical?: boolean
   evidence?: EvidenceRef
 }
 
@@ -19,7 +22,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
     const presentation = clusterPresentation(cluster, data)
     const basis = evidence && evidencePresentation(evidence, data.source !== 'bff')
     return {
-      text: `${cluster.name}: ${presentation.current && !summary.current ? 'Last observed' : presentation.label}. ${presentation.current && summary.current ? cluster.readiness : `Last observed: ${cluster.readiness}` }. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidence.title} (${basis?.current && summary.current ? evidence.outcome : `${basis?.current ? 'Last observed' : basis?.label}; last observed outcome: ${evidence.outcome}`} ).` : ''}`,
+      text: `${cluster.name}: ${presentation.current && !summary.current ? 'Last observed' : presentation.label}. ${presentation.current && summary.current ? cluster.readiness : `Last observed: ${cluster.readiness}` }. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidence.title} (${basis?.current && summary.current ? evidence.outcome : `${basis?.current ? 'Last observed' : basis?.label}; last observed outcome: ${evidence.outcome}`}).` : ''}`,
       evidence,
     }
   }
@@ -31,10 +34,10 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   }
 }
 
-export default function DiagnosticWidget({ data, openEvidence }: { data: PlatformSnapshot; openEvidence: (item: EvidenceRef) => void }) {
+export default function DiagnosticWidget({ data, generation = 0, openEvidence }: { data: PlatformSnapshot; generation?: number; openEvidence: (item: EvidenceRef) => void }) {
   const summary = overviewPresentation(data)
-  const rank = summary.verdict === 'Unknown' ? 3 : summary.verdict === 'Stale' ? 2 : summary.current ? 0 : 1
-  const [previousRank, setPreviousRank] = useState(rank)
+  const [previous, setPrevious] = useState({ generation, current: summary.current })
+  const nextId = useRef(1)
   const [isOpen, setIsOpen] = useState(false)
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState<Message[]>([{
@@ -43,19 +46,21 @@ export default function DiagnosticWidget({ data, openEvidence }: { data: Platfor
     text: 'Hi, I’m the OK AI Diagnostic preview. I can summarize the cluster observations and evidence shown in this Console. I’m read-only; no live AI service or cluster actions are connected.',
   }])
 
-  if (rank !== previousRank) {
-    setPreviousRank(rank)
-    if (rank > previousRank) setMessages([{ id: 0, role: 'assistant', text: 'Earlier answers were cleared because the data they used is no longer current.' }])
+  if (generation !== previous.generation || summary.current !== previous.current) {
+    setPrevious({ generation, current: summary.current })
+    setMessages(items => items.map(item => item.generation !== undefined &&
+      (item.generation < generation || !summary.current) ? { ...item, historical: true } : item))
   }
 
   const ask = (value: string) => {
     const prompt = value.trim()
     if (!prompt) return
-    const id = Date.now()
+    const id = nextId.current
+    nextId.current += 2
     setMessages((items) => [
       ...items,
       { id, role: 'user', text: prompt },
-      { id: id + 1, role: 'assistant', ...answerDiagnosticQuestion(prompt, data) },
+      { id: id + 1, role: 'assistant', generation, observedAt: data.generatedAt, historical: !summary.current, ...answerDiagnosticQuestion(prompt, data) },
     ])
     setQuestion('')
   }
@@ -70,8 +75,9 @@ export default function DiagnosticWidget({ data, openEvidence }: { data: Platfor
       <header className="diagnostic-header"><span className="diagnostic-spark" aria-hidden="true">✦</span><span><strong>OK AI</strong><small>Diagnostic · Demo Preview</small></span><button type="button" aria-label="Close OK AI Diagnostic" onClick={() => setIsOpen(false)}>×</button></header>
       <div className="diagnostic-messages" aria-live="polite">
         {messages.map((message) => <div className={`diagnostic-message ${message.role}`} key={message.id}>
-          <p>{message.text}</p>
-          {message.evidence && <button className="diagnostic-evidence" onClick={() => openEvidence(message.evidence!)}>View evidence · {message.evidence.title}</button>}
+          {message.historical && <small>Earlier answer, based on data observed at {new Date(message.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>}
+          <p>{observedText(message.text, !message.historical)}</p>
+          {message.evidence && <button className="diagnostic-evidence" onClick={() => openEvidence(message.evidence!)}>View evidence · {observedText(message.evidence.title, !message.historical)}</button>}
         </div>)}
       </div>
       <div className="diagnostic-prompts"><button onClick={() => ask('Platform status')}>Platform status</button><button onClick={() => ask('ok-shared status')}>ok-shared status</button></div>

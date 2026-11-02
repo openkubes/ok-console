@@ -14,6 +14,8 @@ import {
 import type { Cluster, ConsoleDataPort, EvidenceRef, PlatformSnapshot } from '../domain/contracts'
 import { curatedAgents } from './agentCatalog'
 
+export const BFF_REQUEST_TIMEOUT_MS = 15_000
+
 type FetchLike = typeof fetch
 
 export class ConsoleDataError extends Error {
@@ -80,23 +82,39 @@ export class BffConsoleAdapter implements ConsoleDataPort {
     private readonly fetcher: FetchLike = (...args) => fetch(...args),
   ) {}
 
-  private async request<T>(path: string, expectedKind: string): Promise<T> {
-    let response: Response
-    try {
-      response = await this.fetcher(`${this.baseUrl}${path}`, {
-        headers: { Accept: `application/json; profile="${PRESENTATION_CONTRACT_VERSION}"` },
-        credentials: 'same-origin',
-      })
-    } catch {
-      throw new ConsoleDataError('The Console BFF is unavailable.', 'NETWORK_ERROR', true)
-    }
-
+  private async request<T>(path: string, expectedKind: string, controller = new AbortController()): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let abortListener: (() => void) | undefined
     let payload: unknown
+    let response!: Response
     try {
-      payload = await response.json()
-    } catch {
-      throw new ConsoleDataError('The Console BFF returned an unreadable response.', 'CONTRACT_INCOMPATIBLE', false)
-    }
+      payload = await Promise.race([
+        new Promise<never>((_, reject) => {
+          abortListener = () => reject(controller.signal.reason instanceof ConsoleDataError ? controller.signal.reason : new ConsoleDataError('The Console BFF request was interrupted.', 'NETWORK_ERROR', true))
+          if (controller.signal.aborted) abortListener()
+          else controller.signal.addEventListener('abort', abortListener, { once: true })
+        }),
+        (async () => {
+          response = await this.fetcher(`${this.baseUrl}${path}`, {
+            headers: { Accept: `application/json; profile="${PRESENTATION_CONTRACT_VERSION}"` },
+            credentials: 'same-origin', signal: controller.signal,
+          })
+          // Authentication is an HTTP boundary, even for an empty or malformed body.
+          if (response.status === 401) throw new ConsoleDataError('Your session ended. Sign in again.', 'UNAUTHENTICATED', false)
+          try { return await response.json() as unknown }
+          catch { throw new ConsoleDataError('The Console BFF returned an unreadable response.', 'CONTRACT_INCOMPATIBLE', false) }
+        })(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new ConsoleDataError('The Console BFF request timed out.', 'NETWORK_ERROR', true))
+            controller.abort(new ConsoleDataError('The Console BFF request timed out.', 'NETWORK_ERROR', true))
+          }, BFF_REQUEST_TIMEOUT_MS)
+        }),
+      ])
+    } catch (error) {
+      if (error instanceof ConsoleDataError) throw error
+      throw new ConsoleDataError('The Console BFF is unavailable.', 'NETWORK_ERROR', true)
+    } finally { clearTimeout(timer); if (abortListener) controller.signal.removeEventListener('abort', abortListener) }
 
     const validation = validateConsoleResponse(payload)
     if (!validation.valid) {
@@ -131,18 +149,28 @@ export class BffConsoleAdapter implements ConsoleDataPort {
     return payload as T
   }
 
-  async getSnapshot(): Promise<PlatformSnapshot> {
+  async getSnapshot(controller = new AbortController()): Promise<PlatformSnapshot> {
     const [overview, clusters] = await Promise.all([
-      this.request<PlatformOverviewResponse>('/overview', 'PlatformOverview'),
-      this.request<ClusterListResponse>('/clusters', 'ClusterList'),
+      this.request<PlatformOverviewResponse>('/overview', 'PlatformOverview', controller),
+      this.request<ClusterListResponse>('/clusters', 'ClusterList', controller),
     ])
     const evidenceIds = new Set([
       ...clusters.data.items.map((cluster) => cluster.evidenceId),
       ...overview.data.recentPlacements.map((placement) => placement.evidenceId),
     ])
     const evidenceResults = await Promise.allSettled(
-      [...evidenceIds].map((id) => this.getEvidence(id)),
+      [...evidenceIds].map(async (id) => {
+        try { return await this.getEvidence(id, controller) }
+        catch (error) {
+          if (error instanceof ConsoleDataError && error.code === 'UNAUTHENTICATED') controller.abort(error)
+          throw error
+        }
+      }),
     )
+    for (const result of evidenceResults) {
+      if (result.status === 'rejected' && result.reason instanceof ConsoleDataError &&
+          (result.reason.code === 'UNAUTHENTICATED' || controller.signal.aborted)) throw result.reason
+    }
     const evidence = evidenceResults
       .filter((result): result is PromiseFulfilledResult<EvidenceRef | undefined> => result.status === 'fulfilled')
       .map((result) => result.value)
@@ -182,9 +210,9 @@ export class BffConsoleAdapter implements ConsoleDataPort {
     }
   }
 
-  async getCluster(id: string): Promise<Cluster | undefined> {
+  async getCluster(id: string, controller = new AbortController()): Promise<Cluster | undefined> {
     try {
-      const response = await this.request<ClusterDetailResponse>(`/clusters/${encodeURIComponent(id)}`, 'ClusterDetail')
+      const response = await this.request<ClusterDetailResponse>(`/clusters/${encodeURIComponent(id)}`, 'ClusterDetail', controller)
       return { ...clusterFromDetail(response.data), freshness: response.meta.freshness }
     } catch (error) {
       if (error instanceof ConsoleDataError && error.code === 'NOT_FOUND') return undefined
@@ -192,9 +220,9 @@ export class BffConsoleAdapter implements ConsoleDataPort {
     }
   }
 
-  async getEvidence(id: string): Promise<EvidenceRef | undefined> {
+  async getEvidence(id: string, controller = new AbortController()): Promise<EvidenceRef | undefined> {
     try {
-      const response = await this.request<EvidenceReferenceResponse>(`/evidence/${encodeURIComponent(id)}`, 'EvidenceReference')
+      const response = await this.request<EvidenceReferenceResponse>(`/evidence/${encodeURIComponent(id)}`, 'EvidenceReference', controller)
       return evidenceFromContract(response)
     } catch (error) {
       if (error instanceof ConsoleDataError && error.code === 'NOT_FOUND') return undefined

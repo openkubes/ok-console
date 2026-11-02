@@ -132,3 +132,45 @@ describe('BffConsoleAdapter', () => {
     expect(snapshot.warnings).toContain('1 evidence reference could not be loaded (NETWORK_ERROR).')
   })
 })
+
+it.each(['/overview', '/clusters', '/clusters/cluster-ok-ai', '/evidence/ev-test'])('R3 treats malformed HTTP 401 at %s as session-ended before JSON validation', async endpoint => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input).replace('/api/console/v0', '')
+    if (path === endpoint || endpoint.startsWith('/evidence/') && path.startsWith('/evidence/')) return new Response('not json', { status: 401 })
+    if (path === '/overview') return jsonResponse(platformOverview)
+    if (path === '/clusters') return jsonResponse(clusterList)
+    return jsonResponse(evidenceReference)
+  }) as typeof fetch
+  const adapter = new BffConsoleAdapter('/api/console/v0', fetcher)
+  const request = endpoint.startsWith('/clusters/') ? adapter.getCluster('cluster-ok-ai') : adapter.getSnapshot()
+  await expect(request).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+})
+it.each(['headers', 'body'])('R3 15s timeout covers %s and aborts sibling requests', async phase => {
+  vi.useFakeTimers()
+  try {
+    const signals: AbortSignal[] = []
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init!.signal!)
+      if (phase === 'headers') return new Promise<Response>(() => {})
+      return { status: 200, json: () => new Promise(() => {}) } as Response
+    }) as typeof fetch
+    const request = new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+    const check = expect(request).rejects.toMatchObject({ code: 'NETWORK_ERROR', message: expect.stringMatching(/timed out/) })
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(signals.every(signal => !signal.aborted)).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signals.length).toBe(2)
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    await check
+  } finally { vi.useRealTimers() }
+})
+it('R3 Evidence 401 is not swallowed by allSettled behind a hanging sibling', async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse(platformOverview)
+    if (url.endsWith('/clusters')) return jsonResponse(clusterList)
+    if (url.endsWith(clusterList.data.items[0].evidenceId)) return new Response(null, { status: 401 })
+    return new Promise<Response>(() => {})
+  }) as typeof fetch
+  await expect(new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+})

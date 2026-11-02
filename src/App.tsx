@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { capabilityPresentation, clusterPresentation, conservativeVerdict, evidencePresentation, observationPresentation, observedText, overviewPresentation, placementPresentation } from './observationPresentation'
 import { useObservationSnapshot } from './useObservationSnapshot'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import DiagnosticWidget from './DiagnosticWidget'
 import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
-import { consoleData, consoleDataMode } from './data/consoleData'
+import { consoleDataMode } from './data/consoleData'
 import { platformFixture } from './data/fixtures'
 import { ConsoleDataError } from './data/bffAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
@@ -66,7 +66,7 @@ function ObservationLabel({ presentation }: { presentation: ReturnType<typeof ob
 function EvidenceOutcome({ item, fixture = false }: { item: EvidenceRef; fixture?: boolean }) {
   const presentation = evidencePresentation(item, fixture)
   if (fixture) return <StatusBadge status={item.outcome}/>
-  return <span><ObservationLabel presentation={presentation}/>{presentation.stale || (item.immutable && presentation.verdict !== 'Unknown')
+  return <span><ObservationLabel presentation={presentation}/>{(item.freshness !== 'Current' && item.outcome !== 'Unknown') || presentation.stale || (item.immutable && presentation.verdict !== 'Unknown')
     ? <span className="status status-unknown">Last observed: {item.outcome}</span>
     : <StatusBadge status={presentation.verdict === 'Unknown' ? 'Unknown' : item.outcome}/>}</span>
 }
@@ -117,14 +117,16 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
   const presentation = overviewPresentation(data)
   const overview = data.overview
   const observedMetric = (value: number | null) => value ?? 'Unavailable'
+  const OverviewMetric = (props: Parameters<typeof Metric>[0]) => <Metric {...props} value={data.source === 'bff' && !presentation.current ? 'Unavailable' : props.value} note={data.source === 'bff' && !presentation.current ? 'Unavailable' : props.note}/>
   return <>
     <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><ObservationLabel presentation={presentation}/> · {data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
     <FreshnessWarning data={data} freshness={data.freshness}/>
+    {data.source === 'bff' && data.evidence.some(item => item.immutable) && <p className="receipt-note">Immutable Evidence receipts are retained separately from mutable observations.</p>}
     <section className="metrics-grid" aria-label="Platform metrics">
-      <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
-      <Metric label="Capabilities" value={overview ? observedMetric(overview.capabilities.total) : data.capabilities.length} note={`${overview ? observedMetric(overview.capabilities.ready) : 5} conformant · ${overview ? observedMetric(overview.capabilities.pending) : 2} converging`} tone="green"/>
-      <Metric label="Workload claims" value={overview ? observedMetric(overview.workloadClaims.total) : data.claims.length} note={`${overview ? observedMetric(overview.workloadClaims.ready) : 1} ready · ${overview ? observedMetric(overview.workloadClaims.pending) : 2} in progress`} tone="orange"/>
-      <Metric label="Open findings" value={overview ? observedMetric(overview.openFindings.total) : 2} note={`${overview ? observedMetric(overview.openFindings.critical) : 0} critical policy violations`} tone="red"/>
+      <OverviewMetric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
+      <OverviewMetric label="Capabilities" value={overview ? observedMetric(overview.capabilities.total) : data.capabilities.length} note={`${overview ? observedMetric(overview.capabilities.ready) : 5} conformant · ${overview ? observedMetric(overview.capabilities.pending) : 2} converging`} tone="green"/>
+      <OverviewMetric label="Workload claims" value={overview ? observedMetric(overview.workloadClaims.total) : data.claims.length} note={`${overview ? observedMetric(overview.workloadClaims.ready) : 1} ready · ${overview ? observedMetric(overview.workloadClaims.pending) : 2} in progress`} tone="orange"/>
+      <OverviewMetric label="Open findings" value={overview ? observedMetric(overview.openFindings.total) : 2} note={`${overview ? observedMetric(overview.openFindings.critical) : 0} critical policy violations`} tone="red"/>
     </section>
     <section className="section-block">
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
@@ -456,7 +458,7 @@ type ShellEntry = {
 
 const MUTATING_COMMAND = /\b(apply|create|delete|edit|patch|replace|scale|cordon|drain|uncordon|exec|rollout\s+restart|set\s+image)\b/i
 
-function simulatedShellResponse(command: string, cluster: Cluster, source: PlatformSnapshot['source']): ShellEntry[] {
+function simulatedShellResponse(command: string, cluster: Cluster, source: PlatformSnapshot['source'], presentation?: ReturnType<typeof observationPresentation>, readinessCluster = cluster): ShellEntry[] {
   const normalized = command.trim().toLowerCase()
   if (MUTATING_COMMAND.test(normalized)) {
     return [{ kind: 'blocked', content: 'BLOCKED · This read-only prototype cannot invoke a mutating operation. A production request would enter Review → Authorization → Execution.' }]
@@ -491,12 +493,12 @@ function simulatedShellResponse(command: string, cluster: Cluster, source: Platf
     return [{ kind: 'output', content: `This shell session holds the following lifecycle snapshot:\n` + cluster.lifecycle.map((item) => `${item.label.padEnd(18)} ${item.state.padEnd(8)} ${item.detail}`).join('\n') }]
   }
   if (normalized.includes('evidence')) {
-    return [{ kind: 'output', content: `This shell session holds the following evidence snapshot:\nEVIDENCE     ${cluster.evidenceId}\nCONTRACT     ${cluster.contractVersion}\nREVISION     ${cluster.revision}\nREADINESS    ${cluster.readiness}\nSOURCE       ${source ?? 'unspecified'}` }]
+    return [{ kind: 'output', content: `This shell session holds the following evidence snapshot:\nEVIDENCE     ${cluster.evidenceId}\nCONTRACT     ${cluster.contractVersion}\nREVISION     ${cluster.revision}\nREADINESS    ${presentation && !presentation.current ? `Unknown (${presentation.label}; Last observed: ${readinessCluster.readiness})` : `${readinessCluster.readiness}${presentation ? ` (${presentation.label})` : ''}`}\nSOURCE       ${source ?? 'unspecified'}` }]
   }
   return [{ kind: 'blocked', content: 'UNKNOWN · This command is not in the prototype read-only allowlist. Type “help” to see supported diagnostics.' }]
 }
 
-function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: PlatformSnapshot['source']; close: () => void }) {
+function ClusterShell({ cluster, source, presentation, readinessCluster = cluster, close }: { cluster: Cluster; source: PlatformSnapshot['source']; presentation?: ReturnType<typeof observationPresentation>; readinessCluster?: Cluster; close: () => void }) {
   const [namespace, setNamespace] = useState('all namespaces')
   const [command, setCommand] = useState('')
   const [entries, setEntries] = useState<ShellEntry[]>([
@@ -511,7 +513,7 @@ function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: Pl
       setCommand('')
       return
     }
-    setEntries((current) => [...current, { kind: 'command', content: nextCommand }, ...simulatedShellResponse(nextCommand, cluster, source)])
+    setEntries((current) => [...current, { kind: 'command', content: nextCommand }, ...simulatedShellResponse(nextCommand, cluster, source, presentation, readinessCluster)])
     setCommand('')
   }
 
@@ -552,12 +554,12 @@ function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: Pl
   </div>
 }
 
-function EvidenceDrawer({ item, close, fixture }: { item: EvidenceRef; close: () => void; fixture: boolean }) {
+function EvidenceDrawer({ item, close, fixture, observedStale = false }: { item: EvidenceRef; close: () => void; fixture: boolean; observedStale?: boolean }) {
   const staleReason = Date.parse(item.observedAt) > Date.now() + 60_000
     ? 'dated in the future (clock fault)'
     : 'older than the freshness window'
   const presentation = evidencePresentation(item, fixture)
-  const durability = presentation.stale
+  const durability = presentation.stale || observedStale
     ? `${item.immutable ? 'Immutable receipt · ' : ''}Stale observation: ${staleReason}`
     : item.immutable ? presentation.label : presentation.current ? 'Current, freshness-bound observation' : presentation.label
   return <div className="drawer-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><header><div><span className="eyebrow">{item.type}</span><h2 id="evidence-title">{item.title}</h2></div><button className="icon-button" onClick={close} aria-label="Close evidence"><Icon name="x"/></button></header><EvidenceOutcome item={item} fixture={fixture}/><p className="drawer-summary">{observedText(item.summary, presentation.current)}</p><dl className="evidence-details"><div><dt>Cluster</dt><dd>{item.cluster}</dd></div><div><dt>Contract</dt><dd>{item.contract}</dd></div><div><dt>Revision / digest</dt><dd>{item.revision}</dd></div><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Observed at</dt><dd>{new Date(item.observedAt).toLocaleString()}</dd></div><div><dt>Durability</dt><dd>{durability}</dd></div></dl><div className="provenance-box"><Icon name="shield"/><div><strong>Provenance visible</strong><p>This projection is redaction-safe fixture data. It does not expose credentials, kubeconfigs, or raw private evidence.</p></div></div><button className="secondary-button full-button" onClick={close}>Close</button></aside></div>
@@ -575,8 +577,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   const [shellCluster, setShellCluster] = useState<Cluster>()
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRef>()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [loadAttempt, setLoadAttempt] = useState(0)
-  const [clusterDetailError, setClusterDetailError] = useState<ConsoleDataError>()
+  const [loadAttempt] = useState(0)
 
   useEffect(() => {
     if (auth.mode === 'prototype') return
@@ -609,56 +610,22 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     }
   }
 
-  const observation = useObservationSnapshot(Boolean(session), loadAttempt)
-  const detailGeneration = useRef(0)
-  const [detailCaps, setDetailCaps] = useState<Record<string, { arrivedAt: number; verdict: Cluster['freshness']; released?: string[] }>>({})
-  const rawData = observation.data
-  const data = rawData && {
-    ...rawData,
-    evidence: rawData.evidence.map(item => {
-      const cap = detailCaps[item.cluster]
-      return cap && !cap.released?.includes(item.id) && !(observation.startedAt > cap.arrivedAt && item.freshness === 'Current')
-        ? { ...item, freshness: conservativeVerdict(item.freshness, cap.verdict) } : item
-    }),
+  const endSession = () => {
+    setSelectedCluster(undefined); setSelectedEvidence(undefined); setShellCluster(undefined)
+    setSession(undefined); setAuthError('Your session ended. Sign in again.')
   }
-  // Release each Evidence cap only after a later snapshot explicitly restores its currency.
-  // Remember releases so a subsequent Stale response cannot resurrect an older Unknown cap.
-  useEffect(() => {
-    if (!rawData) return
-    setDetailCaps(caps => {
-      let updated = caps
-      for (const item of rawData.evidence) {
-        const cap = updated[item.cluster]
-        if (!cap || observation.startedAt <= cap.arrivedAt || item.freshness !== 'Current' || cap.released?.includes(item.id)) continue
-        if (updated === caps) updated = { ...caps }
-        updated[item.cluster] = { ...cap, released: [...(cap.released ?? []), item.id] }
-      }
-      return updated
-    })
-  }, [rawData, observation.startedAt])
-  const openCluster = (cluster: Cluster) => {
-    const request = ++detailGeneration.current
-    setSelectedCluster(cluster)
-    setClusterDetailError(undefined)
-    if (consoleDataMode === 'bff') {
-      consoleData.getCluster(cluster.id).then(detail => {
-        if (request !== detailGeneration.current) return
-        const verdict = conservativeVerdict(detail?.freshness, detail?.readiness === 'Unknown' ? 'Unknown' : 'Current')
-        const cap = { arrivedAt: performance.now(), verdict }
-        setDetailCaps(caps => ({ ...caps, [cluster.id]: cap, [cluster.name]: cap }))
-        setSelectedCluster(detail ?? { ...cluster, freshness: 'Unknown' })
-      }).catch((error: unknown) => {
-        if (request !== detailGeneration.current) return
-        const cap = { arrivedAt: performance.now(), verdict: 'Unknown' as const }
-        setDetailCaps(caps => ({ ...caps, [cluster.id]: cap, [cluster.name]: cap }))
-        setSelectedCluster({ ...cluster, freshness: 'Unknown' })
-        setClusterDetailError(error instanceof ConsoleDataError ? error : new ConsoleDataError('Cluster detail could not be loaded.', 'INTERNAL_ERROR', true))
-      })
-    }
+  const observation = useObservationSnapshot(Boolean(session), loadAttempt, selectedCluster, endSession)
+  const clusterDetailError = observation.detailError
+  const effectiveDetail = observation.detail
+  const data = observation.data && {
+    ...observation.data,
+    evidence: observation.data.evidence.map(item => effectiveDetail &&
+      (item.cluster === effectiveDetail.id || item.cluster === effectiveDetail.name)
+      ? { ...item, freshness: conservativeVerdict(item.freshness, effectiveDetail.freshness, effectiveDetail.readiness === 'Unknown' ? 'Unknown' : 'Current') } : item),
   }
+  const openCluster = (cluster: Cluster) => setSelectedCluster(cluster)
   useEffect(() => {
     const onHash = () => {
-      ++detailGeneration.current
       setPage(pageFromHash())
       setSelectedCluster(undefined)
       setShellCluster(undefined)
@@ -679,9 +646,9 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
 
   if (authStatus === 'checking') return <AuthLoading/>
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
-  if (observation.error && !data) return <LoadFailure error={observation.error} retry={() => setLoadAttempt(attempt => attempt + 1)}/>
+  if (observation.error && !data) return <LoadFailure error={observation.error} retry={observation.retry}/>
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={{ ...selectedCluster, freshness: conservativeVerdict(selectedCluster.freshness, observation.aged ? 'Stale' : 'Current') }} data={data} detailError={clusterDetailError} close={() => { ++detailGeneration.current; setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
+  const view = selectedCluster ? <ClusterDetail cluster={effectiveDetail ?? selectedCluster} data={data} detailError={clusterDetailError} close={() => setSelectedCluster(undefined)} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
@@ -695,11 +662,11 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
-      <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
+      <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="environment-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
       <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</span></footer></main>
     </div>
-    <DiagnosticWidget data={data} openEvidence={setSelectedEvidence}/>
-    {selectedEvidence && <EvidenceDrawer fixture={data.source !== 'bff'} item={data.evidence.find(item => item.id === selectedEvidence.id) ?? { ...selectedEvidence, freshness: 'Unknown' }} close={() => setSelectedEvidence(undefined)}/>}
-    {shellCluster && <ClusterShell cluster={shellCluster} source={data.source} close={() => setShellCluster(undefined)}/>}
+    <DiagnosticWidget generation={observation.generation} data={data} openEvidence={setSelectedEvidence}/>
+    {selectedEvidence && <EvidenceDrawer observedStale={observation.originalEvidence?.some(item => item.id === selectedEvidence.id && item.freshness === 'Stale')} fixture={data.source !== 'bff'} item={data.evidence.find(item => item.id === selectedEvidence.id) ?? { ...selectedEvidence, freshness: 'Unknown' }} close={() => setSelectedEvidence(undefined)}/>}
+    {shellCluster && <ClusterShell cluster={shellCluster} readinessCluster={effectiveDetail?.id === shellCluster.id ? effectiveDetail : shellCluster} source={data.source} presentation={consoleDataMode === 'bff' ? clusterPresentation(effectiveDetail?.id === shellCluster.id ? effectiveDetail : shellCluster, data) : undefined} close={() => setShellCluster(undefined)}/>}
   </div>
 }

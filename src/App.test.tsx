@@ -431,7 +431,7 @@ describe('OpenKubes Console', () => {
     const detail = vi.spyOn(consoleData, 'getCluster').mockImplementation((id) => adapter.getCluster(id))
     try {
       const shell = await openShell()
-      expect(detail).toHaveBeenCalledExactlyOnceWith('cluster-ok-mgmt')
+      expect(detail).toHaveBeenCalledExactlyOnceWith('cluster-ok-mgmt', expect.any(AbortController))
       expect(screen.queryByText('Endpoint observed through the management plane')).not.toBeInTheDocument()
       release()
       if (status === 'resolved') {
@@ -458,7 +458,7 @@ describe('OpenKubes Console', () => {
       shell.run('evidence')
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'evidence'),
-        entry('output', 'This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Ready\nSOURCE       bff'),
+        entry('output', `This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Unknown (Observation unavailable - readiness Unknown; Last observed: ${status === 'resolved' ? 'Failed' : 'Ready'})\nSOURCE       bff`),
       ])
     } finally {
       release()

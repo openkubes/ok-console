@@ -44,21 +44,20 @@ export function placementPresentation(claim: WorkloadClaim, data: PlatformSnapsh
 }
 
 export function overviewPresentation(data: PlatformSnapshot) {
+  const immutableBasis = (id: string) => data.evidence.some(item => item.id === id && item.immutable)
   const items = [
-    ...[...new Map(data.clusters.map(item => [item.id, item])).values()].map(item => clusterPresentation(item, data)),
-    ...[...new Map(data.claims.map(item => [item.id, item])).values()].map(item => placementPresentation(item, data)),
+    ...[...new Map(data.clusters.map(item => [item.id, item])).values()].filter(item => !immutableBasis(item.evidenceId)).map(item => clusterPresentation(item, data)),
+    ...[...new Map(data.claims.map(item => [item.id, item])).values()].filter(item => !immutableBasis(item.evidenceId)).map(item => placementPresentation(item, data)),
   ]
   const unavailable = items.filter(item => item.verdict === 'Unknown').length
   const stale = items.filter(item => item.verdict === 'Stale').length
-  const historical = items.filter(item => item.label.startsWith('Immutable receipt')).length
-  const evidence = data.evidence.map(item => evidencePresentation(item))
+  const evidence = data.evidence.filter(item => !item.immutable).map(item => evidencePresentation(item))
   const metrics = data.overview && [data.overview.capabilities, data.overview.workloadClaims, data.overview.openFindings]
   const metricsVerdict = metrics?.some(metric => Object.values(metric).some(value => value === null)) ? 'Unknown' : 'Current'
   const verdict = conservativeVerdict(data.freshness, data.clusterListFreshness, metricsVerdict, ...items.map(item => item.verdict), ...evidence.map(item => item.verdict))
   const presentation = observationPresentation({ freshness: verdict, state: 'Ready', fixture: data.source !== 'bff' })
   if (data.source !== 'bff') return presentation
-  if (unavailable || stale || historical) return { ...presentation, current: false, label: [stale && `${stale} items stale`, unavailable && `${unavailable} unavailable`, historical && `${historical} historical receipts`].filter(Boolean).join(', ') + '. Readiness is suppressed for affected items.' }
-  if (evidence.some(item => !item.current) && presentation.current) return { ...presentation, current: false, label: 'Historical Evidence receipts' }
+  if (unavailable || stale) return { ...presentation, current: false, label: [stale && `${stale} item${stale === 1 ? '' : 's'} stale`, unavailable && `${unavailable} unavailable`].filter(Boolean).join(', ') + '. Readiness is suppressed for affected items.' }
   if (metricsVerdict === 'Unknown') return { ...presentation, current: false, label: 'Metrics unavailable' }
   return presentation
 }

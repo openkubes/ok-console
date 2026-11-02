@@ -341,3 +341,5 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 
 @media (max-width: 820px) { .diagnostic-widget { right: 16px; bottom: 16px; } }
+
+.environment-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }

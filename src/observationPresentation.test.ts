@@ -59,11 +59,11 @@ describe('observationPresentation', () => {
   })
 })
 
-it('historical Evidence alone cannot grant global currency', () => {
+it('immutable Evidence is excluded from the mutable header aggregate', () => {
   const data = structuredClone(platformFixture)
   Object.assign(data, { source: 'bff', freshness: 'Current', clusterListFreshness: 'Current', clusters: [], claims: [] })
   data.evidence = [{ ...data.evidence[0], freshness: 'Current', outcome: 'Ready', immutable: true }]
-  expect(overviewPresentation(data)).toMatchObject({ current: false, label: 'Historical Evidence receipts' })
+  expect(overviewPresentation(data)).toMatchObject({ current: true, label: 'Current observation' })
   data.evidence[0].immutable = false
   expect(overviewPresentation(data).current).toBe(true)
 })

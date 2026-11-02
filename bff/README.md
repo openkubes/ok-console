@@ -240,7 +240,18 @@ Migration `003_local_access_throttle.sql` adds digest-only, database-time
 throttling shared by all BFF replicas. Five failed attempts in a 15-minute
 window block that principal for 15 minutes; 50 failures across rotating
 principals also activate a shared global bucket. The digest is HMAC-peppered so
-the table does not disclose configured usernames. Edge/IP rate limiting remains
+the table does not disclose configured usernames. Before password derivation, a
+transaction locks both rows in digest order, checks their previous block state,
+and durably reserves one attempt on each. A reservation error refuses access
+before any password work. The internal global-bucket name is reserved; attempts
+that alias it fail unavailable before derivation. Already-blocked attempts are audited as THROTTLED
+without incrementing counters or extending the deadline. A wrong password keeps
+the reservation; it is not counted twice. Success atomically deletes the
+principal row and releases one global count only in the reserved window (never
+below zero), clearing a threshold block if the remaining count is below 50.
+A release error refuses access before session creation and keeps the reservation.
+In-flight attempts and failed dependencies can therefore conservatively consume
+budget; successful logins do not. Edge/IP rate limiting remains
 a deployment control because the BFF does not invent trust in proxy headers.
 
 Every attempt requires a 12–512 character operational reason and writes
@@ -512,7 +523,7 @@ Projection and response-writing exceptions therefore remain visible.
 
 Local-access dependency failures emit LOCAL_ACCESS_FAILED once for the unavailable
 operation, at the reached lifecycle stage (normally REQUEST_RECEIVED). The closed
-cause steps are THROTTLE_CHECK, THROTTLE_FAILURE, THROTTLE_RESET, KDF,
+cause steps are THROTTLE_RESERVE, THROTTLE_RESET, KDF,
 SESSION_STORE and AUDIT, with OTHER for an unknown step. These identify the exact
 verifier operation without adding lifecycle stages. errorCode uses the preserved
 cause and the shared classifier. A failed compensating revoke adds a

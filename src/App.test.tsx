@@ -445,7 +445,7 @@ describe('OpenKubes Console', () => {
       fireEvent.click(shell.getByRole('button', { name: 'ok evidence explain' }))
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'ok evidence explain'),
-        entry('ai', `This shell session holds readiness Unknown (Observation unavailable - readiness Unknown; Last observed: ${status === 'resolved' ? 'Failed' : 'Ready'}) for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.`),
+        entry('ai', `This shell session holds readiness Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'}) for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.`),
         proposal,
       ])
       shell.run('clear')
@@ -458,7 +458,7 @@ describe('OpenKubes Console', () => {
       shell.run('evidence')
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'evidence'),
-        entry('output', `This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Unknown (Observation unavailable - readiness Unknown; Last observed: ${status === 'resolved' ? 'Failed' : 'Ready'})\nSOURCE       bff`),
+        entry('output', `This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'})\nSOURCE       bff`),
       ])
     } finally {
       release()

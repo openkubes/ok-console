@@ -109,7 +109,7 @@ it('R4 poll detects a forward wall jump without an external event', async () => 
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   // Delay the independent ceiling tick to exercise the poll check in isolation.
   const schedule = window.setTimeout
-  vi.spyOn(window, 'setTimeout').mockImplementation((handler, delay, ...args) => schedule(handler, delay === 1_000 ? 120_000 : delay, ...args))
+  vi.spyOn(window, 'setTimeout').mockImplementation((handler, delay, ...args) => schedule(handler, delay === 60_000 ? 120_000 : delay, ...args))
   const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
   vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot()).mockImplementation(() => new Promise(() => {}))
   const { result } = renderHook(() => useObservationSnapshot(true))
@@ -151,17 +151,85 @@ it('R4 keeps the detail error object throughout retries until success', async ()
   await act(async () => { resolve(cluster) })
   expect(result.current.detailError).toBeUndefined()
 })
-it('R4 ceiling timer detects wall gaps between polls, and backward clocks cannot upgrade', async () => {
+it('R5 poll detects wall gaps, and backward clocks cannot upgrade', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
   const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
   const requests = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot()).mockImplementation(() => new Promise(() => {}))
   const { result } = renderHook(() => useObservationSnapshot(true))
   await act(async () => {})
   now.mockReturnValue(601_000)
-  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
   expect(result.current.data?.freshness).toBe('Stale')
   now.mockReturnValue(0)
-  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
   expect(result.current.data?.freshness).toBe('Stale')
+  expect(requests).toHaveBeenCalledTimes(2)
+})
+
+
+it.each(['wheel', 'pointerdown'])('R5 scroll cannot resume or reset idle; %s resumes once', async input => {
+  vi.useFakeTimers()
+  const requests = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(snapshot())
+  const listeners = vi.spyOn(window, 'addEventListener')
+  renderHook(() => useObservationSnapshot(true))
+  await act(async () => {})
+  await act(async () => { await vi.advanceTimersByTimeAsync(240_000) })
+  requests.mockClear()
+  await act(async () => {
+    window.dispatchEvent(new Event('scroll'))
+    // jsdom cannot manufacture a trusted event. Deliver a trusted-like event
+    // directly to any registered scroll handler, independent of dispatch trust.
+    for (const [type, listener] of listeners.mock.calls) {
+      if (type === 'scroll' && typeof listener === 'function') listener.call(window, { type: 'scroll', isTrusted: true } as Event)
+    }
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(30_000)
+  })
+  expect(requests).toHaveBeenCalledTimes(0)
+  await act(async () => { window.dispatchEvent(new Event(input)) })
   expect(requests).toHaveBeenCalledTimes(1)
+})
+
+it('R5 fresh observations cause no renders between polls; the ceiling still demotes', async () => {
+  vi.useFakeTimers()
+  const requests = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(snapshot())
+  let renders = 0
+  const { result } = renderHook(() => { renders++; return useObservationSnapshot(true) })
+  await act(async () => {})
+  for (let poll = 0; poll < 2; poll++) {
+    const before = renders
+    for (let second = 0; second < 29; second++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+      expect(renders).toBe(before)
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  }
+  requests.mockImplementation(() => new Promise(() => {}))
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_999) })
+  expect(result.current.data?.freshness).toBe('Current')
+  await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+  expect(result.current.data?.freshness).toBe('Stale')
+})
+
+
+it('R6 a forward wall gap demotes within one second with performance frozen', async () => {
+  vi.useFakeTimers()
+  vi.spyOn(performance, 'now').mockReturnValue(0)
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(snapshot())
+  let renders = 0
+  const { result } = renderHook(() => { renders++; return useObservationSnapshot(true) })
+  await act(async () => {})
+  const before = renders
+  for (let second = 0; second < 25; second++) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    expect(renders).toBe(before)
+  }
+  vi.setSystemTime(Date.now() + 600_000)
+  await act(async () => { await vi.advanceTimersByTimeAsync(999) })
+  expect(result.current.data?.freshness).toBe('Current')
+  await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+  expect(result.current.data?.freshness).toBe('Stale')
+  const demoted = renders
+  await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+  expect(renders).toBe(demoted)
 })

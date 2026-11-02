@@ -141,7 +141,7 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
       }
       if (!idle && document.visibilityState === 'visible') refresh('auto')
     }, SNAPSHOT_POLL_MS)
-    const inputs = ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'scroll']
+    const inputs = ['pointerdown', 'pointermove', 'keydown', 'touchstart', 'wheel']
     inputs.forEach(event => window.addEventListener(event, input, { passive: true, capture: true }))
     window.addEventListener('hashchange', visibleRefresh)
     window.addEventListener('focus', visibleRefresh)
@@ -167,7 +167,7 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
     if (consoleDataMode !== 'bff') return
     const starts = [result?.startedAt, detail?.startedAt].filter((value): value is number => value !== undefined && performance.now() - value < BROWSER_OBSERVATION_CEILING_MS)
     if (!starts.length) return
-    const timer = window.setTimeout(() => checkWallRef.current(), Math.max(0, Math.min(1_000, Math.min(...starts) + BROWSER_OBSERVATION_CEILING_MS - performance.now())))
+    const timer = window.setTimeout(() => checkWallRef.current(), Math.max(0, Math.min(...starts) + BROWSER_OBSERVATION_CEILING_MS - performance.now()))
     return () => window.clearTimeout(timer)
   }, [result, detail, tick])
   useEffect(() => {
@@ -206,5 +206,24 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
     readiness: loadedDetail && result && loadedDetail.startedAt >= result.startedAt ? basis.readiness : summary?.readiness ?? basis.readiness,
     freshness: conservativeVerdict(basis.freshness, summary?.freshness, basis.readiness === 'Unknown' || summary?.readiness === 'Unknown' ? 'Unknown' : 'Current', detailAged ? 'Stale' : 'Current'),
   }
+  const snapshotCurrent = !!data && [data.freshness, data.clusterListFreshness, ...data.clusters.map(item => item.freshness), ...data.evidence.map(item => item.freshness)].includes('Current')
+  const detailCurrent = effectiveDetail?.freshness === 'Current'
+  useEffect(() => {
+    if (!enabled || consoleDataMode !== 'bff' || !snapshotCurrent && !detailCurrent) return
+    let timer: number | undefined
+    const check = () => {
+      // Wall time catches suspend gaps even when the monotonic ceiling has not elapsed.
+      // Do not call a setter on quiet ticks: even a repeated value can schedule a render.
+      if (snapshotCurrent && result && !wallAged && Date.now() - result.wallStart >= BROWSER_OBSERVATION_CEILING_MS) setWallAged(true)
+      if (detailCurrent && detail && !detailWallAged && Date.now() - detail.wallStart >= BROWSER_OBSERVATION_CEILING_MS) setDetailWallAged(true)
+    }
+    const watch = () => {
+      window.clearInterval(timer)
+      if (document.visibilityState === 'visible') timer = window.setInterval(check, 1_000)
+    }
+    watch()
+    document.addEventListener('visibilitychange', watch)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', watch) }
+  }, [enabled, snapshotCurrent, detailCurrent, result, detail, wallAged, detailWallAged])
   return { data, originalEvidence: rawData?.evidence, detail: effectiveDetail, detailError, startedAt: result?.startedAt ?? -Infinity, generation: result?.generation ?? 0, error, aged, loading, retry: () => refreshRef.current('retry') }
 }

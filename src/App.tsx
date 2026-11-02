@@ -466,7 +466,7 @@ type ShellEntry = {
 const MUTATING_COMMAND = /\b(apply|create|delete|edit|patch|replace|scale|cordon|drain|uncordon|exec|rollout\s+restart|set\s+image)\b/i
 
 function simulatedShellResponse(command: string, cluster: Cluster, source: PlatformSnapshot['source'], presentation?: ReturnType<typeof observationPresentation>, readinessCluster = cluster): ShellEntry[] {
-  const readiness = presentation && !presentation.current ? `Unknown (${presentation.label}; Last observed: ${readinessCluster.readiness})` : `${readinessCluster.readiness}${presentation ? ` (${presentation.label})` : ''}`
+  const readiness = presentation && !presentation.current ? `Unknown (last observed ${readinessCluster.readiness})` : `${readinessCluster.readiness}${presentation ? ` (${presentation.label})` : ''}`
   const normalized = command.trim().toLowerCase()
   if (MUTATING_COMMAND.test(normalized)) {
     return [{ kind: 'blocked', content: 'BLOCKED · This read-only prototype cannot invoke a mutating operation. A production request would enter Review → Authorization → Execution.' }]

@@ -513,8 +513,8 @@ it('R4 Shell qualifies explain and conditions; older currency becomes history at
   expect(document.querySelector('.terminal-output')).toHaveTextContent('Earlier output')
   fireEvent.click(screen.getByRole('button', { name: 'ok evidence explain' }))
   fireEvent.click(screen.getByRole('button', { name: 'kubectl get clusterconditions -o wide' }))
-  expect(document.querySelector('.terminal-output')).toHaveTextContent('readiness Unknown (Last observed; Last observed: Ready)')
-  expect(document.querySelector('.terminal-output')).toHaveTextContent('lifecycle snapshot (Unknown (Last observed; Last observed: Ready))')
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('readiness Unknown (last observed Ready)')
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('lifecycle snapshot (Unknown (last observed Ready))')
 }, 30_000)
 it('R4 a new widget answer on unavailable data is timestamped without calling it earlier', async () => {
   await mount('overview', 'Unknown')

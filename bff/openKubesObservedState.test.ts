@@ -835,7 +835,7 @@ describe('typed producer output contract', () => {
     envelope.data.clusters[0].name = name
     expect(normalizeOpenKubesObservedState(envelope).clusters[0].name).toBe(name)
   })
-  it.each([undefined, null, 7, '', 'a'.repeat(64), 'a'.repeat(254), 'a'.repeat(513), '-a', 'a-', 'A', 'a..b', ' leading', 'a\n', 'a\t', 'ａ', 'name extra'])('rejects invalid cluster names %s', async (value) => {
+  it.each([undefined, null, 7, '', 'a'.repeat(64), 'a'.repeat(254), 'a'.repeat(63) + '.' + 'b'.repeat(63) + '.' + 'c'.repeat(63) + '.' + 'd'.repeat(62), 'a'.repeat(513), '-a', 'a-', 'A', 'a..b', ' leading', 'a\n', 'a\t', 'ａ', 'name extra'])('rejects invalid cluster names %s', async (value) => {
     const envelope = await golden()
     envelope.data.clusters[0].name = value
     expect(() => normalizeOpenKubesObservedState(envelope)).toThrow()

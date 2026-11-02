@@ -4,7 +4,7 @@ import { useObservationSnapshot } from './useObservationSnapshot'
 import { consoleData } from './data/consoleData'
 import { ConsoleDataError } from './data/bffAdapter'
 import { platformFixture } from './data/fixtures'
-import type { PlatformSnapshot } from './domain/contracts'
+import type { Cluster, PlatformSnapshot } from './domain/contracts'
 
 vi.mock('./data/consoleData', async original => ({ ...await original<typeof import('./data/consoleData')>(), consoleDataMode: 'bff' }))
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
@@ -14,7 +14,7 @@ it.each(['success', '401'] as const)('R3 old session %s cannot populate or sign 
   let reject!: (error: Error) => void
   vi.spyOn(consoleData, 'getSnapshot').mockImplementationOnce(() => new Promise((done, fail) => { resolve = done; reject = fail })).mockResolvedValue(snapshot())
   const ended = vi.fn()
-  const { result, rerender } = renderHook(({ enabled }) => useObservationSnapshot(enabled, 0, undefined, ended), { initialProps: { enabled: true } })
+  const { result, rerender } = renderHook(({ enabled }) => useObservationSnapshot(enabled, undefined, ended), { initialProps: { enabled: true } })
   rerender({ enabled: false }); rerender({ enabled: true })
   await act(async () => {})
   const applied = result.current.generation
@@ -27,7 +27,7 @@ it('R3 idle boundary discards an automatic queued follow-up before the in-flight
   vi.useFakeTimers()
   let resolve!: (data: PlatformSnapshot) => void
   const fetch = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot()).mockImplementationOnce(() => new Promise(done => { resolve = done })).mockResolvedValue(snapshot())
-  renderHook(() => useObservationSnapshot(true, 0))
+  renderHook(() => useObservationSnapshot(true))
   await act(async () => {})
   await act(async () => { await vi.advanceTimersByTimeAsync(240_000) })
   expect(fetch).toHaveBeenCalledTimes(2)
@@ -41,7 +41,7 @@ it('R3 snapshot failure demotes detail independently; detail recovery alone cann
   const cluster = data.clusters[0]
   const fetch = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
   vi.spyOn(consoleData, 'getCluster').mockResolvedValue(cluster)
-  const { result } = renderHook(() => useObservationSnapshot(true, 0, cluster))
+  const { result } = renderHook(() => useObservationSnapshot(true, cluster))
   await act(async () => {})
   fetch.mockRejectedValueOnce(new Error('snapshot unavailable'))
   await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
@@ -55,7 +55,7 @@ it('R3 later-started snapshot wins until the same-generation detail arrives and 
   data.clusters = [cluster]
   const fetch = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
   const detailFetch = vi.spyOn(consoleData, 'getCluster').mockResolvedValue(cluster)
-  const { result } = renderHook(() => useObservationSnapshot(true, 0, cluster))
+  const { result } = renderHook(() => useObservationSnapshot(true, cluster))
   await act(async () => {})
   let resolve!: (value: typeof cluster) => void
   fetch.mockResolvedValue({ ...data, clusters: [{ ...cluster, readiness: 'Failed' }] })
@@ -71,7 +71,97 @@ it.each(['snapshot', 'detail'])('R3 Unknown readiness in the %s independently su
   data.clusters = [{ ...cluster, readiness: unknown === 'snapshot' ? 'Unknown' : 'Ready' }]
   vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
   vi.spyOn(consoleData, 'getCluster').mockResolvedValue({ ...cluster, readiness: unknown === 'detail' ? 'Unknown' : 'Ready' })
-  const { result } = renderHook(() => useObservationSnapshot(true, 0, cluster))
+  const { result } = renderHook(() => useObservationSnapshot(true, cluster))
   await act(async () => {})
   expect(result.current.detail?.freshness).toBe('Unknown')
+})
+it('R4 older snapshot cannot release a newer detail cap while its snapshot is pending', async () => {
+  vi.useFakeTimers()
+  const data = snapshot()
+  const cluster = { ...data.clusters[0], freshness: 'Current' as const, readiness: 'Ready' as const }
+  data.clusters = [cluster]
+  data.evidence = [{ ...data.evidence[0], id: cluster.evidenceId, cluster: cluster.id, freshness: 'Current', outcome: 'Ready' }]
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(data).mockImplementation(() => new Promise(() => {}))
+  vi.spyOn(consoleData, 'getCluster').mockResolvedValueOnce(cluster).mockResolvedValue({ ...cluster, freshness: 'Unknown' })
+  const { result } = renderHook(() => useObservationSnapshot(true, cluster))
+  await act(async () => {})
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+  expect(result.current.data?.evidence[0].freshness).toBe('Unknown')
+})
+it('R4 A to B to A rejects the first A detail by selection epoch', async () => {
+  const data = snapshot()
+  const a = { ...data.clusters[0], freshness: 'Current' as const, readiness: 'Ready' as const }
+  const b = { ...a, id: 'B', name: 'B' }
+  data.clusters = [a, b]
+  data.evidence = [{ ...data.evidence[0], id: a.evidenceId, cluster: a.id, freshness: 'Current', outcome: 'Ready' }]
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(data).mockImplementation(() => new Promise(() => {}))
+  let resolve!: (value: Cluster) => void
+  vi.spyOn(consoleData, 'getCluster').mockImplementation(() => new Promise(done => { resolve = done }))
+  const { result, rerender, unmount } = renderHook(({ selected }) => useObservationSnapshot(true, selected), { initialProps: { selected: a } })
+  await act(async () => {})
+  rerender({ selected: b }); rerender({ selected: a })
+  await act(async () => { resolve({ ...a, readiness: 'Unknown', freshness: 'Unknown' }) })
+  expect(result.current.data?.evidence[0].freshness).toBe('Current')
+  expect(result.current.detail?.readiness).toBe('Ready')
+  unmount()
+})
+it('R4 poll detects a forward wall jump without an external event', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
+  // Delay the independent ceiling tick to exercise the poll check in isolation.
+  const schedule = window.setTimeout
+  vi.spyOn(window, 'setTimeout').mockImplementation((handler, delay, ...args) => schedule(handler, delay === 1_000 ? 120_000 : delay, ...args))
+  const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot()).mockImplementation(() => new Promise(() => {}))
+  const { result } = renderHook(() => useObservationSnapshot(true))
+  await act(async () => {})
+  now.mockReturnValue(601_000)
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+  expect(result.current.data?.freshness).toBe('Stale')
+})
+it('R4 repeated automatic events while idle make zero requests; input resumes', async () => {
+  vi.useFakeTimers()
+  const requests = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(snapshot())
+  renderHook(() => useObservationSnapshot(true))
+  await act(async () => {})
+  await act(async () => { await vi.advanceTimersByTimeAsync(240_000) })
+  requests.mockClear()
+  for (let i = 0; i < 6; i++) {
+    await act(async () => {
+      window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(600_000)
+    })
+  }
+  expect(requests).toHaveBeenCalledTimes(0)
+  await act(async () => { window.dispatchEvent(new Event('pointerdown')) })
+  expect(requests).toHaveBeenCalledTimes(1)
+})
+it('R4 keeps the detail error object throughout retries until success', async () => {
+  vi.useFakeTimers()
+  const data = snapshot(), cluster = data.clusters[0]
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
+  const fetch = vi.spyOn(consoleData, 'getCluster').mockRejectedValue(new ConsoleDataError('detail down', 'NETWORK_ERROR', true))
+  const { result } = renderHook(() => useObservationSnapshot(true, cluster))
+  await act(async () => {})
+  const error = result.current.detailError
+  let resolve!: (value: typeof cluster) => void
+  fetch.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+  expect(result.current.detailError).toBe(error)
+  await act(async () => { resolve(cluster) })
+  expect(result.current.detailError).toBeUndefined()
+})
+it('R4 ceiling timer detects wall gaps between polls, and backward clocks cannot upgrade', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] })
+  const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+  const requests = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot()).mockImplementation(() => new Promise(() => {}))
+  const { result } = renderHook(() => useObservationSnapshot(true))
+  await act(async () => {})
+  now.mockReturnValue(601_000)
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(result.current.data?.freshness).toBe('Stale')
+  now.mockReturnValue(0)
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(result.current.data?.freshness).toBe('Stale')
+  expect(requests).toHaveBeenCalledTimes(1)
 })

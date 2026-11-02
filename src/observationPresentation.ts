@@ -44,27 +44,27 @@ export function placementPresentation(claim: WorkloadClaim, data: PlatformSnapsh
 }
 
 export function overviewPresentation(data: PlatformSnapshot) {
-  const immutableBasis = (id: string) => data.evidence.some(item => item.id === id && item.immutable)
   const items = [
-    ...[...new Map(data.clusters.map(item => [item.id, item])).values()].filter(item => !immutableBasis(item.evidenceId)).map(item => clusterPresentation(item, data)),
-    ...[...new Map(data.claims.map(item => [item.id, item])).values()].filter(item => !immutableBasis(item.evidenceId)).map(item => placementPresentation(item, data)),
+    ...[...new Map(data.clusters.map(item => [item.id, item])).values()].map(item => clusterPresentation(item, data)),
+    ...[...new Map(data.claims.map(item => [item.id, item])).values()].map(item => placementPresentation(item, data)),
   ]
   const unavailable = items.filter(item => item.verdict === 'Unknown').length
   const stale = items.filter(item => item.verdict === 'Stale').length
+  const historical = items.filter(item => item.verdict === 'Current' && !item.current).length
   const evidence = data.evidence.filter(item => !item.immutable).map(item => evidencePresentation(item))
   const metrics = data.overview && [data.overview.capabilities, data.overview.workloadClaims, data.overview.openFindings]
   const metricsVerdict = metrics?.some(metric => Object.values(metric).some(value => value === null)) ? 'Unknown' : 'Current'
-  const verdict = conservativeVerdict(data.freshness, data.clusterListFreshness, metricsVerdict, ...items.map(item => item.verdict), ...evidence.map(item => item.verdict))
+  const verdict = conservativeVerdict(data.freshness, data.clusterListFreshness, metricsVerdict, historical ? 'Stale' : 'Current', ...items.map(item => item.verdict), ...evidence.map(item => item.verdict))
   const presentation = observationPresentation({ freshness: verdict, state: 'Ready', fixture: data.source !== 'bff' })
   if (data.source !== 'bff') return presentation
-  if (unavailable || stale) return { ...presentation, current: false, label: [stale && `${stale} item${stale === 1 ? '' : 's'} stale`, unavailable && `${unavailable} unavailable`].filter(Boolean).join(', ') + '. Readiness is suppressed for affected items.' }
+  if (unavailable || stale || historical) return { ...presentation, current: false, label: [stale && `${stale} item${stale === 1 ? '' : 's'} stale`, historical && `${historical} item${historical === 1 ? '' : 's'} historical`, unavailable && `${unavailable} unavailable`].filter(Boolean).join(', ') + '. Readiness is suppressed for affected items.' }
   if (metricsVerdict === 'Unknown') return { ...presentation, current: false, label: 'Metrics unavailable' }
   return presentation
 }
 
 /** Producer prose describes its observation; retain it as history when currency is suppressed. */
 export function observedText(text: string, current: boolean) {
-  return current ? text : text.replace(/\bcurrently\b/gi, 'previously').replace(/\bcurrent\b/gi, 'last observed')
+  return current ? text : text.replace(/\bcurrent observation\b/gi, 'last observation').replace(/\bcurrently\b/gi, 'previously').replace(/\bcurrent\b/gi, 'last observed')
 }
 
 export function capabilityPresentation(capability: { readiness: string; evidenceId: string }, cluster: Cluster, data: PlatformSnapshot) {

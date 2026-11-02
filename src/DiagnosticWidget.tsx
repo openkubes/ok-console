@@ -9,6 +9,7 @@ interface Message {
   generation?: number
   observedAt?: string
   historical?: boolean
+  qualified?: boolean
   evidence?: EvidenceRef
 }
 
@@ -60,7 +61,7 @@ export default function DiagnosticWidget({ data, generation = 0, openEvidence }:
     setMessages((items) => [
       ...items,
       { id, role: 'user', text: prompt },
-      { id: id + 1, role: 'assistant', generation, observedAt: data.generatedAt, historical: !summary.current, ...answerDiagnosticQuestion(prompt, data) },
+      { id: id + 1, role: 'assistant', generation, observedAt: data.generatedAt, qualified: !summary.current, ...answerDiagnosticQuestion(prompt, data) },
     ])
     setQuestion('')
   }
@@ -75,9 +76,9 @@ export default function DiagnosticWidget({ data, generation = 0, openEvidence }:
       <header className="diagnostic-header"><span className="diagnostic-spark" aria-hidden="true">✦</span><span><strong>OK AI</strong><small>Diagnostic · Demo Preview</small></span><button type="button" aria-label="Close OK AI Diagnostic" onClick={() => setIsOpen(false)}>×</button></header>
       <div className="diagnostic-messages" aria-live="polite">
         {messages.map((message) => <div className={`diagnostic-message ${message.role}`} key={message.id}>
-          {message.historical && <small>Earlier answer, based on data observed at {new Date(message.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>}
-          <p>{observedText(message.text, !message.historical)}</p>
-          {message.evidence && <button className="diagnostic-evidence" onClick={() => openEvidence(message.evidence!)}>View evidence · {observedText(message.evidence.title, !message.historical)}</button>}
+          {(message.historical || message.qualified) && <small>{message.historical ? 'Earlier answer, based on data observed at' : 'Answer based on data observed at'} {new Date(message.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>}
+          <p>{observedText(message.text, !message.historical && !message.qualified)}</p>
+          {message.evidence && <button className="diagnostic-evidence" onClick={() => openEvidence(message.evidence!)}>View evidence · {observedText(message.evidence.title, !message.historical && !message.qualified)}</button>}
         </div>)}
       </div>
       <div className="diagnostic-prompts"><button onClick={() => ask('Platform status')}>Platform status</button><button onClick={() => ask('ok-shared status')}>ok-shared status</button></div>

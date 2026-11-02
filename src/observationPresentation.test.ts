@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { capabilityPresentation, conservativeVerdict, observationPresentation, overviewPresentation, placementPresentation } from './observationPresentation'
+import { capabilityPresentation, observedText, conservativeVerdict, observationPresentation, overviewPresentation, placementPresentation } from './observationPresentation'
 import { platformFixture } from './data/fixtures'
 
 describe('observationPresentation', () => {
@@ -66,4 +66,24 @@ it('immutable Evidence is excluded from the mutable header aggregate', () => {
   expect(overviewPresentation(data)).toMatchObject({ current: true, label: 'Current observation' })
   data.evidence[0].immutable = false
   expect(overviewPresentation(data).current).toBe(true)
+})
+it.each([true, false])('R4 receipt-backed cluster and claim retain Unknown and Stale verdicts (immutable=%s)', immutable => {
+  const data = structuredClone(platformFixture)
+  Object.assign(data, { source: 'bff', freshness: 'Current', clusterListFreshness: 'Current' })
+  data.clusters = [{ ...data.clusters[0], readiness: 'Ready', freshness: 'Current' }]
+  const cluster = data.clusters[0]
+  data.claims = []
+  data.evidence = [{ ...data.evidence[0], id: cluster.evidenceId, cluster: cluster.id, outcome: 'Ready', freshness: 'Current', immutable, observedAt: '2026-11-01T09:00:00Z' }]
+  expect(overviewPresentation(data).current).toBe(!immutable)
+  cluster.readiness = 'Unknown'
+  expect(overviewPresentation(data)).toMatchObject({ current: false, verdict: 'Unknown', label: '1 unavailable. Readiness is suppressed for affected items.' })
+  cluster.readiness = 'Ready'; cluster.freshness = 'Stale'
+  expect(overviewPresentation(data)).toMatchObject({ current: false, verdict: 'Stale', label: '1 item stale. Readiness is suppressed for affected items.' })
+  cluster.freshness = 'Current'
+  data.claims = [{ ...platformFixture.claims[0], targetCluster: cluster.id, evidenceId: cluster.evidenceId, readiness: 'Unknown' }]
+  expect(overviewPresentation(data)).toMatchObject({ current: false, verdict: 'Unknown', label: expect.stringContaining('1 unavailable') })
+})
+
+it('R4 historical wording avoids last observed observation', () => {
+  expect(observedText('Current observation; currently Ready', false)).toBe('last observation; previously Ready')
 })

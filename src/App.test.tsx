@@ -445,7 +445,7 @@ describe('OpenKubes Console', () => {
       fireEvent.click(shell.getByRole('button', { name: 'ok evidence explain' }))
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'ok evidence explain'),
-        entry('ai', 'This shell session holds readiness Ready for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.'),
+        entry('ai', `This shell session holds readiness Unknown (Observation unavailable - readiness Unknown; Last observed: ${status === 'resolved' ? 'Failed' : 'Ready'}) for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.`),
         proposal,
       ])
       shell.run('clear')

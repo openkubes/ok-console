@@ -174,3 +174,23 @@ it('R3 Evidence 401 is not swallowed by allSettled behind a hanging sibling', as
   }) as typeof fetch
   await expect(new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
 })
+it.each(['/overview', '/clusters', '/clusters/test', '/evidence/test'])('R4 401 at %s aborts its shared request scope', async path => {
+  const controller = new AbortController()
+  const fetcher = vi.fn(async () => new Response('malformed', { status: 401 })) as typeof fetch
+  const adapter = new BffConsoleAdapter('/api/console/v0', fetcher)
+  const result = path === '/overview' || path === '/clusters' ? adapter.getSnapshot(controller) : path.startsWith('/clusters/') ? adapter.getCluster('test', controller) : adapter.getEvidence('test', controller)
+  await expect(result).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+  expect(controller.signal.aborted).toBe(true)
+  expect(controller.signal.reason).toMatchObject({ code: 'UNAUTHENTICATED' })
+})
+it('R4 overview failure followed by clusters 401 preserves authentication failure', async () => {
+  let denied!: (response: Response) => void
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/overview') ? jsonResponse(sourceUnavailable, 503) : new Promise<Response>(done => { denied = done })) as typeof fetch
+  const controller = new AbortController()
+  const pending = new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot(controller)
+  const assertion = expect(pending).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+  await new Promise(done => setTimeout(done, 0))
+  denied(new Response('', { status: 401 }))
+  await assertion
+  expect(controller.signal.aborted).toBe(true)
+})

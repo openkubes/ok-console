@@ -112,7 +112,10 @@ export class BffConsoleAdapter implements ConsoleDataPort {
         }),
       ])
     } catch (error) {
-      if (error instanceof ConsoleDataError) throw error
+      if (error instanceof ConsoleDataError) {
+        if (error.code === 'UNAUTHENTICATED') controller.abort(error)
+        throw error
+      }
       throw new ConsoleDataError('The Console BFF is unavailable.', 'NETWORK_ERROR', true)
     } finally { clearTimeout(timer); if (abortListener) controller.signal.removeEventListener('abort', abortListener) }
 
@@ -150,10 +153,16 @@ export class BffConsoleAdapter implements ConsoleDataPort {
   }
 
   async getSnapshot(controller = new AbortController()): Promise<PlatformSnapshot> {
-    const [overview, clusters] = await Promise.all([
+    const results = await Promise.allSettled([
       this.request<PlatformOverviewResponse>('/overview', 'PlatformOverview', controller),
       this.request<ClusterListResponse>('/clusters', 'ClusterList', controller),
     ])
+    const denied = results.find(result => result.status === 'rejected' && result.reason instanceof ConsoleDataError && result.reason.code === 'UNAUTHENTICATED')
+    if (denied?.status === 'rejected') throw denied.reason
+    const [overview, clusters] = results.map(result => {
+      if (result.status === 'rejected') throw result.reason
+      return result.value
+    }) as [PlatformOverviewResponse, ClusterListResponse]
     const evidenceIds = new Set([
       ...clusters.data.items.map((cluster) => cluster.evidenceId),
       ...overview.data.recentPlacements.map((placement) => placement.evidenceId),

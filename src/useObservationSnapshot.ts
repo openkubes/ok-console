@@ -12,7 +12,7 @@ type Observation<T> = { data: T; startedAt: number; wallStart: number; generatio
 type Cap = { generation: number; verdict: Cluster['freshness']; released?: string[] }
 const failure = (cause: unknown) => cause instanceof ConsoleDataError ? cause : new ConsoleDataError('Platform data could not be loaded.', 'INTERNAL_ERROR', true)
 
-export function useObservationSnapshot(enabled: boolean, attempt: number, selected?: Cluster, onSessionEnded?: () => void) {
+export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onSessionEnded?: () => void) {
   const [result, setResult] = useState<Observation<PlatformSnapshot>>()
   const [detail, setDetail] = useState<Observation<Cluster>>()
   const [caps, setCaps] = useState<Record<string, Cap>>({})
@@ -30,6 +30,7 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
   selectedRef.current = selected
   const endedRef = useRef(onSessionEnded)
   endedRef.current = onSessionEnded
+  const checkWallRef = useRef<() => void>(() => {})
   const refreshRef = useRef<(kind?: 'auto' | 'user' | 'retry') => void>(() => {})
 
   useEffect(() => {
@@ -78,7 +79,7 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
       const cluster = selectedRef.current
       const selection = selectionEpoch.current.value
       const scope = controller = new AbortController()
-      setLoading(true); setError(undefined); setDetailError(undefined)
+      setLoading(true); setError(undefined)
       const snapshotRequest = consoleData.getSnapshot(scope).then(data => {
         if (!active) return
         lastSuccess = startedAt; lastWallStart = wallStart
@@ -116,7 +117,8 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
       if (Date.now() - lastDetailWallStart >= BROWSER_OBSERVATION_CEILING_MS) setDetailWallAged(true)
       setTick(value => value + 1)
     }
-    const visibleRefresh = () => { checkWall(); if (document.visibilityState === 'visible') refresh() }
+    checkWallRef.current = checkWall
+    const visibleRefresh = () => { checkWall(); if (document.visibilityState === 'visible') refresh('auto') }
     const stopIdle = () => {
       idle = true
       if (pending === 'auto') pending = undefined
@@ -132,6 +134,7 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
       if (wasIdle && performance.now() - lastSuccess > SNAPSHOT_POLL_MS) refresh()
     }
     poll = window.setInterval(() => {
+      checkWall()
       if (performance.now() - lastInput >= USER_INPUT_IDLE_MS) {
         idle = true
         if (pending === 'auto') pending = undefined
@@ -145,7 +148,7 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
     window.addEventListener('online', visibleRefresh)
     document.addEventListener('visibilitychange', visibleRefresh)
     return () => {
-      active = false; pending = undefined; controller?.abort(); refreshRef.current = () => {}
+      active = false; pending = undefined; controller?.abort(); refreshRef.current = () => {}; checkWallRef.current = () => {}
       window.clearInterval(poll); window.clearTimeout(idleTimer)
       inputs.forEach(event => window.removeEventListener(event, input, true))
       window.removeEventListener('hashchange', visibleRefresh)
@@ -154,7 +157,6 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
       document.removeEventListener('visibilitychange', visibleRefresh)
     }
   }, [enabled])
-  useEffect(() => { if (attempt) refreshRef.current('retry') }, [attempt])
   useEffect(() => {
     setDetail(undefined); setDetailFailed(false); setDetailError(undefined)
     if (selected && enabled && consoleDataMode === 'bff') refreshRef.current()
@@ -165,7 +167,7 @@ export function useObservationSnapshot(enabled: boolean, attempt: number, select
     if (consoleDataMode !== 'bff') return
     const starts = [result?.startedAt, detail?.startedAt].filter((value): value is number => value !== undefined && performance.now() - value < BROWSER_OBSERVATION_CEILING_MS)
     if (!starts.length) return
-    const timer = window.setTimeout(() => setTick(value => value + 1), Math.max(0, Math.min(...starts) + BROWSER_OBSERVATION_CEILING_MS - performance.now()))
+    const timer = window.setTimeout(() => checkWallRef.current(), Math.max(0, Math.min(1_000, Math.min(...starts) + BROWSER_OBSERVATION_CEILING_MS - performance.now())))
     return () => window.clearTimeout(timer)
   }, [result, detail, tick])
   useEffect(() => {

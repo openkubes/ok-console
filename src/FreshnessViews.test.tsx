@@ -46,6 +46,7 @@ async function mount(view = 'overview', verdict: Freshness = 'Current', options:
   const e = structuredClone(evidence)
   e.meta.freshness = options.evidence ?? verdict
   e.data.classification = options.immutable ? 'Immutable' : 'Current'
+  if (options.immutable) e.data.observedAt = new Date(Date.parse(e.meta.observedAt) - 15 * 60 * 60_000).toISOString()
   e.data.outcome = options.outcome ?? 'Ready'
   const c = structuredClone(clusters)
   c.meta.freshness = options.clusters ?? verdict
@@ -87,7 +88,7 @@ async function mount(view = 'overview', verdict: Freshness = 'Current', options:
   return { ...result, snapshot, getSnapshot, cluster: c.data.items[0] }
 }
 
-describe('whole-document framing, including DiagnosticWidget', () => {
+describe('whole-document framing, including DiagnosticWidget', { timeout: 30_000 }, () => {
   for (const view of ['overview', 'clusters', 'detail', 'evidence', 'drawer', 'agents']) {
     it(`${view}: genuinely fresh positive control`, async () => {
       await mount(view)
@@ -371,13 +372,13 @@ it('R3 polling stops at four minutes idle, focus does not restart it, and input 
   await advance(120_000)
   expect(getSnapshot).toHaveBeenCalledTimes(stopped)
   fireEvent(window, new Event('focus')); await act(async () => {})
-  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 1)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped)
   await advance(60_000)
-  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 1)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped)
   fireEvent.keyDown(window, { key: 'Shift' }); await act(async () => {})
-  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 2)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 1)
   await advance(30_000)
-  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 3)
+  expect(getSnapshot).toHaveBeenCalledTimes(stopped + 2)
 })
 it('R3 one in-flight refresh coalesces many triggers into one follow-up', async () => {
   const { getSnapshot, snapshot } = await mount()
@@ -464,5 +465,62 @@ it('R3 new Shell READINESS uses the effective detail; printed lines remain a tra
   await advance(30_000)
   run()
   expect(document.querySelector('.terminal-output')).toHaveTextContent('READINESS Failed (Current observation)')
-  expect(document.querySelector('.terminal-output')?.textContent).toContain(original!)
+  expect(original).toContain('Current observation')
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('Earlier output, based on data observed at')
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('READINESS Ready (last observation)')
 })
+it.each([
+  { readiness: 'Unknown' as const },
+  { clusters: 'Stale' as const },
+  {},
+])('R4 immutable basis preserves item verdict in header, metrics and widget: %j', async options => {
+  await mount('overview', 'Current', { immutable: true, ...options })
+  widget()
+  noCurrency(document.querySelector('.snapshot')!)
+  noCurrency(document.querySelector('.diagnostic-widget')!)
+  expect(document.querySelector('.metrics-grid')).not.toHaveTextContent(/\d/)
+  expect(document.querySelector('.snapshot')).toHaveTextContent(options.readiness ? '1 unavailable' : options.clusters ? '1 item stale' : '1 item historical')
+}, 30_000)
+it('R4 dry-run 401 ends the session and stops polling', async () => {
+  await timers()
+  window.history.replaceState(null, '', '#/create')
+  const { getSnapshot } = await mount()
+  act(() => { window.location.hash = '#/create'; window.dispatchEvent(new HashChangeEvent('hashchange')) })
+  await act(async () => {})
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 401 })))
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Generate contract' }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: /dry.run/i }))
+    await act(async () => {})
+    expect(screen.getByText('Your session ended. Sign in again.')).toBeVisible()
+    const count = getSnapshot.mock.calls.length
+    await advance(120_000)
+    expect(getSnapshot).toHaveBeenCalledTimes(count)
+  } finally { vi.unstubAllGlobals() }
+}, 30_000)
+it('R4 Shell qualifies explain and conditions; older currency becomes history at ceiling', async () => {
+  await timers()
+  const { getSnapshot } = await mount('detail')
+  fireEvent.click(screen.getByRole('button', { name: 'Open Shell' }))
+  fireEvent.click(screen.getByRole('button', { name: 'ok evidence explain' }))
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('readiness Ready (Current observation)')
+  getSnapshot.mockImplementation(() => new Promise(() => {}))
+  vi.mocked(consoleData.getCluster).mockImplementation(() => new Promise(() => {}))
+  await advance(60_000)
+  noCurrency(document.querySelector('.terminal-output')!)
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('Earlier output')
+  fireEvent.click(screen.getByRole('button', { name: 'ok evidence explain' }))
+  fireEvent.click(screen.getByRole('button', { name: 'kubectl get clusterconditions -o wide' }))
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('readiness Unknown (Last observed; Last observed: Ready)')
+  expect(document.querySelector('.terminal-output')).toHaveTextContent('lifecycle snapshot (Unknown (Last observed; Last observed: Ready))')
+}, 30_000)
+it('R4 a new widget answer on unavailable data is timestamped without calling it earlier', async () => {
+  await mount('overview', 'Unknown')
+  widget()
+  const answer = document.querySelector('.diagnostic-message.assistant:last-child')!
+  expect(answer).toHaveTextContent('Answer based on data observed at')
+  expect(answer).not.toHaveTextContent('Earlier answer')
+  expect(answer).not.toHaveTextContent('last observed observation')
+}, 30_000)

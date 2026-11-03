@@ -35,7 +35,14 @@ function baseline() {
 }
 type Reply = { stdout?: string; stderr?: string; status?: number; sleep?: boolean }
 const reply = (x: unknown): Reply => ({ stdout: JSON.stringify(x) })
-const discovery = { stdout: 'NAME SHORTNAMES APIVERSION NAMESPACED KIND VERBS\nconfigmaps cm v1 true ConfigMap get\nsecrets v1 true Secret get\npods po v1 true Pod get\nserviceaccounts sa v1 true ServiceAccount get\ndeployments deploy apps/v1 true Deployment get\n' }
+const discovery = { stdout: readFileSync(new URL('./fixtures/ok170-api-resources-wide.txt', import.meta.url), 'utf8') }
+// Preserve the captured header offsets when constructing exceptional discovery rows.
+function discoveryRow(cells: string[]) {
+  const columns = [...discovery.stdout.split('\n')[0].matchAll(/\S+/g)]
+  return cells.map((cell, i) => i + 1 < columns.length
+    ? cell.padEnd(columns[i + 1].index! - columns[i].index!) : cell).join('') + '\n'
+}
+
 const version = reply({ clientVersion: { gitVersion: 'v1.34.1' } })
 function harness() {
   const dir = mkdtempSync(join(tmpdir(), 'ok170-')); dirs.push(dir)
@@ -519,11 +526,11 @@ describe('round 3 canonical permission resources', () => {
     const r = h.run('permissions', f, [version, sa, yes, grant(group === '' ? 'foreign' : ''), no])
     passed(r, 'permissions')
     expect(r.calls[1].args.slice(5)).toEqual(['api-resources', '-o', 'wide'])
-    expect(r.calls.at(-1)!.args.slice(7, 9)).toEqual(['get', group ? `${plural}.${group}` : plural])
+    expect(r.calls.at(-1)!.args.slice(7, 9)).toEqual(['get', group ? `${plural}.v1.${group}` : plural])
   })
   it.each(['unknown', 'unknown-group', 'ambiguous', 'empty', 'malformed', 'header', 'stderr', 'status'])('fails discovery %s before permission checks', (c) => {
     const h = harness()
-    if (c === 'ambiguous') h.discover({ stdout: discovery.stdout + 'deployments deploy other/v1 true Deployment get\n' })
+    if (c === 'ambiguous') h.discover({ stdout: discovery.stdout + discoveryRow(['deployments', 'deploy', 'other/v1', 'true', 'Deployment', 'get', '']) })
     if (c === 'header') h.discover({ stdout: discovery.stdout.replace('NAME', 'WRONG') })
     if (c === 'empty') h.discover({ stdout: '' })
     if (c === 'malformed') h.discover({ stdout: discovery.stdout + 'bad row\n' })
@@ -576,5 +583,67 @@ describe('round 3 rejection forms', () => {
   it.each([' with subresource "scale"', ' garbage', ' using v1 with subresource "scale"'])('rejects manager suffix %s', (suffix) => {
     failed(run(`error: Apply failed with 1 conflict: conflict with "old"${suffix}: .spec.selector\n`), 'expected rejection absent or unclassified')
     passed(run('error: Apply failed with 1 conflict: conflict with "old" using v1: .spec.selector\n'), 'admission')
+  })
+})
+
+
+describe('round 4 discovery boundaries', () => {
+  it.each(['true', 'false'])('resolves empty SHORTNAMES with KIND %s to its group', (kind) => {
+    const h = harness()
+    h.discover({ stdout: discovery.stdout.replace('\n', '\n' + discoveryRow(['foos', '', 'r4.example.com/v1', 'true', kind, 'get', ''])) })
+    const f = ['--matrix', h.input({ 'ok-console': { allow: [['get', 'configmaps']], deny: [['get', 'foos']] } })]
+    const grant = reply({ status: { incomplete: false, resourceRules: [{
+      verbs: ['get'], apiGroups: ['r4.example.com'], resources: ['foos'], resourceNames: ['one'],
+    }] } })
+    failed(h.run('permissions', f, [version, sa, yes, grant, no]), 'permission rules grant denied pair')
+    passed(h.run('permissions', f, [version, sa, yes, rules, no]), 'permissions')
+  })
+  it('fully qualifies a version-like group in can-i argv', () => {
+    const h = harness()
+    h.discover({ stdout: discovery.stdout + discoveryRow(['deployments', '', 'v1.apps/v1', 'true', 'OtherDeployment', 'get', '']) })
+    const f = ['--matrix', h.input({ 'ok-console': { allow: [['get', 'deployments.v1.apps']], deny: [['get', 'secrets']] } })]
+    const r = h.run('permissions', f, [version, sa, yes, rules, no])
+    passed(r, 'permissions')
+    expect(r.calls.find((c) => c.args.includes('can-i'))!.args.slice(5)).toEqual([
+      'auth', 'can-i', 'get', 'deployments.v1.v1.apps', '--as=system:serviceaccount:openkubes-console:ok-console',
+    ])
+    failed(h.run('permissions', f, [version, sa, no]), 'positive permission control failed')
+  })
+  it.each(['extra-header', 'order', 'missing-header', 'bare-version', 'extra-slash', 'empty-group', 'empty-version', 'space-api-component', 'namespaced', 'missing-plural', 'missing-kind', 'missing-verbs'])('rejects discovery %s', (c) => {
+    const h = harness()
+    let stdout = discovery.stdout
+    if (c === 'extra-header') stdout = stdout.replace('CATEGORIES', 'CATEGORIES EXTRA')
+    else if (c === 'order') stdout = stdout.replace('SHORTNAMES', 'APIVERSION').replace(/APIVERSION(?=\s+NAMESPACED)/, 'SHORTNAMES')
+    else if (c === 'missing-header') stdout = stdout.replace('SHORTNAMES', 'SHORTNAME')
+    else {
+      const apiVersion = c === 'bare-version' ? 'v2' : c === 'extra-slash' ? 'group/v1/extra'
+        : c === 'empty-group' ? '/v1' : c === 'empty-version' ? 'group/' : c === 'space-api-component' ? 'group/ v1' : 'r4.example.com/v1'
+      stdout += discoveryRow([c === 'missing-plural' ? '' : 'foos', '', apiVersion, c === 'namespaced' ? 'maybe' : 'true',
+        c === 'missing-kind' ? '' : 'Foo', c === 'missing-verbs' ? '' : 'get', ''])
+    }
+    h.discover({ stdout })
+    const r = h.run('permissions', permissionFlags(h), [version, sa, yes, rules, no, no])
+    failed(r, 'invalid resource discovery')
+    expect(r.calls).toHaveLength(2)
+  })
+  it('accepts discovery without the optional CATEGORIES column', () => {
+    const h = harness()
+    const offset = discovery.stdout.split('\n')[0].indexOf('CATEGORIES')
+    h.discover({ stdout: discovery.stdout.trimEnd().split('\n').map((line) => line.slice(0, offset).trimEnd()).join('\n') + '\n' })
+    passed(h.run('permissions', permissionFlags(h), [version, sa, yes, rules, no, no]), 'permissions')
+  })
+  it('compares real two-field conflict stderr byte-for-byte', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ok170-conflict-')); dirs.push(dir)
+    const fixture = readFileSync(new URL('./fixtures/ok170-conflict-two.stderr', import.meta.url))
+    const captured = join(dir, 'conflict-two-producer.stderr')
+    const script = readFileSync(process.env.OK170_KIND_SCRIPT ?? new URL('./verify-gates-kind.sh', import.meta.url), 'utf8')
+    const line = script.split('\n').find((s) => s.startsWith('cmp ') && s.includes('conflict-two-producer.stderr'))
+    expect(line).toBeDefined()
+    const run = () => spawnSync('bash', ['-c', 'set -Eeuo pipefail\n' + line], { encoding: 'utf8',
+      env: { ...process.env, proof_dir: dir, script_dir: fileURLToPath(new URL('.', import.meta.url)) } })
+    writeFileSync(captured, Buffer.concat([fixture, Buffer.from('\n')]))
+    expect(run().status).not.toBe(0)
+    writeFileSync(captured, fixture)
+    expect(run().status).toBe(0)
   })
 })

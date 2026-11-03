@@ -208,6 +208,7 @@ gate 5 expected-conflict PASS admission --snapshot "$proof_dir/deployment-snapsh
 if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=unowned -f "$proof_dir/conflict-two.json" -o json >"$proof_dir/conflict-two-producer.stdout" 2>"$proof_dir/conflict-two-producer.stderr"; then
   echo 'two-field conflict unexpectedly accepted' >&2; exit 1
 fi
+cmp "$proof_dir/conflict-two-producer.stderr" "$script_dir/fixtures/ok170-conflict-two.stderr"
 gate 5 expected-conflict-two PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict-two.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas",".spec.template.spec.containers[name=\"console\"].image"]' --expect-conflict-manager ok-172-live
 gate 5 wrong-conflict-path FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas"]' --expect-conflict-manager ok-172-live
 if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=ok-172-live --show-managed-fields -f "$proof_dir/invalid.json" -o json >"$proof_dir/invalid-producer.stdout" 2>"$proof_dir/invalid-producer.stderr"; then

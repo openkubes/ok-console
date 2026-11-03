@@ -265,12 +265,19 @@ function main() {
       result.push({ object: id, managers: entries.map(({ manager, operation, subresource }) => ({ manager, operation, subresource })), verdict: 'pass' });
     }
   } else if (mode === 'permissions') {
-    const discovery = success(run(['api-resources', '-o', 'wide'])).trim().split(/\r?\n/);
-    check(/^NAME\s+SHORTNAMES\s+APIVERSION\s+NAMESPACED\s+KIND\s+VERBS/.test(discovery.shift()), 'invalid resource discovery');
+    const discovery = success(run(['api-resources', '-o', 'wide'])).trimEnd().split(/\r?\n/);
+    const columns = [...discovery.shift().matchAll(/\S+/g)];
+    const names = columns.map((c) => c[0]);
+    check(equal(names, ['NAME', 'SHORTNAMES', 'APIVERSION', 'NAMESPACED', 'KIND', 'VERBS'])
+      || equal(names, ['NAME', 'SHORTNAMES', 'APIVERSION', 'NAMESPACED', 'KIND', 'VERBS', 'CATEGORIES']), 'invalid resource discovery');
     const resources = discovery.map((line) => {
-      const m = /^(\S+)\s+(?:(\S+)\s+)?(\S+)\s+(true|false)\s+(\S+)\s+.+$/.exec(line);
-      check(m, 'invalid resource discovery');
-      return { plural: m[1], short: (m[2] ?? '').split(','), group: m[3].includes('/') ? m[3].split('/')[0] : '', kind: m[5].toLowerCase() };
+      const cells = columns.map((c, index) => line.slice(c.index, columns[index + 1]?.index).trim());
+      const [plural, short, apiVersion, namespaced, kind, verbs] = cells;
+      const parts = apiVersion.split('/');
+      check(plural && kind && verbs && /^(true|false)$/.test(namespaced)
+        && (apiVersion === 'v1' || (parts.length === 2 && parts.every((p) => p && !/\s/.test(p)))), 'invalid resource discovery');
+      return { plural, short: short.split(','), group: parts.length === 2 ? parts[0] : '',
+        version: parts.at(-1), kind: kind.toLowerCase() };
     });
     function resolve([verb, resource]) {
       const [base, sub] = resource.split('/');
@@ -290,8 +297,8 @@ function main() {
       check(account.kind === 'ServiceAccount' && account.metadata?.name === sa && account.metadata?.namespace === f.namespace,
         'missing service account');
       function can(pair, denied) {
-        const { verb, plural, group, sub } = pair;
-        const resource = group ? `${plural}.${group}` : plural;
+        const { verb, plural, group, version, sub } = pair;
+        const resource = group ? `${plural}.${version}.${group}` : plural;
         const r = run(['auth', 'can-i', verb, resource, ...(sub ? [`--subresource=${sub}`] : []), `--as=system:serviceaccount:${f.namespace}:${sa}`]);
         check(r.status === (denied ? 1 : 0) && r.stderr === ''
           && (r.stdout === (denied ? 'no' : 'yes') || r.stdout === `${denied ? 'no' : 'yes'}\n`),

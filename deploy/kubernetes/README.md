@@ -283,3 +283,16 @@ verification and cleanup emit `KIND-PROOF PASS v1.34.1`.
 - An invalid-message reason containing `, <word>: ` can add a phantom path
   (adds, never hides).
 - The rules review reflects RBAC only.
+
+- Expected conflicts assume the conflict text forms in the fixture: Apply and
+  Update managers without a timestamp suffix. Other forms are unclassified and
+  fail closed.
+- `--expect-conflict-manager` matches the manager name, not its operation.
+- Subresource names in the matrix are not checked against discovery. A misspelt
+  deny pair passes for that pair only.
+- Cluster-scoped resources (e.g. nodes) are not supported in the matrix.
+- Ambiguous names such as `events` must be group-qualified (core: a trailing
+  dot, `events.`).
+- `api-resources` silently omits groups of unavailable aggregated APIs; pairs
+  in those groups fail as unknown.
+- Warning-line handling is unit-tested only.

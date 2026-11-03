@@ -10,8 +10,8 @@ for tool in kind kubectl node; do
 done
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(dirname -- "$(dirname -- "$script_dir")")"
-mkdir -p "$repo_dir/test-results/ok170-gates-r2"
-proof_dir="$(mktemp -d "$repo_dir/test-results/ok170-gates-r2/kind.XXXXXXXX")"
+mkdir -p "$repo_dir/test-results/ok170-gates"
+proof_dir="$(mktemp -d "$repo_dir/test-results/ok170-gates/kind.XXXXXXXX")"
 cluster_name="ok170-cx-$(date +%s)-$$-$RANDOM"
 context="kind-$cluster_name"
 namespace=openkubes-console
@@ -84,6 +84,19 @@ if (action === 'initial') {
   write('named-role', { ...read('extra-role'), rules: [{ apiGroups: [''], resources: ['secrets'], verbs: ['get'], resourceNames: ['one'] }] });
   write('extra-binding', { ...read('binding-ok-console'), metadata: { name: 'deliberate-extra', namespace: ns }, roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: 'deliberate-extra' } });
   write('allowlist', { 'Deployment/ok-console': [{ manager: 'ok-172-live', operation: 'Apply', required: true }, { manager: 'kubectl-set', operation: 'Update' }, { manager: 'kube-controller-manager', operation: 'Update', subresource: 'status' }], 'Service/observed-state-producer': [{ manager: 'ok-172-live', operation: 'Apply', required: true }, { manager: 'ok-173-breakglass', operation: 'Apply', required: true }], 'ConfigMap/observed-state-producer-cluster-observations': [{ manager: 'ok-173-breakglass', operation: 'Apply', required: true }] });
+} else if (action === 'permissions-r3') {
+  for (const [resource, plural, group, verb, name] of [
+    ['secret', 'secrets', '', 'get', 'one'], ['sa', 'serviceaccounts', '', 'get', 'ok-console'],
+    ['deployments', 'deployments', 'apps', 'delete', 'ok-console'], ['deployments.apps', 'deployments', 'apps', 'delete', 'ok-console'],
+  ]) {
+    write(`matrix-${resource}`, { 'ok-console': { allow: [['get', 'configmaps']], deny: [[verb, resource]] } });
+    write(`named-${resource}`, { ...read('extra-role'), rules: [{ apiGroups: [group], resources: [plural], verbs: [verb], resourceNames: [name] }] });
+  }
+  for (const [name, resource] of [['pods-only', 'pods'], ['exec-only', 'pods/exec']]) {
+    write(name, { ...read('extra-role'), rules: [{ apiGroups: [''], resources: [resource], verbs: ['create'] }] });
+  }
+  write('allow-exec', { 'ok-console': { allow: [['get', 'configmaps'], ['create', 'pods/exec']], deny: [['get', 'secrets']] } });
+  write('deny-exec', { 'ok-console': { allow: [['get', 'configmaps']], deny: [['create', 'pods/exec']] } });
 } else if (action === 'ownership') {
   const live = read('snapshot');
   const paths = [];
@@ -108,6 +121,7 @@ if (action === 'initial') {
   write('empty-delta', []); write('immutable-delta', [{ path: '/immutable', value: true }]);
   const dep = read('deployment');
   dep.spec.template.spec.containers[0].image = 'registry.k8s.io/pause:3.9'; write('conflict', dep);
+  dep.spec.replicas = 3; write('conflict-two', dep);
   const invalid = read('deployment'); invalid.spec.template.spec.containers[0].ports[0].containerPort = 70000; write('invalid', invalid);
   const approved = read('deployment'); approved.spec.replicas = 1; write('approved', approved);
   write('delta', [{ path: '/spec/replicas', value: 1 }]);
@@ -132,7 +146,7 @@ const reasons = { 'foreign-manager': 'foreign manager or operation', 'release-be
   'over-release': 'over-release, under-release or newly owned path', conflict: 'admission rejected: conflict',
   'extra-delta': 'unapproved admission delta', 'extra-permission': 'permission rules grant denied pair', 'missing-namespace': 'missing --namespace',
   'unowned-adopt': 'selected path not owned by another manager', 'immutable-empty': 'unapproved admission delta',
-  'named-permission': 'permission rules grant denied pair', 'wrong-conflict-path': 'expected rejection paths mismatch',
+  'exec-without-grant': 'positive permission control failed', 'named-permission': 'permission rules grant denied pair', 'wrong-conflict-path': 'expected rejection paths mismatch',
   'wrong-invalid-path': 'expected rejection paths mismatch' };
 const intendedFailure = Boolean(reasons[name]) && stderr === `${reasons[name]}\n`;
 if (+code === 0 && stderr === '' && passes.length === 1 && lines.at(-1) === `PASS ${mode}`) console.log('PASS');
@@ -191,6 +205,10 @@ if k apply --server-side --force-conflicts=false --dry-run=server --field-manage
 fi
 gate 5 conflict FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --delta "$proof_dir/delta.json"
 gate 5 expected-conflict PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.template.spec.containers[name=\"console\"].image"]' --expect-conflict-manager ok-172-live
+if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=unowned -f "$proof_dir/conflict-two.json" -o json >"$proof_dir/conflict-two-producer.stdout" 2>"$proof_dir/conflict-two-producer.stderr"; then
+  echo 'two-field conflict unexpectedly accepted' >&2; exit 1
+fi
+gate 5 expected-conflict-two PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict-two.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas",".spec.template.spec.containers[name=\"console\"].image"]' --expect-conflict-manager ok-172-live
 gate 5 wrong-conflict-path FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas"]' --expect-conflict-manager ok-172-live
 if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=ok-172-live --show-managed-fields -f "$proof_dir/invalid.json" -o json >"$proof_dir/invalid-producer.stdout" 2>"$proof_dir/invalid-producer.stderr"; then
   echo 'invalid fixture unexpectedly accepted' >&2; exit 1
@@ -210,6 +228,19 @@ gate 8 permissions PASS permissions --matrix "$proof_dir/matrix.json"
 apply_fixture ok170-proof named-role
 apply_fixture ok170-proof extra-binding
 gate 8 named-permission FAIL permissions --matrix "$proof_dir/matrix.json"
+fixture permissions-r3
+for resource in secret sa deployments deployments.apps; do
+  apply_fixture ok170-proof "named-$resource"
+  gate 8 named-permission FAIL permissions --matrix "$proof_dir/matrix-$resource.json"
+done
+# N1's independent authorization control: the named Deployment really is deletable.
+k delete deployment ok-console --dry-run=server --as="system:serviceaccount:$namespace:ok-console" >"$proof_dir/n1-delete-dry-run.stdout"
+apply_fixture ok170-proof pods-only
+gate 8 exec-without-grant FAIL permissions --matrix "$proof_dir/allow-exec.json"
+gate 8 deny-exec-pods-only PASS permissions --matrix "$proof_dir/deny-exec.json"
+apply_fixture ok170-proof exec-only
+gate 8 allow-exec-granted PASS permissions --matrix "$proof_dir/allow-exec.json"
+gate 8 named-permission FAIL permissions --matrix "$proof_dir/deny-exec.json"
 apply_fixture ok170-proof extra-role
 apply_fixture ok170-proof extra-binding
 gate 8 extra-permission FAIL permissions --matrix "$proof_dir/matrix.json"

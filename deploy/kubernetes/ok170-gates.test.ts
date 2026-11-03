@@ -35,6 +35,7 @@ function baseline() {
 }
 type Reply = { stdout?: string; stderr?: string; status?: number; sleep?: boolean }
 const reply = (x: unknown): Reply => ({ stdout: JSON.stringify(x) })
+const discovery = { stdout: 'NAME SHORTNAMES APIVERSION NAMESPACED KIND VERBS\nconfigmaps cm v1 true ConfigMap get\nsecrets v1 true Secret get\npods po v1 true Pod get\nserviceaccounts sa v1 true ServiceAccount get\ndeployments deploy apps/v1 true Deployment get\n' }
 const version = reply({ clientVersion: { gitVersion: 'v1.34.1' } })
 function harness() {
   const dir = mkdtempSync(join(tmpdir(), 'ok170-')); dirs.push(dir)
@@ -51,9 +52,11 @@ if (r.sleep) setTimeout(() => {}, 30000);
 else { process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? ''); process.exitCode = r.status ?? 0; }
 `)
   chmodSync(join(dir, 'kubectl'), 0o755)
+  let discoveryReply = discovery
   let n = 0
   function input(value: unknown) { const path = join(dir, `input-${n++}.json`); writeFileSync(path, JSON.stringify(value)); return path }
   function run(mode: string, flags: string[], replies: Reply[], kuberc: string | null = 'false', target = ['--context', 'kind-unit', '--namespace', 'openkubes-console']) {
+    if (mode === 'permissions' && replies.length) replies = [replies[0], discoveryReply, ...replies.slice(1)]
     writeFileSync(join(dir, 'replies.json'), JSON.stringify(replies)); writeFileSync(log, '')
     const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, CALL_LOG: log, REPLIES: join(dir, 'replies.json') }
     if (kuberc === null) delete env.KUBECTL_KUBERC
@@ -61,7 +64,7 @@ else { process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? ''
     const r = spawnSync(process.execPath, [tool, mode, ...target, ...flags], { encoding: 'utf8', env, timeout: 18000 })
     return { ...r, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((s) => JSON.parse(s) as { args: string[]; input: string; kuberc: string }) }
   }
-  return { input, run }
+  return { input, run, discover: (r: Reply) => { discoveryReply = r as typeof discovery } }
 }
 type Run = ReturnType<ReturnType<typeof harness>['run']>
 function failed(r: Run, reason: string) {
@@ -412,10 +415,10 @@ describe('round 2 wrong-PASS regressions', () => {
 })
 
 describe('round 2 rejection parser and input boundaries', () => {
-  function flags(h: ReturnType<typeof harness>, classification = 'conflict', paths = ['.spec.selector']) {
+  function flags(h: ReturnType<typeof harness>, classification = 'conflict', paths = ['.spec.selector'], manager = 'old') {
     return ['--snapshot', h.input(baseline()), '--artifact', h.input(baseline()), '--manager', 'old',
       '--expect-rejection', classification, '--expect-paths', JSON.stringify(paths),
-      ...(classification === 'conflict' ? ['--expect-conflict-manager', 'old'] : [])]
+      ...(classification === 'conflict' ? ['--expect-conflict-manager', manager] : [])]
   }
   it.each(['bad-path', 'count', 'prefix', 'second-manager'])('rejects conflict parser %s', (c) => {
     const h = harness()
@@ -423,15 +426,15 @@ describe('round 2 rejection parser and input boundaries', () => {
     if (c === 'bad-path') stderr = stderr.replace('.spec.selector', '.spec.???')
     if (c === 'count') stderr = stderr.replace('1 conflict', '2 conflicts')
     if (c === 'prefix') stderr = stderr.replace('error:', 'Error:')
-    if (c === 'second-manager') stderr = 'Error from server (Conflict): Apply failed with 2 conflicts:\n- conflict with "old" using v1: .spec.selector\n- conflict with "foreign" using v1: .spec.ports\n'
+    if (c === 'second-manager') stderr = 'Error from server (Conflict): Apply failed with 2 conflicts: conflicts with "old" using v1:\n- .spec.selector\nconflicts with "foreign" using v1:\n- .spec.ports\n'
     failed(h.run('admission', flags(h, 'conflict', c === 'second-manager' ? ['.spec.selector', '.spec.ports'] : ['.spec.selector']), [version, reply(baseline()), { status: 1, stderr }]), c === 'second-manager' ? 'expected conflict manager mismatch' : 'expected rejection absent or unclassified')
   })
   it.each(['invalid-list', 'invalid-server', 'conflict-list'])('accepts real kubectl forms %s and emits only paths', (c) => {
     const h = harness(); const conflict = c === 'conflict-list'
-    const paths = conflict ? ['.spec.ports', '.spec.selector'] : ['spec.ports[0].port', 'spec.selector']
-    const stderr = conflict ? 'error: Apply failed with 2 conflicts:\n- conflict with "old" using v1: .spec.selector\n- conflict with "old" using v1: .spec.ports\n'
+    const paths = conflict ? ['.spec.replicas', '.spec.template.spec.containers[name="console"].image'] : ['spec.ports[0].port', 'spec.selector']
+    const stderr = conflict ? readFileSync(new URL('./fixtures/ok170-conflict-two.stderr', import.meta.url), 'utf8')
       : `${c === 'invalid-server' ? 'Error from server (Invalid): Service "observed-state-producer" is invalid:' : 'The Service "observed-state-producer" is invalid:'} spec.ports[0].port: Invalid value: 70000, spec.selector: Invalid value: private-value\n`
-    const r = h.run('admission', flags(h, conflict ? 'conflict' : 'invalid', paths), [version, reply(baseline()), { status: 1, stderr }])
+    const r = h.run('admission', flags(h, conflict ? 'conflict' : 'invalid', paths, conflict ? 'ok-172-live' : 'old'), [version, reply(baseline()), { status: 1, stderr }])
     passed(r, 'admission')
     expect(JSON.parse(r.stdout.split('\n')[0])[0]).toMatchObject({ verdict: 'rejected', rejection: conflict ? 'conflict' : 'invalid', paths: [...paths].sort() })
     expect(r.stdout).not.toMatch(/private-value|70000/)
@@ -501,5 +504,77 @@ describe('round 2 option validation', () => {
     const h = harness(); const e = { manager: 'old', operation: 'Apply', [c.startsWith('subresource') ? 'subresource' : 'required']: c.endsWith('null') ? null : 1 }
     const r = h.run('ownership-inventory', ['--allowlist', h.input({ 'Service/observed-state-producer': [e] })], [])
     failed(r, 'invalid allowlist entry'); expect(r.calls).toEqual([])
+  })
+})
+
+
+describe('round 3 canonical permission resources', () => {
+  it.each(['secret', 'sa', 'deployments', 'deployments.apps', 'Deployment.apps'])('rejects name-restricted grant for %s', (resource) => {
+    const h = harness()
+    const plural = resource === 'secret' ? 'secrets' : resource === 'sa' ? 'serviceaccounts' : 'deployments'
+    const group = plural === 'deployments' ? 'apps' : ''
+    const f = ['--matrix', h.input({ 'ok-console': { allow: [['get', 'configmaps']], deny: [['get', resource]] } })]
+    const grant = (apiGroup: string) => reply({ status: { incomplete: false, resourceRules: [{ verbs: ['get'], apiGroups: [apiGroup], resources: [plural], resourceNames: ['one'] }] } })
+    failed(h.run('permissions', f, [version, sa, yes, grant(group), no]), 'permission rules grant denied pair')
+    const r = h.run('permissions', f, [version, sa, yes, grant(group === '' ? 'foreign' : ''), no])
+    passed(r, 'permissions')
+    expect(r.calls[1].args.slice(5)).toEqual(['api-resources', '-o', 'wide'])
+    expect(r.calls.at(-1)!.args.slice(7, 9)).toEqual(['get', group ? `${plural}.${group}` : plural])
+  })
+  it.each(['unknown', 'unknown-group', 'ambiguous', 'empty', 'malformed', 'header', 'stderr', 'status'])('fails discovery %s before permission checks', (c) => {
+    const h = harness()
+    if (c === 'ambiguous') h.discover({ stdout: discovery.stdout + 'deployments deploy other/v1 true Deployment get\n' })
+    if (c === 'header') h.discover({ stdout: discovery.stdout.replace('NAME', 'WRONG') })
+    if (c === 'empty') h.discover({ stdout: '' })
+    if (c === 'malformed') h.discover({ stdout: discovery.stdout + 'bad row\n' })
+    if (c === 'stderr') h.discover({ ...discovery, stderr: 'warning' })
+    if (c === 'status') h.discover({ ...discovery, status: 1 })
+    const f = ['--matrix', h.input({ 'ok-console': { allow: [['get', 'configmaps']], deny: [['get', c === 'unknown' ? 'absent' : c === 'unknown-group' ? 'deployments.wrong' : 'deployments']] } })]
+    const r = h.run('permissions', f, [version, sa, yes, rules, no])
+    failed(r, c.startsWith('unknown') || c === 'ambiguous' ? 'unknown or ambiguous resource' : c === 'malformed' || c === 'header' ? 'invalid resource discovery' : 'kubectl failed, stderr or empty stdout')
+    expect(r.calls).toHaveLength(2)
+  })
+  it.each(['allow', 'deny'])('uses explicit subresource for %s controls', (side) => {
+    const h = harness()
+    const f = ['--matrix', h.input({ 'ok-console': { allow: side === 'allow' ? [['create', 'pods/exec']] : [['get', 'configmaps']], deny: side === 'deny' ? [['create', 'pods/exec']] : [['get', 'secrets']] } })]
+    const podRules = reply({ status: { incomplete: false, resourceRules: [{ verbs: ['create'], apiGroups: [''], resources: ['pods'] }] } })
+    if (side === 'allow') failed(h.run('permissions', f, [version, sa, no]), 'positive permission control failed')
+    else failed(h.run('permissions', f, [version, sa, yes, reply({ status: { incomplete: false, resourceRules: [{ verbs: ['create'], apiGroups: [''], resources: ['pods/exec'] }] } }), no]), 'permission rules grant denied pair')
+    const r = h.run('permissions', f, [version, sa, yes, podRules, no]); passed(r, 'permissions')
+    const call = r.calls.find((x) => x.args.includes('--subresource=exec'))!
+    expect(call).toBeDefined()
+    expect(call.args.slice(7, 10)).toEqual(['create', 'pods', '--subresource=exec'])
+    expect(call.args).not.toContain('pods/exec')
+  })
+  it('rejects plural subresource wildcard grants', () => {
+    const h = harness(); const f = ['--matrix', h.input({ 'ok-console': { allow: [['get', 'configmaps']], deny: [['create', 'pods/exec']] } })]
+    failed(h.run('permissions', f, [version, sa, yes, reply({ status: { incomplete: false, resourceRules: [{ verbs: ['create'], apiGroups: [''], resources: ['pods/*'] }] } })]), 'permission rules grant denied pair')
+  })
+})
+
+describe('round 3 rejection forms', () => {
+  function run(stderr: string, classification = 'conflict') {
+    const h = harness(); const f = ['--snapshot', h.input(baseline()), '--artifact', h.input(baseline()), '--manager', 'old', '--expect-rejection', classification, '--expect-paths', JSON.stringify([classification === 'conflict' ? '.spec.selector' : 'spec.selector']), ...(classification === 'conflict' ? ['--expect-conflict-manager', 'old'] : [])]
+    return h.run('admission', f, [version, reply(baseline()), { status: 1, stderr }])
+  }
+  it.each(['conflict', 'invalid'])('ignores only leading Warning lines for %s', (c) => {
+    const message = c === 'conflict' ? 'error: Apply failed with 1 conflict: conflict with "old": .spec.selector\n' : 'The Service "observed-state-producer" is invalid: spec.selector: Invalid value\n'
+    failed(run(`other text\n${message}`, c), 'expected rejection absent or unclassified')
+    failed(run(`Warning: allowed\nother text\n${message}`, c), 'expected rejection absent or unclassified')
+    passed(run(`Warning: first\nWarning: second\n${message}`, c), 'admission')
+  })
+  it.each(['orphan', 'extra-text'])('rejects malformed conflict body %s', (c) => {
+    const body = c === 'orphan' ? '- .spec.selector\n' : 'conflict with "old": .spec.selector\nunknown text\n'
+    failed(run(`error: Apply failed with 1 conflict: ${body}`), 'expected rejection absent or unclassified')
+  })
+  it.each(['Warning: trailing', 'error: trailing', 'unknown text'])('rejects text after conflict help: %s', (tail) => {
+    const h = harness(); const stderr = readFileSync(new URL('./fixtures/ok170-conflict-two.stderr', import.meta.url), 'utf8')
+    const f = ['--snapshot', h.input(baseline()), '--artifact', h.input(baseline()), '--manager', 'old', '--expect-rejection', 'conflict', '--expect-paths', JSON.stringify(['.spec.replicas', '.spec.template.spec.containers[name="console"].image']), '--expect-conflict-manager', 'ok-172-live']
+    failed(h.run('admission', f, [version, reply(baseline()), { status: 1, stderr: `${stderr}${tail}\n` }]), 'expected rejection absent or unclassified')
+    passed(h.run('admission', f, [version, reply(baseline()), { status: 1, stderr }]), 'admission')
+  })
+  it.each([' with subresource "scale"', ' garbage', ' using v1 with subresource "scale"'])('rejects manager suffix %s', (suffix) => {
+    failed(run(`error: Apply failed with 1 conflict: conflict with "old"${suffix}: .spec.selector\n`), 'expected rejection absent or unclassified')
+    passed(run('error: Apply failed with 1 conflict: conflict with "old" using v1: .spec.selector\n'), 'admission')
   })
 })

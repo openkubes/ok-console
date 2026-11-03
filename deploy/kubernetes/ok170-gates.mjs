@@ -102,12 +102,43 @@ function at(x, path) {
 function fieldPath(path) {
   return typeof path === 'string' && /^\.?[A-Za-z_][\w-]*(?:\[(?:\d+|[\w.-]+="[^"\]\r\n]+")\]|\.[A-Za-z_][\w/-]*)*$/.test(path);
 }
+// kubectl v1.34.1 appends this fixed help text to SSA conflicts.
+const conflictHelp = [
+  "Please review the fields above--they currently have other managers. Here",
+  "are the ways you can resolve this warning:",
+  "* If you intend to manage all of these fields, please re-run the apply",
+  "  command with the `--force-conflicts` flag.",
+  "* If you do not intend to manage all of the fields, please edit your",
+  "  manifest to remove references to the fields that should keep their",
+  "  current managers.",
+  "* You may co-own fields by updating your manifest to match the existing",
+  "  value; in this case, you'll become the manager if the other manager(s)",
+  "  stop managing the field (remove it from their configuration).",
+  "See https://kubernetes.io/docs/reference/using-api/server-side-apply/#conflicts",
+].join('\n');
 function classifyRejection(stderr, artifact) {
-  const conflict = /^(?:error: |Error from server \(Conflict\): )Apply failed with (\d+) conflicts?\b/.exec(stderr);
+  stderr = stderr.replace(/^(?:Warning:[^\r\n]*\r?\n)+/, '');
+  const conflict = /^(?:error: |Error from server \(Conflict\): )Apply failed with (\d+) conflicts?: /.exec(stderr);
   if (conflict) {
-    const items = [...stderr.matchAll(/conflict with "([^"\r\n]+)"[^:\r\n]*:\s*(\.[^\r\n]+)\s*(?:\n|$)/g)];
-    if (items.length !== Number(conflict[1]) || !items.every((m) => fieldPath(m[2].trim()))) return null;
-    return { classification: 'conflict', paths: [...new Set(items.map((m) => m[2].trim()))].sort(), managers: items.map((m) => m[1]) };
+    let body = stderr.slice(conflict[0].length).replaceAll('\r\n', '\n');
+    const help = body.indexOf('\nPlease review the fields above--');
+    if (help !== -1) {
+      if (body.slice(help + 1).trimEnd() !== conflictHelp) return null;
+      body = body.slice(0, help);
+    }
+    const lines = body.trimEnd().split(/\r?\n/);
+    const items = [];
+    let manager;
+    for (const line of lines) {
+      const block = /^(?:- )?conflicts? with "([^"\r\n]+)"(?: using [A-Za-z0-9./-]+)?:([ \t]*(\.[^\r\n]+))?$/.exec(line);
+      if (block) {
+        manager = block[1];
+        if (block[3]) items.push([manager, block[3].trim()]);
+      } else if (manager && /^- \./.test(line)) items.push([manager, line.slice(2).trim()]);
+      else return null;
+    }
+    if (items.length !== Number(conflict[1]) || !items.every((m) => fieldPath(m[1]))) return null;
+    return { classification: 'conflict', paths: [...new Set(items.map((m) => m[1]))].sort(), managers: items.map((m) => m[0]) };
   }
   const prefix = `The ${artifact.kind} "${artifact.metadata.name}" is invalid:`;
   if (!stderr.startsWith(prefix) && !/^Error from server \(Invalid\):/.test(stderr)) return null;
@@ -183,7 +214,7 @@ function parse(argv) {
         check(Array.isArray(m[k]) && m[k].length > 0, 'empty permission matrix');
         for (const pair of m[k]) check(Array.isArray(pair) && pair.length === 2
           && string(pair[0]) && /^[a-z][a-z0-9*-]*$/.test(pair[0])
-          && string(pair[1]) && /^[a-z*][a-z0-9.*-]*(?:\/[a-z*][a-z0-9*-]*)?$/.test(pair[1]), 'invalid permission pair');
+          && string(pair[1]) && /^[A-Za-z*][A-Za-z0-9.*-]*(?:\/[a-z*][a-z0-9*-]*)?$/.test(pair[1]), 'invalid permission pair');
       }
     }
   }
@@ -234,16 +265,38 @@ function main() {
       result.push({ object: id, managers: entries.map(({ manager, operation, subresource }) => ({ manager, operation, subresource })), verdict: 'pass' });
     }
   } else if (mode === 'permissions') {
-    for (const [sa, matrix] of Object.entries(i.matrix)) {
+    const discovery = success(run(['api-resources', '-o', 'wide'])).trim().split(/\r?\n/);
+    check(/^NAME\s+SHORTNAMES\s+APIVERSION\s+NAMESPACED\s+KIND\s+VERBS/.test(discovery.shift()), 'invalid resource discovery');
+    const resources = discovery.map((line) => {
+      const m = /^(\S+)\s+(?:(\S+)\s+)?(\S+)\s+(true|false)\s+(\S+)\s+.+$/.exec(line);
+      check(m, 'invalid resource discovery');
+      return { plural: m[1], short: (m[2] ?? '').split(','), group: m[3].includes('/') ? m[3].split('/')[0] : '', kind: m[5].toLowerCase() };
+    });
+    function resolve([verb, resource]) {
+      const [base, sub] = resource.split('/');
+      const [name, ...suffix] = base.toLowerCase().split('.');
+      const matches = resources.filter((r) => (!suffix.length || r.group === suffix.join('.'))
+        && (r.plural === name || r.kind === name || r.short.includes(name)));
+      const unique = [...new Map(matches.map((r) => [JSON.stringify([r.group, r.plural]), r])).values()];
+      check(unique.length === 1, 'unknown or ambiguous resource');
+      return { verb, ...unique[0], sub };
+    }
+    // Resolve the entire matrix before making any permission decision.
+    const matrices = Object.entries(i.matrix).map(([sa, matrix]) => [sa, {
+      allow: matrix.allow.map(resolve), deny: matrix.deny.map(resolve),
+    }]);
+    for (const [sa, matrix] of matrices) {
       const account = object(run(['get', 'serviceaccount', sa, '-o', 'json']));
       check(account.kind === 'ServiceAccount' && account.metadata?.name === sa && account.metadata?.namespace === f.namespace,
         'missing service account');
       function can(pair, denied) {
-        const r = run(['auth', 'can-i', ...pair, `--as=system:serviceaccount:${f.namespace}:${sa}`]);
+        const { verb, plural, group, sub } = pair;
+        const resource = group ? `${plural}.${group}` : plural;
+        const r = run(['auth', 'can-i', verb, resource, ...(sub ? [`--subresource=${sub}`] : []), `--as=system:serviceaccount:${f.namespace}:${sa}`]);
         check(r.status === (denied ? 1 : 0) && r.stderr === ''
           && (r.stdout === (denied ? 'no' : 'yes') || r.stdout === `${denied ? 'no' : 'yes'}\n`),
         denied ? 'permission denial failed' : 'positive permission control failed');
-        result.push({ object: `ServiceAccount/${sa}`, operation: pair, verdict: denied ? 'denied' : 'allowed' });
+        result.push({ object: `ServiceAccount/${sa}`, operation: [verb, `${resource}${sub ? `/${sub}` : ''}`], verdict: denied ? 'denied' : 'allowed' });
       }
       for (const pair of matrix.allow) can(pair, false);
       // This built-in review needs no client CRD discovery under the impersonated SA.
@@ -253,13 +306,11 @@ function main() {
       for (const rule of review.status.resourceRules) {
         check(record(rule) && ['verbs', 'resources', 'apiGroups'].every((k) => Array.isArray(rule[k])
           && rule[k].every((v) => typeof v === 'string')), 'invalid permission rules');
-        for (const [verb, resource] of matrix.deny) {
-          const [base, sub] = resource.split('/');
-          const [name, ...group] = base.split('.');
-          const target = sub ? `${name}/${sub}` : name;
+        for (const { verb, plural, group, sub } of matrix.deny) {
+          const target = sub ? `${plural}/${sub}` : plural;
           const matches = (values, value) => values.includes('*') || values.includes(value);
-          check(!(matches(rule.verbs, verb) && matches(rule.apiGroups, group.join('.'))
-            && (matches(rule.resources, target) || (sub && rule.resources.includes(`*/${sub}`)))), 'permission rules grant denied pair');
+          check(!(matches(rule.verbs, verb) && matches(rule.apiGroups, group)
+            && (matches(rule.resources, target) || (sub && (rule.resources.includes(`*/${sub}`) || rule.resources.includes(`${plural}/*`))))), 'permission rules grant denied pair');
         }
       }
       for (const pair of matrix.deny) can(pair, true);

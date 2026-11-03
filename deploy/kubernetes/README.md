@@ -248,7 +248,9 @@ Successful runs emit a small JSON result followed by `PASS <mode>`.
   SelfSubjectRulesReview (including name-restricted grants), then each
   denial. Matrix shape: `{ "sa": { "allow": [["get", "configmaps"]], "deny":
   [["get", "secrets"]] } }`. Denials require exactly `no` and exit 1. Resources use
-  `resource[.group][/subresource]`.
+  `resource[.group][/subresource]`. Discovery resolves plural, singular, short name
+  or kind to one canonical group/resource before checks; unknown or ambiguous
+  names fail. Subresources use the explicit can-i `--subresource` flag.
 - `admission --snapshot <file> --artifact <file> --manager <name> --delta <file>`
   checks the complete spec/data/binaryData/immutable and metadata
   labels/annotations/finalizers/ownerReferences diff, including
@@ -262,13 +264,11 @@ Adopt, release and admission require a freshly retained `kubectl get ...
 --show-managed-fields -o json` snapshot with matching live uid/resourceVersion, ownership and compared roots.
 Artifacts must match its kind/name and target namespace.
 Run `pnpm test:deployment` (or `pnpm exec vitest run
-deploy/kubernetes/ok170-gates.test.ts` for the CLI fixtures). In the same pinned
-gates container, run `python3 deploy/kubernetes/verify-gates-mutations.py` for
-the per-site removal/restoration table. Run
+deploy/kubernetes/ok170-gates.test.ts` for the CLI fixtures). Run
 `KIND_NODE_IMAGE=<locally-built-v1.34.1-image> pnpm verify:gates-kind` with kind,
 Node 22 and kubectl v1.34.1 on PATH for the disposable server proof. It creates a
 unique cluster, exercises both passing and failing gates, deletes the cluster
-on exit, and retains logs under `test-results/ok170-gates-r2/`. Only successful
+on exit, and retains logs under `test-results/ok170-gates/`. Only successful
 verification and cleanup emit `KIND-PROOF PASS v1.34.1`.
 
 ### Limits
@@ -278,3 +278,8 @@ verification and cleanup emit `KIND-PROOF PASS v1.34.1`.
 - The tool trusts the first kubectl on PATH, after checking its version.
 - Deny matrices prove only the pairs listed.
 - Ingress is not exercised in the kind proof.
+- Expected rejections cannot cover ValidatingAdmissionPolicy denials or multi-key
+  list paths (e.g. `.spec.ports[port=80,protocol="TCP"]`).
+- An invalid-message reason containing `, <word>: ` can add a phantom path
+  (adds, never hides).
+- The rules review reflects RBAC only.

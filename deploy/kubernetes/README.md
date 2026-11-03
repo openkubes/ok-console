@@ -232,32 +232,49 @@ Inputs are single-object JSON files; failures emit one reason and no PASS line.
 Successful runs emit a small JSON result followed by `PASS <mode>`.
 
 - `ownership-inventory --allowlist <file> [--forbid-manager <name>]` checks every
-  managedFields manager and operation against `{ "Kind/name": [{ "manager":
-  "name", "operation": "Apply" }] }`.
+  managedFields manager, operation and subresource against `{ "Kind/name": [{ "manager":
+  "name", "operation": "Apply", "subresource": "", "required": true }] }`.
+  Empty managedFields fail; required entries must be present.
 - `ownership-adopt --snapshot <file> --selected <file> --artifact <file>` checks
-  unchanged values, generation and other owners, with exactly the selected new
+  unchanged values, generation and other owners; every selected path must already
+  have another owner, with exactly the selected new
   ownership. Selected input is `{ "Kind/name": { "manager": "adopter", "paths":
   [["f:spec", "f:selector"]] } }`; paths use the object's fieldsV1 leaf tokens.
 - `ownership-release` takes those same flags plus `--manager <releasing-manager>`.
   It requires prior live adoption and exactly the selected release. Both ownership
   steps support `--apply`, which runs only after the dry-run succeeds, pins the
   snapshot resourceVersion and verifies a fresh read against that snapshot.
-- `permissions --matrix <file>` checks SA existence, a positive control, then each
+- `permissions --matrix <file>` checks SA existence, every positive control, a complete
+  SelfSubjectRulesReview (including name-restricted grants), then each
   denial. Matrix shape: `{ "sa": { "allow": [["get", "configmaps"]], "deny":
-  [["get", "secrets"]] } }`. Denials require exactly `no` and exit 1.
+  [["get", "secrets"]] } }`. Denials require exactly `no` and exit 1. Resources use
+  `resource[.group][/subresource]`.
 - `admission --snapshot <file> --artifact <file> --manager <name> --delta <file>`
-  checks the complete spec/data/binaryData/labels/annotations diff, including
+  checks the complete spec/data/binaryData/immutable and metadata
+  labels/annotations/finalizers/ownerReferences diff, including
   deletions and ordered arrays. Delta shape: `[{ "path": "/spec/replicas",
   "value": 1 }]` or `[{ "path": "/data/key", "deleted": true }]`. Alternatively,
-  `--expect-rejection conflict|invalid` gates only that server rejection class.
+  `--expect-rejection conflict|invalid --expect-paths '["field.path"]'` requires
+  exactly that rejection class and path set. Conflict also requires
+  `--expect-conflict-manager <name>`; conflict paths have a leading dot.
 
 Adopt, release and admission require a freshly retained `kubectl get ...
---show-managed-fields -o json` snapshot with matching live uid/resourceVersion.
+--show-managed-fields -o json` snapshot with matching live uid/resourceVersion, ownership and compared roots.
 Artifacts must match its kind/name and target namespace.
 Run `pnpm test:deployment` (or `pnpm exec vitest run
-deploy/kubernetes/ok170-gates.test.ts` for the CLI fixtures). Run
+deploy/kubernetes/ok170-gates.test.ts` for the CLI fixtures). In the same pinned
+gates container, run `python3 deploy/kubernetes/verify-gates-mutations.py` for
+the per-site removal/restoration table. Run
 `KIND_NODE_IMAGE=<locally-built-v1.34.1-image> pnpm verify:gates-kind` with kind,
 Node 22 and kubectl v1.34.1 on PATH for the disposable server proof. It creates a
 unique cluster, exercises both passing and failing gates, deletes the cluster
-on exit, and retains logs under `test-results/ok170-gates/`. Only successful
+on exit, and retains logs under `test-results/ok170-gates-r2/`. Only successful
 verification and cleanup emit `KIND-PROOF PASS v1.34.1`.
+
+### Limits
+
+- `--apply` has no rollback. A timeout after sending the request can leave the
+  object changed; recover with a fresh snapshot, then run inventory.
+- The tool trusts the first kubectl on PATH, after checking its version.
+- Deny matrices prove only the pairs listed.
+- Ingress is not exercised in the kind proof.

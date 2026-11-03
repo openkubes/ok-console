@@ -10,9 +10,9 @@ for tool in kind kubectl node; do
 done
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(dirname -- "$(dirname -- "$script_dir")")"
-mkdir -p "$repo_dir/test-results/ok170-gates"
-proof_dir="$(mktemp -d "$repo_dir/test-results/ok170-gates/kind.XXXXXXXX")"
-cluster_name="ok170-$(date +%s)-$$-$RANDOM"
+mkdir -p "$repo_dir/test-results/ok170-gates-r2"
+proof_dir="$(mktemp -d "$repo_dir/test-results/ok170-gates-r2/kind.XXXXXXXX")"
+cluster_name="ok170-cx-$(date +%s)-$$-$RANDOM"
 context="kind-$cluster_name"
 namespace=openkubes-console
 export KUBECTL_KUBERC=false
@@ -27,6 +27,13 @@ cleanup() {
     if ! kind delete cluster --name "$cluster_name" >"$proof_dir/cleanup.log" 2>&1; then
       echo 'kind cleanup failed' >&2
       status=1
+    fi
+    if kind get clusters >"$proof_dir/clusters-after" 2>"$proof_dir/clusters-after.stderr"; then
+      while IFS= read -r remaining; do
+        if [[ "$remaining" == "$cluster_name" ]]; then echo 'kind cleanup left cluster present' >&2; status=1; fi
+      done <"$proof_dir/clusters-after"
+    else
+      echo 'kind cleanup inventory failed' >&2; status=1
     fi
   fi
   if (( status == 0 )) && [[ "$completed" == true ]]; then
@@ -71,10 +78,12 @@ if (action === 'initial') {
     matrix[sa] = { allow: [['get', 'configmaps']], deny: [['get', 'secrets'], ['list', 'secrets'], ['watch', 'secrets'], ['get', 'pods'], ['create', 'deployments.apps'], ['patch', 'deployments.apps'], ['delete', 'pods']] };
   }
   write('matrix', matrix);
+  write('rules-review', { apiVersion: 'authorization.k8s.io/v1', kind: 'SelfSubjectRulesReview', spec: { namespace: ns } });
   write('role', { apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'Role', metadata: { name: 'configmap-reader', namespace: ns }, rules: [{ apiGroups: [''], resources: ['configmaps'], verbs: ['get'] }] });
   write('extra-role', { apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'Role', metadata: { name: 'deliberate-extra', namespace: ns }, rules: [{ apiGroups: [''], resources: ['secrets'], verbs: ['get'] }] });
+  write('named-role', { ...read('extra-role'), rules: [{ apiGroups: [''], resources: ['secrets'], verbs: ['get'], resourceNames: ['one'] }] });
   write('extra-binding', { ...read('binding-ok-console'), metadata: { name: 'deliberate-extra', namespace: ns }, roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: 'deliberate-extra' } });
-  write('allowlist', { 'Deployment/ok-console': [{ manager: 'ok-172-live', operation: 'Apply' }, { manager: 'kubectl-set', operation: 'Update' }, { manager: 'kube-controller-manager', operation: 'Update' }], 'Service/observed-state-producer': [{ manager: 'ok-172-live', operation: 'Apply' }, { manager: 'ok-173-breakglass', operation: 'Apply' }], 'ConfigMap/observed-state-producer-cluster-observations': [{ manager: 'ok-173-breakglass', operation: 'Apply' }] });
+  write('allowlist', { 'Deployment/ok-console': [{ manager: 'ok-172-live', operation: 'Apply', required: true }, { manager: 'kubectl-set', operation: 'Update' }, { manager: 'kube-controller-manager', operation: 'Update', subresource: 'status' }], 'Service/observed-state-producer': [{ manager: 'ok-172-live', operation: 'Apply', required: true }, { manager: 'ok-173-breakglass', operation: 'Apply', required: true }], 'ConfigMap/observed-state-producer-cluster-observations': [{ manager: 'ok-173-breakglass', operation: 'Apply', required: true }] });
 } else if (action === 'ownership') {
   const live = read('snapshot');
   const paths = [];
@@ -87,12 +96,16 @@ if (action === 'initial') {
   const entry = live.metadata.managedFields.find(e => e.manager === 'ok-172-live' && e.operation === 'Apply');
   walk(entry.fieldsV1, []);
   if (!paths.length) throw Error('fixture does not own selector');
+  write('unowned-selected', { 'Service/observed-state-producer': { manager: 'ok-170-acceptance', paths: [['f:spec', 'f:sessionAffinity']] } });
   write('selected', { 'Service/observed-state-producer': { manager: 'ok-170-acceptance', paths } });
   write('adopt', { apiVersion: 'v1', kind: 'Service', metadata: { name: service.metadata.name, namespace: ns }, spec: { selector: service.spec.selector } });
+  write('unowned-adopt', { ...read('adopt'), spec: { sessionAffinity: 'None' } });
   const release = structuredClone(service); delete release.spec.selector; write('release', release);
   delete release.spec.ports; write('over-release', release);
   const allow = read('allowlist'); allow['Service/observed-state-producer'].push({ manager: 'ok-170-acceptance', operation: 'Apply' }); write('adopted-allowlist', allow);
 } else if (action === 'admission') {
+  const cm = read('configmap'); cm.immutable = true; write('immutable', cm);
+  write('empty-delta', []); write('immutable-delta', [{ path: '/immutable', value: true }]);
   const dep = read('deployment');
   dep.spec.template.spec.containers[0].image = 'registry.k8s.io/pause:3.9'; write('conflict', dep);
   const invalid = read('deployment'); invalid.spec.template.spec.containers[0].ports[0].containerPort = 70000; write('invalid', invalid);
@@ -117,8 +130,11 @@ const lines = text.trim().split('\n');
 const passes = lines.filter(x => x.startsWith('PASS '));
 const reasons = { 'foreign-manager': 'foreign manager or operation', 'release-before-adoption': 'release before adoption',
   'over-release': 'over-release, under-release or newly owned path', conflict: 'admission rejected: conflict',
-  'extra-delta': 'unapproved admission delta', 'extra-permission': 'permission denial failed', 'missing-namespace': 'missing --namespace' };
-const intendedFailure = !reasons[name] || stderr.trim() === reasons[name];
+  'extra-delta': 'unapproved admission delta', 'extra-permission': 'permission rules grant denied pair', 'missing-namespace': 'missing --namespace',
+  'unowned-adopt': 'selected path not owned by another manager', 'immutable-empty': 'unapproved admission delta',
+  'named-permission': 'permission rules grant denied pair', 'wrong-conflict-path': 'expected rejection paths mismatch',
+  'wrong-invalid-path': 'expected rejection paths mismatch' };
+const intendedFailure = Boolean(reasons[name]) && stderr === `${reasons[name]}\n`;
 if (+code === 0 && stderr === '' && passes.length === 1 && lines.at(-1) === `PASS ${mode}`) console.log('PASS');
 else if (+code !== 0 && passes.length === 0 && stderr.trim().split('\n').length === 1 && stderr.trim() && intendedFailure) console.log('FAIL');
 else console.log('MALFORMED');
@@ -154,6 +170,7 @@ k label service observed-state-producer foreign=present --field-manager=foreign 
 gate 1 foreign-manager FAIL ownership-inventory --allowlist "$proof_dir/allowlist.json"
 reset_service
 gate 2 release-before-adoption FAIL ownership-release --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/release.json" --manager ok-172-live
+gate 3 unowned-adopt FAIL ownership-adopt --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/unowned-selected.json" --artifact "$proof_dir/unowned-adopt.json"
 gate 3 adopt-dry-run PASS ownership-adopt --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/adopt.json"
 gate 3 adopt-apply PASS ownership-adopt --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/adopt.json" --apply
 gate 3 adopted-inventory PASS ownership-inventory --allowlist "$proof_dir/adopted-allowlist.json"
@@ -173,17 +190,30 @@ if k apply --server-side --force-conflicts=false --dry-run=server --field-manage
   echo 'conflict fixture unexpectedly accepted' >&2; exit 1
 fi
 gate 5 conflict FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --delta "$proof_dir/delta.json"
-gate 5 expected-conflict PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict
+gate 5 expected-conflict PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.template.spec.containers[name=\"console\"].image"]' --expect-conflict-manager ok-172-live
+gate 5 wrong-conflict-path FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas"]' --expect-conflict-manager ok-172-live
 if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=ok-172-live --show-managed-fields -f "$proof_dir/invalid.json" -o json >"$proof_dir/invalid-producer.stdout" 2>"$proof_dir/invalid-producer.stderr"; then
   echo 'invalid fixture unexpectedly accepted' >&2; exit 1
 fi
-gate 6 expected-invalid PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/invalid.json" --manager ok-172-live --expect-rejection invalid
+gate 6 expected-invalid PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/invalid.json" --manager ok-172-live --expect-rejection invalid --expect-paths '["spec.template.spec.containers[0].ports[0].containerPort"]'
+gate 6 wrong-invalid-path FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/invalid.json" --manager ok-172-live --expect-rejection invalid --expect-paths '["spec.replicas"]'
 gate 7 exact-delta PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/approved.json" --manager ok-172-live --delta "$proof_dir/delta.json"
 gate 7 extra-delta FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/extra.json" --manager ok-172-live --delta "$proof_dir/delta.json"
+k get configmap observed-state-producer-cluster-observations --show-managed-fields -o json >"$proof_dir/cm-snapshot.json"
+gate 7 immutable-empty FAIL admission --snapshot "$proof_dir/cm-snapshot.json" --artifact "$proof_dir/immutable.json" --manager ok-173-breakglass --delta "$proof_dir/empty-delta.json"
+gate 7 immutable-exact PASS admission --snapshot "$proof_dir/cm-snapshot.json" --artifact "$proof_dir/immutable.json" --manager ok-173-breakglass --delta "$proof_dir/immutable-delta.json"
+# Retain the real review producer diagnostics alongside admission diagnostics.
+if k create --validate=false -f "$proof_dir/rules-review.json" -o json --as="system:serviceaccount:$namespace:ok-console" >"$proof_dir/rules-producer.stdout" 2>"$proof_dir/rules-producer.stderr"; then :; else
+  echo 'rules review producer failed' >&2; exit 1
+fi
 gate 8 permissions PASS permissions --matrix "$proof_dir/matrix.json"
+apply_fixture ok170-proof named-role
+apply_fixture ok170-proof extra-binding
+gate 8 named-permission FAIL permissions --matrix "$proof_dir/matrix.json"
 apply_fixture ok170-proof extra-role
 apply_fixture ok170-proof extra-binding
 gate 8 extra-permission FAIL permissions --matrix "$proof_dir/matrix.json"
+k delete rolebinding deliberate-extra >"$proof_dir/remove-extra-binding.log"
 # The wrapper records ANY kubectl call, including client version. A guard refusal must leave it empty.
 if [[ -e "$proof_dir/bin" ]]; then echo 'wrapper directory already exists' >&2; exit 1; fi
 mkdir "$proof_dir/bin"
@@ -197,6 +227,10 @@ printf 'call\n' >>"$OK170_CALL_LOG"
 exec "$OK170_REAL_KUBECTL" "$@"
 SH
 chmod +x "$proof_dir/bin/kubectl"
+# Positive control: the same wrapper and complete target must record calls.
+PATH="$proof_dir/bin:$PATH" gate 8 call-log-control PASS permissions --matrix "$proof_dir/matrix.json"
+if [[ ! -s "$OK170_CALL_LOG" ]]; then echo 'call log positive control empty' >&2; exit 1; fi
+: >"$OK170_CALL_LOG"
 PATH="$proof_dir/bin:$PATH" step 8 missing-namespace FAIL permissions --context "$context" --matrix "$proof_dir/matrix.json"
 if [[ -s "$OK170_CALL_LOG" ]]; then echo 'guard made a kubectl call' >&2; exit 1; fi
 completed=true

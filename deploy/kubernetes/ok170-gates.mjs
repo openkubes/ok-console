@@ -15,7 +15,7 @@ const modes = {
   'ownership-adopt': ['snapshot', 'selected', 'artifact', 'manager', 'apply'],
   'ownership-release': ['snapshot', 'selected', 'artifact', 'manager', 'apply'],
   permissions: ['matrix'],
-  admission: ['snapshot', 'artifact', 'manager', 'delta', 'expect-rejection'],
+  admission: ['snapshot', 'artifact', 'manager', 'delta', 'expect-rejection', 'expect-paths', 'expect-conflict-manager'],
 };
 function json(text, reason) { try { return JSON.parse(text); } catch { fail(reason); } }
 function file(path) { try { return json(readFileSync(path, 'utf8'), 'invalid JSON input'); } catch { fail('missing or invalid JSON input'); } }
@@ -40,7 +40,7 @@ function token(t) {
   return t;
 }
 function fields(x) {
-  check(record(x.metadata) && Array.isArray(x.metadata.managedFields), 'missing managedFields');
+  check(record(x.metadata) && Array.isArray(x.metadata.managedFields) && x.metadata.managedFields.length > 0, 'missing managedFields');
   const entries = new Map();
   for (const e of x.metadata.managedFields) {
     check(record(e) && string(e.manager) && ['Apply', 'Update'].includes(e.operation)
@@ -58,7 +58,7 @@ function fields(x) {
     walk(e.fieldsV1, []);
     const key = JSON.stringify([e.manager, e.operation, e.apiVersion, e.subresource ?? '']);
     check(!entries.has(key), 'duplicate managedFields entry');
-    entries.set(key, { manager: e.manager, operation: e.operation, paths: [...paths].sort() });
+    entries.set(key, { manager: e.manager, operation: e.operation, subresource: e.subresource ?? '', paths: [...paths].sort() });
   }
   return entries;
 }
@@ -67,18 +67,16 @@ function owned(entries, manager) {
 }
 const minus = (a, b) => [...a].filter((p) => !b.has(p)).sort();
 function stableValues(before, after) {
-  check(equal(before.spec, after.spec) && equal(before.data, after.data)
-    && equal(before.binaryData, after.binaryData) && equal(before.metadata.labels, after.metadata.labels)
-    && equal(before.metadata.annotations, after.metadata.annotations)
+  check(equal(projection(before), projection(after))
     && equal(before.metadata.generation, after.metadata.generation), 'values, env order or generation changed');
 }
 const pointer = (p) => p.replaceAll('~', '~0').replaceAll('/', '~1');
-const roots = ['spec', 'data', 'binaryData'];
+const roots = ['spec', 'data', 'binaryData', 'immutable'];
 function projection(x) {
   const result = {};
   for (const k of roots) if (Object.hasOwn(x, k)) result[k] = x[k];
   result.metadata = {};
-  for (const k of ['labels', 'annotations']) if (Object.hasOwn(x.metadata, k)) result.metadata[k] = x.metadata[k];
+  for (const k of ['labels', 'annotations', 'finalizers', 'ownerReferences']) if (Object.hasOwn(x.metadata, k)) result.metadata[k] = x.metadata[k];
   return result;
 }
 const absent = Symbol('absent');
@@ -101,6 +99,24 @@ function at(x, path) {
   }
   return x;
 }
+function fieldPath(path) {
+  return typeof path === 'string' && /^\.?[A-Za-z_][\w-]*(?:\[(?:\d+|[\w.-]+="[^"\]\r\n]+")\]|\.[A-Za-z_][\w/-]*)*$/.test(path);
+}
+function classifyRejection(stderr, artifact) {
+  const conflict = /^(?:error: |Error from server \(Conflict\): )Apply failed with (\d+) conflicts?\b/.exec(stderr);
+  if (conflict) {
+    const items = [...stderr.matchAll(/conflict with "([^"\r\n]+)"[^:\r\n]*:\s*(\.[^\r\n]+)\s*(?:\n|$)/g)];
+    if (items.length !== Number(conflict[1]) || !items.every((m) => fieldPath(m[2].trim()))) return null;
+    return { classification: 'conflict', paths: [...new Set(items.map((m) => m[2].trim()))].sort(), managers: items.map((m) => m[1]) };
+  }
+  const prefix = `The ${artifact.kind} "${artifact.metadata.name}" is invalid:`;
+  if (!stderr.startsWith(prefix) && !/^Error from server \(Invalid\):/.test(stderr)) return null;
+  const body = stderr.startsWith(prefix) ? stderr.slice(prefix.length) : stderr.replace(/^Error from server \(Invalid\):.*? is invalid:/, '');
+  const items = body.trim().split(/\r?\n|,\s+(?=[^,:\r\n]+:\s)/).map((s) => s.trim().replace(/^\*\s+/, ''));
+  const paths = items.map((item) => /^([^:]+):\s+.+$/.exec(item)?.[1]);
+  if (!paths.length || !paths.every(fieldPath)) return null;
+  return { classification: 'invalid', paths: [...new Set(paths)].sort() };
+}
 function parse(argv) {
   const [mode, ...args] = argv;
   check(Object.hasOwn(modes, mode), 'unknown mode');
@@ -120,6 +136,15 @@ function parse(argv) {
   for (const k of required) check(string(flags[k]), `missing --${k}`);
   if (flags['expect-rejection']) check(['conflict', 'invalid'].includes(flags['expect-rejection']), 'invalid expected rejection');
   if (mode === 'admission') check(Boolean(flags.delta) !== Boolean(flags['expect-rejection']), 'provide delta or expected rejection');
+  if (flags['expect-rejection']) {
+    check(string(flags['expect-paths']), 'missing --expect-paths');
+    const paths = json(flags['expect-paths'], 'invalid expected paths');
+    check(Array.isArray(paths) && paths.length > 0 && paths.every(fieldPath)
+      && new Set(paths).size === paths.length, 'invalid expected paths');
+    flags.expectedPaths = paths.sort();
+    if (flags['expect-rejection'] === 'conflict') check(string(flags['expect-conflict-manager']), 'missing --expect-conflict-manager');
+    else check(!flags['expect-conflict-manager'], 'unexpected conflict manager');
+  } else check(!flags['expect-paths'] && !flags['expect-conflict-manager'], 'unexpected rejection flags');
   const input = {};
   for (const k of ['allowlist', 'matrix', 'snapshot', 'selected', 'artifact', 'delta']) if (flags[k]) input[k] = file(flags[k]);
   if (input.snapshot) {
@@ -130,7 +155,7 @@ function parse(argv) {
   if (mode.startsWith('ownership-') && mode !== 'ownership-inventory') {
     check(record(input.selected) && equal(Object.keys(input.selected), [input.id]), 'invalid selected object');
     const selected = input.selected[input.id];
-    check(record(selected) && string(selected.manager) && Array.isArray(selected.paths) && selected.paths.length > 0,
+    check(record(selected) && Object.keys(selected).every((k) => ['manager', 'paths'].includes(k)) && string(selected.manager) && Array.isArray(selected.paths) && selected.paths.length > 0,
       'invalid selected paths');
     input.paths = selected.paths.map((p) => { check(Array.isArray(p), 'invalid selected path'); return JSON.stringify(p.map(token)); });
     check(new Set(input.paths).size === input.paths.length, 'duplicate selected path');
@@ -144,17 +169,21 @@ function parse(argv) {
       const [kind, name, extra] = id.split('/');
       check(kinds.has(kind) && string(name) && /^[a-z0-9][a-z0-9.-]*$/.test(name) && extra === undefined
         && Array.isArray(entries) && entries.length > 0, 'invalid allowlist object');
-      for (const e of entries) check(record(e) && string(e.manager) && ['Apply', 'Update'].includes(e.operation), 'invalid allowlist entry');
+      for (const e of entries) check(record(e) && Object.keys(e).every((k) => ['manager', 'operation', 'subresource', 'required'].includes(k))
+        && string(e.manager) && ['Apply', 'Update'].includes(e.operation)
+        && (e.subresource === undefined || typeof e.subresource === 'string')
+        && (e.required === undefined || typeof e.required === 'boolean'), 'invalid allowlist entry');
     }
   }
   if (mode === 'permissions') {
     check(record(input.matrix) && Object.keys(input.matrix).length > 0, 'invalid matrix');
     for (const [sa, m] of Object.entries(input.matrix)) {
-      check(/^[a-z0-9][a-z0-9.-]*$/.test(sa) && record(m), 'invalid service account');
+      check(/^[a-z0-9][a-z0-9.-]*$/.test(sa) && record(m) && Object.keys(m).every((k) => ['allow', 'deny'].includes(k)), 'invalid service account');
       for (const k of ['allow', 'deny']) {
         check(Array.isArray(m[k]) && m[k].length > 0, 'empty permission matrix');
         for (const pair of m[k]) check(Array.isArray(pair) && pair.length === 2
-          && pair.every((s) => string(s) && /^[a-z][a-z0-9.*-]*$/.test(s)), 'invalid permission pair');
+          && string(pair[0]) && /^[a-z][a-z0-9*-]*$/.test(pair[0])
+          && string(pair[1]) && /^[a-z*][a-z0-9.*-]*(?:\/[a-z*][a-z0-9*-]*)?$/.test(pair[1]), 'invalid permission pair');
       }
     }
   }
@@ -163,7 +192,7 @@ function parse(argv) {
     const paths = [];
     for (const d of input.delta) {
       check(record(d) && typeof d.path === 'string'
-        && /^\/(spec|data|binaryData|metadata\/(labels|annotations))(\/|$)/.test(d.path)
+        && /^\/(spec|data|binaryData|immutable|metadata\/(labels|annotations|finalizers|ownerReferences))(\/|$)/.test(d.path)
         && !/~(?![01])/.test(d.path) && (Object.hasOwn(d, 'value') !== Object.hasOwn(d, 'deleted'))
         && (d.deleted === undefined || d.deleted === true)
         && Object.keys(d).every((k) => ['path', 'value', 'deleted'].includes(k)), 'invalid delta entry');
@@ -198,9 +227,11 @@ function main() {
       const entries = [...fields(get(id)).values()];
       for (const e of entries) {
         check(e.manager !== f['forbid-manager'], 'forbidden manager');
-        check(allow.some((a) => a.manager === e.manager && a.operation === e.operation), 'foreign manager or operation');
+        check(allow.some((a) => a.manager === e.manager && a.operation === e.operation && (a.subresource ?? '') === e.subresource), 'foreign manager or operation');
       }
-      result.push({ object: id, managers: entries.map(({ manager, operation }) => ({ manager, operation })), verdict: 'pass' });
+      for (const a of allow) check(!a.required || entries.some((e) => e.manager === a.manager
+        && e.operation === a.operation && e.subresource === (a.subresource ?? '')), 'required manager absent');
+      result.push({ object: id, managers: entries.map(({ manager, operation, subresource }) => ({ manager, operation, subresource })), verdict: 'pass' });
     }
   } else if (mode === 'permissions') {
     for (const [sa, matrix] of Object.entries(i.matrix)) {
@@ -214,14 +245,35 @@ function main() {
         denied ? 'permission denial failed' : 'positive permission control failed');
         result.push({ object: `ServiceAccount/${sa}`, operation: pair, verdict: denied ? 'denied' : 'allowed' });
       }
-      can(matrix.allow[0], false);
+      for (const pair of matrix.allow) can(pair, false);
+      // This built-in review needs no client CRD discovery under the impersonated SA.
+      const review = object(run(['create', '--validate=false', '-f', '-', '-o', 'json', `--as=system:serviceaccount:${f.namespace}:${sa}`],
+        JSON.stringify({ apiVersion: 'authorization.k8s.io/v1', kind: 'SelfSubjectRulesReview', spec: { namespace: f.namespace } })));
+      check(record(review.status) && review.status.incomplete === false && Array.isArray(review.status.resourceRules), 'incomplete permission rules');
+      for (const rule of review.status.resourceRules) {
+        check(record(rule) && ['verbs', 'resources', 'apiGroups'].every((k) => Array.isArray(rule[k])
+          && rule[k].every((v) => typeof v === 'string')), 'invalid permission rules');
+        for (const [verb, resource] of matrix.deny) {
+          const [base, sub] = resource.split('/');
+          const [name, ...group] = base.split('.');
+          const target = sub ? `${name}/${sub}` : name;
+          const matches = (values, value) => values.includes('*') || values.includes(value);
+          check(!(matches(rule.verbs, verb) && matches(rule.apiGroups, group.join('.'))
+            && (matches(rule.resources, target) || (sub && rule.resources.includes(`*/${sub}`)))), 'permission rules grant denied pair');
+        }
+      }
       for (const pair of matrix.deny) can(pair, true);
     }
   } else {
     const live = get(i.id);
     check(live.metadata.uid === i.snapshot.metadata.uid && live.metadata.resourceVersion === i.snapshot.metadata.resourceVersion, 'stale snapshot');
+    check(equal(projection(live), projection(i.snapshot)), 'stale snapshot');
     const before = fields(i.snapshot);
     check(equal(before, fields(live)), 'stale snapshot ownership');
+    if (mode === 'ownership-adopt') {
+      const others = new Set([...before.values()].filter((e) => e.manager !== i.adopter).flatMap((e) => e.paths));
+      check(i.paths.every((p) => others.has(p)), 'selected path not owned by another manager');
+    }
     if (mode === 'ownership-release') {
       const adopted = owned(fields(live), i.adopter);
       check(i.paths.every((p) => adopted.has(p)), 'release before adoption');
@@ -235,14 +287,14 @@ function main() {
       return run(args, JSON.stringify(artifact));
     }
     const dry = apply(true);
-    const conflict = /^(?:Error from server \(Conflict\): |error: )Apply failed with \d+ conflicts?\b/.test(dry.stderr);
-    const invalid = dry.stderr.startsWith(`The ${i.artifact.kind} "${i.artifact.metadata.name}" is invalid:`)
-      || /^Error from server \(Invalid\)/.test(dry.stderr);
-    const classification = conflict ? 'conflict' : invalid ? 'invalid' : 'unclassified';
+    const rejection = classifyRejection(dry.stderr, i.artifact);
+    const classification = rejection?.classification ?? 'unclassified';
     if (!f['expect-rejection'] && dry.status !== 0 && classification !== 'unclassified') fail(`admission rejected: ${classification}`);
     if (f['expect-rejection']) {
       check(dry.status !== 0 && classification === f['expect-rejection'], 'expected rejection absent or unclassified');
-      result.push({ object: i.id, verdict: 'rejected', rejection: classification });
+      check(equal(rejection.paths, f.expectedPaths), 'expected rejection paths mismatch');
+      if (classification === 'conflict') check(rejection.managers.every((m) => m === f['expect-conflict-manager']), 'expected conflict manager mismatch');
+      result.push({ object: i.id, verdict: 'rejected', rejection: classification, paths: rejection.paths });
     } else {
       function verify(after) {
         check(identity(after, f.namespace, true) === i.id && after.metadata.uid === i.snapshot.metadata.uid, 'response identity mismatch');

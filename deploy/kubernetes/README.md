@@ -222,3 +222,42 @@ cosign verify \
 
 A mutable discovery tag is never a deployment identity. Publication here means
 **development candidate**, not stable or production-ready release.
+
+## OK-170 continuity gates
+
+`node deploy/kubernetes/ok170-gates.mjs <mode> --context <context> --namespace
+openkubes-console ...` requires Node 22, kubectl **v1.34.1**, and caller environment
+`KUBECTL_KUBERC=false`. Every request pins the target and a 10-second timeout.
+Inputs are single-object JSON files; failures emit one reason and no PASS line.
+Successful runs emit a small JSON result followed by `PASS <mode>`.
+
+- `ownership-inventory --allowlist <file> [--forbid-manager <name>]` checks every
+  managedFields manager and operation against `{ "Kind/name": [{ "manager":
+  "name", "operation": "Apply" }] }`.
+- `ownership-adopt --snapshot <file> --selected <file> --artifact <file>` checks
+  unchanged values, generation and other owners, with exactly the selected new
+  ownership. Selected input is `{ "Kind/name": { "manager": "adopter", "paths":
+  [["f:spec", "f:selector"]] } }`; paths use the object's fieldsV1 leaf tokens.
+- `ownership-release` takes those same flags plus `--manager <releasing-manager>`.
+  It requires prior live adoption and exactly the selected release. Both ownership
+  steps support `--apply`, which runs only after the dry-run succeeds, pins the
+  snapshot resourceVersion and verifies a fresh read against that snapshot.
+- `permissions --matrix <file>` checks SA existence, a positive control, then each
+  denial. Matrix shape: `{ "sa": { "allow": [["get", "configmaps"]], "deny":
+  [["get", "secrets"]] } }`. Denials require exactly `no` and exit 1.
+- `admission --snapshot <file> --artifact <file> --manager <name> --delta <file>`
+  checks the complete spec/data/binaryData/labels/annotations diff, including
+  deletions and ordered arrays. Delta shape: `[{ "path": "/spec/replicas",
+  "value": 1 }]` or `[{ "path": "/data/key", "deleted": true }]`. Alternatively,
+  `--expect-rejection conflict|invalid` gates only that server rejection class.
+
+Adopt, release and admission require a freshly retained `kubectl get ...
+--show-managed-fields -o json` snapshot with matching live uid/resourceVersion.
+Artifacts must match its kind/name and target namespace.
+Run `pnpm test:deployment` (or `pnpm exec vitest run
+deploy/kubernetes/ok170-gates.test.ts` for the CLI fixtures). Run
+`KIND_NODE_IMAGE=<locally-built-v1.34.1-image> pnpm verify:gates-kind` with kind,
+Node 22 and kubectl v1.34.1 on PATH for the disposable server proof. It creates a
+unique cluster, exercises both passing and failing gates, deletes the cluster
+on exit, and retains logs under `test-results/ok170-gates/`. Only successful
+verification and cleanup emit `KIND-PROOF PASS v1.34.1`.

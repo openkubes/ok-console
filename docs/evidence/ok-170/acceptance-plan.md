@@ -29,7 +29,7 @@ Total: 6 h = 2.5 h off-cluster + 3 h live + 0.5 h record. Step 4 uses existing s
 
 ## Step 3 drill results
 
-Disposable kind v1.34.1; C1 is a local merge of #143 and #142 onto main; both are stacked on #139 (and #143 on #140), so all four PRs are included, at their current heads. P1 is openkubes `1b0739fc`. Two consecutive green runs of the same checks; all drills recovered.
+Disposable kind v1.34.1; C1 is a local merge of the current heads of #143 and #142, which include #139, #140 and main `0a164e3`. P1 is openkubes `1b0739fc`. Two consecutive green runs of the same checks; all drills recovered.
 
 | Drill | Result |
 | --- | --- |
@@ -112,4 +112,4 @@ Allowlist safe projections before persistence. Never record Secret values/hashes
 
 - **Applies to:** Scope C and the identified source pairs; live execution remains separately approved.
 - **Shown in:** #145 gate-tooling proof and the step 3 disposable-cluster results above. These are off-cluster results, not observations of deployed C1/P1 on ok-shared.
-- **Follow-ups:** Steps 1, 4 and 5 remain open; deferred ACs and R1-R9 retain their stated disposition. No macOS access was available; Arash, please verify macOS-only behaviour. C1 built in step 1 is checked against the drilled heads (#142 2a96b03, #143 2af9afb); any change after these heads repeats the affected drills.
+- **Follow-ups:** Steps 1, 4 and 5 remain open; deferred ACs and R1-R9 retain their stated disposition. No macOS access was available; Arash, please verify macOS-only behaviour. C1 built in step 1 is checked against the drilled heads (#142 `43b6c28`, #143 `5319534`); any change after these heads repeats the affected drills.

@@ -23,6 +23,7 @@ export interface EvidenceRef {
   observedAt: string
   source: string
   summary: string
+  freshness?: Freshness
   immutable: boolean
 }
 

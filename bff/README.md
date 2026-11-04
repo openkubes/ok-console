@@ -285,7 +285,7 @@ Append one of these query values to a resource:
 | --- | --- |
 | `?failure=forbidden` | `403 FORBIDDEN` |
 | `?failure=unavailable` | retryable `503 SOURCE_UNAVAILABLE` |
-| `?failure=stale` | successful response with `Stale` freshness |
+| `?failure=stale` | successful response with `Stale` freshness; the stale-response verdict makes readiness and lifecycle `Unknown` and current metric leaves (`ready`, `pending`, `failed`, `unknown`, and open findings total/critical) null, while inventory totals remain |
 | `?failure=degraded` | successful response with `PARTIAL_DATA` warning |
 | `?failure=incompatible` | fail-closed `502 CONTRACT_INCOMPATIBLE` |
 

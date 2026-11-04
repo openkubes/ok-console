@@ -4,15 +4,13 @@
 
 ## Post-event review package — planning only
 
-The event has ended. This package is for Arash’s separate review; no post-event execution or new live observation is claimed. The historical records below are dated evidence, not current deployment assertions.
+The event has ended. Scope C is one working day of 6 h; this planning record grants no execution approval. Historical records below remain dated evidence, not current deployment assertions.
 
 | Review entry | Contract |
 | --- | --- |
-| [Acceptance plan](acceptance-plan.md) | R1/R3–R6, D1–D10, final-candidate D4 reason/server-class mapping, pending D3/D5 freshness pass criteria, risks and artifact template |
-| [Maintenance procedure](maintenance-procedure.md) | Prospective steps, ConfigMap ordering/Q3-C/restore, bounded controls, recovery and closing handoff |
-| [Prerequisites](prerequisites.md) | Complete dependency/owner/image-impact table, producer scope decision, readiness gate and count-derived window |
-| Proposed window | Earliest two working days after explicit readiness sign-off; all prerequisite merges, C1/P1 builds/hashes and package re-review required. Count-derived duration/roster in prerequisites; no fixed dates. |
-| Approval scope | D9/D10 remain in principle. D8 needs a distinct bounded approval; if withheld, bootstrap evidence remains pending and the revised transition/ledger must be reviewed and re-hashed. |
+| [Scope C acceptance plan](acceptance-plan.md) | The 6 h plan, completed off-cluster drills, AC map, deferred risks and recorded decisions |
+| [Deferred full-window procedure](maintenance-procedure.md) | Outside Scope C; kept for a later full window and must be re-reviewed against the current candidate before use |
+| Live approval | Step 4 requires Arash's explicit approval of each live write: deploy C1, deploy P1 and fail-closed abort. Existing sign-in configuration; no OIDC change. |
 
 Historical status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
 

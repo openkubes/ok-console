@@ -593,7 +593,7 @@ describe('local-only W-JAX Console route', () => {
     }) } as Response)
     try {
       await renderSignedIn()
-      expect(screen.getByRole('link', { name: /W-JAX Local Kubernetes/ })).toHaveAttribute('href', '#/wjax')
+      expect(screen.getByRole('link', { name: /User & Project Management/ })).toHaveAttribute('href', '#/users')
       window.location.hash = '#/wjax'
       fireEvent(window, new Event('hashchange'))
       expect(await screen.findByRole('heading', { name: 'Local Kubernetes' })).toBeInTheDocument()
@@ -602,5 +602,14 @@ describe('local-only W-JAX Console route', () => {
       expect(screen.queryByRole('button', { name: /Ask OK AI/ })).not.toBeInTheDocument()
       expect(fetcher).toHaveBeenCalledWith('/api/wjax-kind/snapshot', expect.objectContaining({ method: 'GET' }))
     } finally { fetcher.mockRestore() }
+  })
+})
+
+ describe('Workspace preview navigation', () => {
+  it('opens the workspace preview from the primary navigation', async () => {
+    await renderSignedIn()
+    fireEvent.click(screen.getByRole('link', { name: /Developer Workspaces/ }))
+    expect(await screen.findByRole('heading', { name: 'Developer Workspaces' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Create Workspace/ })).toBeInTheDocument()
   })
 })

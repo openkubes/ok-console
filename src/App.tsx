@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import DiagnosticWidget from './DiagnosticWidget'
 import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
@@ -7,10 +7,15 @@ import { platformFixture } from './data/fixtures'
 import { ConsoleDataError } from './data/bffAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
 
-type Page = 'overview' | 'clusters' | 'workloads' | 'agents' | 'capabilities' | 'evidence' | 'create' | 'register'
-type IconName = Page | 'search' | 'bell' | 'chevron' | 'shield' | 'cube' | 'arrow' | 'menu' | 'x' | 'check' | 'clock' | 'external' | 'code' | 'terminal' | 'spark'
+import { wjaxLocalPreviewEnabled } from './wjax/localPreview'
 
-const NAV: Array<{ id: Page; label: string; caption: string }> = [
+// Excluded from production builds; fetched only when this local demo route opens.
+const WjaxClusterView = import.meta.env.DEV ? lazy(() => import('./wjax/WjaxClusterView')) : null
+
+type Page = 'wjax' | 'overview' | 'clusters' | 'workloads' | 'agents' | 'capabilities' | 'evidence' | 'create' | 'register'
+type IconName = Exclude<Page, 'wjax'> | 'search' | 'bell' | 'chevron' | 'shield' | 'cube' | 'arrow' | 'menu' | 'x' | 'check' | 'clock' | 'external' | 'code' | 'terminal' | 'spark'
+
+const NAV: Array<{ id: Exclude<Page, 'wjax'>; label: string; caption: string }> = [
   { id: 'overview', label: 'Platform Overview', caption: 'Fleet & posture' },
   { id: 'clusters', label: 'Clusters', caption: 'Lifecycle contracts' },
   { id: 'workloads', label: 'Workloads', caption: 'Claims & placement' },
@@ -21,6 +26,7 @@ const NAV: Array<{ id: Page; label: string; caption: string }> = [
 
 const pageFromHash = (): Page => {
   const value = window.location.hash.replace('#/', '').split('/')[0] as Page
+  if (value === 'wjax' && wjaxLocalPreviewEnabled) return 'wjax'
   return [...NAV.map((item) => item.id), 'create', 'register'].includes(value) ? value : 'overview'
 }
 
@@ -139,14 +145,14 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   return <>
     <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div>}/>
-    {import.meta.env.VITE_WJAX_KIND_PREVIEW === 'true' && (
+    {wjaxLocalPreviewEnabled && (
       <section aria-label="W-JAX local kind lab" style={{ padding: '18px 20px', marginBottom: 18, border: '1px solid #65a5d255', borderRadius: 12, background: '#e8f5ff' }}>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div>
             <strong style={{ color: '#15375b' }}>kind-wjax-demo · Local lab</strong>
             <div style={{ marginTop: 5, color: '#37546c', fontSize: 13 }}>Live, read-only Kubernetes observation · Namespace wjax-demo · Not included in fixture cluster totals</div>
           </div>
-          <a href="/wjax-kind.html" style={{ borderRadius: 8, padding: '10px 14px', color: '#fff', background: '#1059b2', textDecoration: 'none', fontWeight: 600 }}>View Deployments &amp; Pods →</a>
+          <a href="#/wjax" style={{ borderRadius: 8, padding: '10px 14px', color: '#fff', background: '#1059b2', textDecoration: 'none', fontWeight: 600 }}>View Deployments &amp; Pods →</a>
         </div>
       </section>
     )}
@@ -633,21 +639,21 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
+  const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'wjax' ? 'W-JAX Local Kubernetes' : page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
   if (authStatus === 'checking') return <AuthLoading/>
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
+  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
     <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
       <div className="brand"><img src="./openkubes-icon.png" alt="OpenKubes"/><div><strong>OpenKubes</strong><span>Platform Console</span></div><button className="menu-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><Icon name="x"/></button></div>
       <div className="context-switcher"><span className="context-mark">OK</span><span><small>Distribution</small><strong>OpenKubes Platform</strong></span><Icon name="chevron" size={15}/></div>
-      <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}</nav>
+      <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}{wjaxLocalPreviewEnabled && <a href="#/wjax" className={page === 'wjax' ? 'active' : ''}><Icon name="clusters"/><span><strong>W-JAX Local Kubernetes</strong><small>Local demo · read-only</small></span></a>}</nav>
       <div className="sidebar-spacer"/>
       <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div>
       <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{signOutError ?? (session.method === 'oidc' ? 'Federated identity' : 'Break-glass session')}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" disabled={signingOut} onClick={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div>
@@ -655,9 +661,9 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="live-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
-      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</span></footer></main>
+      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
     </div>
-    <DiagnosticWidget data={data} openEvidence={setSelectedEvidence}/>
+    {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget data={data} openEvidence={setSelectedEvidence}/>}
     {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}
     {shellCluster && <ClusterShell cluster={shellCluster} source={data.source} close={() => setShellCluster(undefined)}/>}
   </div>

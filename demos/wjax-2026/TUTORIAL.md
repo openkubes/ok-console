@@ -234,6 +234,16 @@ make wjax-demo-diagnose
 
 The Console and live kind view share one process. Ollama is a separate prerequisite, outside the launcher's four services. All demo HTTP listeners bind to loopback. Open the Console, live kind view and Agentic demo URLs manually in your browser.
 
+### 1.9 Open the local Kubernetes view inside the Console
+
+After `make wjax-demo` starts the prepared lab, open `http://127.0.0.1:8790/#/clusters`. In the local prototype sign-in flow, choose **Continue with OpenKubes Identity**, **Simulate identity provider return**, then **Enter Console**. This is a demonstration sign-in, not production authentication. Select **View Deployments & Pods** in the local kind card, or **W-JAX Local Kubernetes** in the sidebar. The direct route is `http://127.0.0.1:8790/#/wjax`.
+
+The launcher sets the existing `VITE_WJAX_KIND_PREVIEW=true` flag only for its local Vite process. The integrated view requires Vite development mode, that flag and a loopback browser hostname. It is unavailable in production builds and the public installer. If you had a stack running before this change, stop launcher-owned processes with `make wjax-demo-stop` and start again with your existing runtime export and `make wjax-demo` so Vite receives the flag. The standalone `http://127.0.0.1:8790/wjax-kind.html` remains available.
+
+The page shows Deployment desired/ready counts, Pod phases/readiness/restarts and a **Refresh observation** button. Its last-success timestamp records when the browser received and validated a response; the Reader performs sequential Deployment/Pod reads, not an atomic Kubernetes snapshot. It does not provide historical telemetry or signed recovery evidence. During refresh or after a failed, malformed or timed-out response, workload tables are cleared; a retained last-success timestamp is explicitly historical. Empty Pod lists are displayed as empty, including during `0/0` intent drift. Follow the **Open Agentic Operations demo** link to `http://127.0.0.1:8788/` for the separate policy, approval and execution flow.
+
+All observation requests are same-origin, credential-free `GET /api/wjax-kind/snapshot` calls through the existing Vite proxy. Kubernetes credentials remain in the server-side Reader. No RBAC changes, BFF endpoints, Kubernetes writes or recovery/evidence changes are introduced by this view. The Console's other pages still show their configured fixture/BFF data; the lab's live observations do not contribute to those fleet totals.
+
 ## 2. Create a controlled intent drift
 
 First confirm a healthy nginx Deployment:

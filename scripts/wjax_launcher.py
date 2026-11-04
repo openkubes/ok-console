@@ -260,7 +260,7 @@ def start():
         ('reader', [sys.executable, str(READER / 'kind_reader.py')], READER, {**os.environ, 'WJAX_READONLY_KUBECONFIG': str(READER_CONFIG)}, 'kind_reader.py'),
         ('diagnostics', [sys.executable, str(ROOT / 'scripts' / 'wjax_diagnostics.py')], ROOT, os.environ.copy(), 'wjax_diagnostics.py'),
         ('demo', [sys.executable, str(DEMO / 'demo.py')], DEMO, {**os.environ, 'AI_MODE': 'ollama', 'OLLAMA_MODEL': os.getenv('WJAX_AI_MODEL', 'llama3.2:latest'), 'WJAX_DEMO_RUNTIME_DIR': str(DEMO_RUNTIME)}, 'demo.py'),
-        ('console', ['pnpm', 'dev', '--host', '127.0.0.1', '--port', '8790', '--strictPort'], ROOT, os.environ.copy(), 'pnpm'),
+        ('console', ['pnpm', 'dev', '--host', '127.0.0.1', '--port', '8790', '--strictPort'], ROOT, {**os.environ, 'VITE_WJAX_KIND_PREVIEW': 'true'}, 'pnpm'),
     ]
     entries = {}
     try:
@@ -307,6 +307,6 @@ if __name__ == '__main__':
         print('ADR-021 local diagnostics (healthy subject + foreign workload rejection):', 'PASS' if success else 'FAIL')
         sys.exit(0 if success else 1)
     elif action == 'auth':
-        sys.exit(refresh_executor_auth())
+        sys.exit(subprocess.run([sys.executable, str(ROOT / 'scripts' / 'wjax_rotate_auth.py')], check=False).returncode)
     else:
         raise SystemExit('Use: start | check | status | stop | auth | diagnose')

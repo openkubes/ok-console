@@ -14,6 +14,7 @@ export const createConsoleServer = async ({
   sourceFactory = createObservedStateSource,
   runtimeHttpFactory = createRuntimeHttpHandler,
   dryRunFactory = createClusterDryRunHttpAdapter,
+  sourceFailureLog = (line) => console.log(line),
 } = {}) => {
   const host = env.OK_CONSOLE_BFF_HOST ?? '127.0.0.1'
   const port = Number.parseInt(env.OK_CONSOLE_BFF_PORT ?? '8787', 10)
@@ -36,8 +37,9 @@ export const createConsoleServer = async ({
     authenticationAudit: sessionRuntime.authenticationAudit,
     enableFailureInjection: env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true',
     dryRunExecutor,
-    requestObserver: ({ method, pathname, correlationId }) => {
-      console.log(`${method} ${pathname} · ${correlationId}`)
+    sourceFailureObserver: sourceFailureLog,
+    requestObserver: ({ stage, method, pathname, correlationId }) => {
+      console.log(`${method} ${pathname} · ${correlationId} stage=${stage}`)
     },
   })
   const server = serverFactory(runtimeHttpFactory({ apiHandler, readiness: sessionRuntime.ready }))

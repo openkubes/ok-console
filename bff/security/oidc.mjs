@@ -1,3 +1,4 @@
+import { currentLifecycle, boundedCorrelation, startErrorCode } from '../diagnostics.mjs'
 import * as client from 'openid-client'
 import { clearOidcTransactionCookie } from './oidcTransactionStore.mjs'
 
@@ -20,6 +21,12 @@ const boundedError = (response, status, code) => {
     error: { code, message: 'Federated sign-in could not be completed.' },
   }))
 }
+
+// Own data properties only: wrappers preserve causes without exposing raw errors.
+const START_STEPS = new Set(['TRANSACTION_STORE', 'AUDIT', 'AUTHORIZATION_URL', 'PKCE', 'OTHER'])
+const CALLBACK_STEPS = new Set(['TRANSACTION_STORE', 'TOKEN_EXCHANGE', 'SUBJECT_MAP', 'SESSION_STORE', 'AUDIT', 'OTHER'])
+export { startErrorCode } from '../diagnostics.mjs'
+
 
 export const createOidcProtocolClient = async ({ issuer, clientId, clientSecret, timeoutSeconds = 5 }) => {
   const configuration = await client.discovery(
@@ -79,21 +86,31 @@ export const createOidcHttpHandler = ({
   redirectUri,
   successRedirect = '/',
   audit = async () => {},
-}) => async ({ request, response, pathname }) => {
+}) => async ({ request, response, pathname, correlationId }) => {
   if (pathname !== START_PATH && pathname !== CALLBACK_PATH) return false
+  if (boundedCorrelation(correlationId) === 'OTHER') {
+    console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: 'OTHER', event: pathname === START_PATH ? 'OIDC_START_FAILED' : 'OIDC_CALLBACK_FAILED', cause: 'WIRING', errorCode: 'CORRELATION_MISSING' }))
+    boundedError(response, 503, 'OIDC_UNAVAILABLE')
+    return true
+  }
+  response.setHeader?.('X-Correlation-ID', correlationId)
   if (request.method !== 'GET') {
     boundedError(response, 405, 'METHOD_NOT_ALLOWED')
     return true
   }
 
   if (pathname === START_PATH) {
+    let step = 'OTHER'
     try {
+      step = 'PKCE'
       const codeVerifier = protocol.codeVerifier()
       const state = protocol.state()
       const nonce = protocol.nonce()
       const codeChallenge = await protocol.challenge(codeVerifier)
+      step = 'TRANSACTION_STORE'
       const transaction = await transactionStore.create({ codeVerifier, state, nonce })
-      const location = protocol.authorizationUrl({
+      step = 'AUTHORIZATION_URL'
+      const location = await protocol.authorizationUrl({
         redirect_uri: redirectUri,
         response_type: 'code',
         scope: 'openid',
@@ -102,28 +119,30 @@ export const createOidcHttpHandler = ({
         state,
         nonce,
       })
-      await audit({ method: 'OIDC', outcome: 'Started', cause: 'REQUESTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-start', reason: 'Federated sign-in requested' })
+      step = 'AUDIT'
+      await audit({ method: 'OIDC', outcome: 'Started', cause: 'REQUESTED', correlationId, reason: 'Federated sign-in requested' })
+      step = 'OTHER'
       response.writeHead(302, headers({ Location: location.href, 'Set-Cookie': transaction.cookie }))
       response.end()
     } catch (error) {
-      console.error('OIDC start failed', {
-        name: error instanceof Error ? error.name : 'UnknownError',
-        code: error && typeof error === 'object' && 'code' in error ? error.code : undefined,
-        causeCode: error instanceof Error && error.cause && typeof error.cause === 'object' && 'code' in error.cause ? error.cause.code : undefined,
-      })
+      console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'OIDC_START_FAILED', cause: START_STEPS.has(step) ? step : 'OTHER', errorCode: startErrorCode(error) }))
       boundedError(response, 503, 'OIDC_UNAVAILABLE')
     }
     return true
   }
 
   let transaction
+  let step = 'TRANSACTION_STORE'
   try {
     transaction = await transactionStore.consume(request.headers.cookie)
     if (!transaction) {
-      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'TRANSACTION_INVALID', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC transaction was missing or already consumed' })
+      step = 'AUDIT'
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'TRANSACTION_INVALID', correlationId, reason: 'OIDC transaction was missing or already consumed' })
+      step = 'OTHER'
       boundedError(response, 401, 'OIDC_TRANSACTION_INVALID')
       return true
     }
+    step = 'TOKEN_EXCHANGE'
     const incomingUrl = new URL(request.url, 'http://console.invalid')
     const currentUrl = new URL(redirectUri)
     currentUrl.search = incomingUrl.search
@@ -132,23 +151,31 @@ export const createOidcHttpHandler = ({
       expectedState: transaction.state,
       expectedNonce: transaction.nonce,
     })
+    step = 'SUBJECT_MAP'
     const authorization = await identityMapper(claims)
     if (!authorization) {
-      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'UNMAPPED_SUBJECT', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC subject is not mapped' })
+      step = 'AUDIT'
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'UNMAPPED_SUBJECT', correlationId, reason: 'OIDC subject is not mapped' })
+      step = 'OTHER'
       boundedError(response, 403, 'OIDC_SUBJECT_UNMAPPED')
       return true
     }
+    step = 'SESSION_STORE'
     const issued = await sessionStore.create(authorization)
-    await audit({ method: 'OIDC', outcome: 'Granted', cause: 'VERIFIED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC session established' })
+    step = 'AUDIT'
+    await audit({ method: 'OIDC', outcome: 'Granted', cause: 'VERIFIED', correlationId, reason: 'OIDC session established' })
+    step = 'OTHER'
     response.writeHead(303, headers({
       Location: successRedirect,
       'Set-Cookie': [clearOidcTransactionCookie(), issued.cookie, issued.csrfCookie],
     }))
     response.end()
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'OIDC_CALLBACK_FAILED', cause: CALLBACK_STEPS.has(step) ? step : 'OTHER', errorCode: startErrorCode(error) }))
     try {
-      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'CALLBACK_REJECTED', correlationId: request.headers['x-correlation-id'] ?? 'oidc-callback', reason: 'OIDC callback validation failed' })
-    } catch {
+      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'CALLBACK_REJECTED', correlationId, reason: 'OIDC callback validation failed' })
+    } catch (error) {
+      console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'OIDC_CALLBACK_FAILED', cause: 'AUDIT', errorCode: startErrorCode(error) }))
       boundedError(response, 503, 'OIDC_UNAVAILABLE')
       return true
     }

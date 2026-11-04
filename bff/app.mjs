@@ -1,3 +1,5 @@
+import { createLifecycle, withLifecycle, boundedCorrelation, boundedMs, startErrorCode } from './diagnostics.mjs'
+import { classifySourceFailure, contractFailure, sourceFailureLogLine } from './adapters/sourceFailure.mjs'
 import { randomUUID } from 'node:crypto'
 import {
   CONTRACT_VERSION,
@@ -167,6 +169,7 @@ export const createConsoleBffHandler = ({
   now = () => new Date(),
   correlationId = () => `corr-${randomUUID()}`,
   requestObserver = () => {},
+  sourceFailureObserver = () => {},
   sessionStore = null,
   expectedOrigin,
   oidcHandler = null,
@@ -179,10 +182,14 @@ export const createConsoleBffHandler = ({
   }
 
   return async (request, response) => {
+    const started = performance.now()
     const requestCorrelationId = correlationId()
+    const lifecycle = createLifecycle(requestCorrelationId)
+    response.once('finish', () => lifecycle.mark('RESPONSE_SENT'))
+    return withLifecycle(lifecycle, async () => {
     try {
       const url = new URL(request.url ?? '/', 'http://console.local')
-      requestObserver({ method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
+      requestObserver({ stage: 'REQUEST_RECEIVED', method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
       if (oidcHandler && await oidcHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
       if (localAccessHandler && await localAccessHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
       if (await handleSessionHttp({
@@ -198,7 +205,8 @@ export const createConsoleBffHandler = ({
       const dryRunPath = `${ROUTE_PREFIX}/operations/create-cluster/dry-run`
       if (request.method === 'POST' && url.pathname === dryRunPath) {
         const authorization = await authorizer({ request, pathname: url.pathname, permission: 'clusters.read' })
-        if (!authorization.allowed) throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot request a cluster dry-run.')
+        lifecycle.mark('AUTHZ_CHECKED')
+      if (!authorization.allowed) throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot request a cluster dry-run.')
         if (!dryRunExecutor) throw new ConsoleBffError(503, 'SOURCE_UNAVAILABLE', 'The Console dry-run runner is not configured.', true)
         const input = await readJsonBody(request)
         if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.contract !== 'object' || input.contract === null) {
@@ -228,6 +236,7 @@ export const createConsoleBffHandler = ({
         pathname: url.pathname,
         permission: permissionFor(url.pathname),
       })
+      lifecycle.mark('AUTHZ_CHECKED')
       if (!authorization.allowed) {
         throw new ConsoleBffError(403, 'FORBIDDEN', 'This identity cannot read the requested Console projection.')
       }
@@ -235,7 +244,18 @@ export const createConsoleBffHandler = ({
       const failure = enableFailureInjection ? url.searchParams.get('failure') : null
       failureResponse(failure)
 
-      const snapshot = authorizedSnapshot(await source.readSnapshot(), authorization.scope)
+      let sourceSnapshot
+      try {
+        sourceSnapshot = await source.readSnapshot()
+      } catch (error) {
+        const diagnostic = error instanceof ObservedStateContractError ? contractFailure() : classifySourceFailure(error)
+        try { Promise.resolve(sourceFailureObserver(sourceFailureLogLine(url.pathname, diagnostic, requestCorrelationId, error))).catch(() => {}) } catch { /* Telemetry cannot change the response. */ }
+        if (error instanceof ObservedStateContractError) throw error
+        throw new ConsoleBffError(503, 'SOURCE_UNAVAILABLE', 'The observed platform source is unavailable.', true, {
+          retryAfterSeconds: 15, reason: diagnostic.reason,
+        })
+      }
+      const snapshot = authorizedSnapshot(sourceSnapshot, authorization.scope)
       const payload = routeResponse({
         pathname: url.pathname,
         snapshot,
@@ -261,6 +281,9 @@ export const createConsoleBffHandler = ({
         return
       }
 
+      if (!lifecycle.hasFailure(error)) {
+        console.error(JSON.stringify({ stage: lifecycle.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(requestCorrelationId), event: 'REQUEST_FAILED', cause: 'OTHER', errorCode: startErrorCode(error) ?? 'OTHER', elapsedMs: boundedMs(performance.now() - started) }))
+      }
       sendJson(
         response,
         503,
@@ -268,5 +291,6 @@ export const createConsoleBffHandler = ({
         requestCorrelationId,
       )
     }
+    })
   }
 }

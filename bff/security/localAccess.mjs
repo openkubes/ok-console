@@ -1,5 +1,6 @@
 import { createHmac, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
+import { pgQuery } from './pgFailure.mjs'
 
 const scrypt = promisify(nodeScrypt)
 const KDF = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1_024 * 1_024 }
@@ -12,8 +13,9 @@ const validInput = ({ username, password, reason }) => username.length >= 1 && u
   && typeof reason === 'string' && reason.trim().length >= 12 && reason.length <= 512
 
 export class LocalAccessError extends Error {
-  constructor(code = 'LOCAL_ACCESS_REJECTED') {
-    super('Exceptional local access was rejected.')
+  constructor(code = 'LOCAL_ACCESS_REJECTED', { cause, step } = {}) {
+    super('Exceptional local access was rejected.', { cause })
+    this.step = step
     this.name = 'LocalAccessError'
     this.code = code
   }
@@ -31,14 +33,14 @@ export class PostgresLocalAccessThrottle {
   }
 
   async blocked(username) {
-    const result = await this.pool.query(`
+    const result = await pgQuery(this.pool, `
       SELECT COALESCE(bool_or(blocked_until > clock_timestamp()), false) AS blocked
       FROM ok_console.local_access_throttle WHERE principal_digest = ANY($1::text[])`, [[this.digest(username), this.digest('__global__')]])
     return result.rows[0]?.blocked === true
   }
 
   async failure(username) {
-    await this.pool.query(`
+    await pgQuery(this.pool, `
       INSERT INTO ok_console.local_access_throttle
         (principal_digest, failures, window_started_at, blocked_until)
       SELECT principal_digest, 1, clock_timestamp(), NULL
@@ -51,7 +53,7 @@ export class PostgresLocalAccessThrottle {
   }
 
   async success(username) {
-    await this.pool.query('DELETE FROM ok_console.local_access_throttle WHERE principal_digest = $1', [this.digest(username)])
+    await pgQuery(this.pool, 'DELETE FROM ok_console.local_access_throttle WHERE principal_digest = $1', [this.digest(username)])
   }
 }
 
@@ -64,7 +66,7 @@ export class PostgresLocalAccessAudit {
 
   async record(event) {
     const principalDigest = createHmac('sha256', this.pepper).update(`audit:${event.principal}`).digest('base64url')
-    await this.pool.query(`
+    await pgQuery(this.pool, `
       INSERT INTO ok_console.local_access_audit (
         principal_digest, authentication_method, outcome, cause,
         operational_reason, correlation_id
@@ -83,55 +85,39 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
   return async (input) => {
     const username = normalize(input?.username)
     if (!validInput({ username, password: input?.password, reason: input?.reason })) throw new LocalAccessError()
-    let isBlocked
-    try {
-      isBlocked = await throttle.blocked(username)
-    } catch {
-      throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-    }
-    if (isBlocked) {
-      try {
-        await audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId })
-      } catch {
-        throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+    const run = async (step, operation) => {
+      try { return await operation() } catch (cause) {
+        throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE', { cause, step })
       }
+    }
+    const isBlocked = await run('THROTTLE_CHECK', () => throttle.blocked(username))
+    if (isBlocked) {
+      await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
       throw new LocalAccessError()
     }
     const account = mapped.get(username)
     const salt = account ? Buffer.from(account.salt, 'base64') : DUMMY_SALT
     const expected = account ? Buffer.from(account.verifier, 'base64') : DUMMY_VERIFIER
-    let actual
-    try {
-      actual = await derive(input.password, salt, 32, KDF)
-    } catch {
-      throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-    }
+    const actual = await run('KDF', () => derive(input.password, salt, 32, KDF))
     const accepted = account?.enabled === true && expected.length === 32 && actual.length === 32 && timingSafeEqual(actual, expected)
     if (!accepted) {
-      try {
-        await throttle.failure(username)
-        await audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'INVALID_CREDENTIAL', correlationId: input.correlationId })
-      } catch {
-        throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-      }
+      await run('THROTTLE_FAILURE', () => throttle.failure(username))
+      await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'INVALID_CREDENTIAL', correlationId: input.correlationId }))
       throw new LocalAccessError()
     }
-    let issued
+    await run('THROTTLE_RESET', () => throttle.success(username))
+    const issued = await run('SESSION_STORE', () => sessionStore.create({
+      subject: { id: account.identityId, providerId: 'local', subjectId: account.username, displayName: account.displayName, method: mode, assurance: ['Password', 'ExceptionalAccess'] },
+      scope: { environmentId: account.environmentId, tenantIds: [...account.tenantIds] },
+      permissions: [...account.permissions], authorizationRevision,
+    }))
     try {
-      await throttle.success(username)
-      issued = await sessionStore.create({
-        subject: { id: account.identityId, providerId: 'local', subjectId: account.username, displayName: account.displayName, method: mode, assurance: ['Password', 'ExceptionalAccess'] },
-        scope: { environmentId: account.environmentId, tenantIds: [...account.tenantIds] },
-        permissions: [...account.permissions], authorizationRevision,
-      })
-    } catch {
-      throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
-    }
-    try {
-      await audit({ outcome: 'Granted', method: mode, reason: input.reason.trim(), principal: username, cause: 'VERIFIED', correlationId: input.correlationId })
-    } catch {
-      await sessionStore.revoke?.(issued.cookie, 'AUDIT_FAILED').catch(() => {})
-      throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      await run('AUDIT', () => audit({ outcome: 'Granted', method: mode, reason: input.reason.trim(), principal: username, cause: 'VERIFIED', correlationId: input.correlationId }))
+    } catch (error) {
+      try { await sessionStore.revoke?.(issued.cookie, 'AUDIT_FAILED') } catch (compensationError) {
+        error.compensationError = compensationError
+      }
+      throw error
     }
     return issued
   }

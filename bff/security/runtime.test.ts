@@ -116,6 +116,7 @@ describe('session runtime configuration', () => {
       max: 10,
       connectionTimeoutMillis: 5_000,
       statement_timeout: 5_000,
+      query_timeout: 6_000,
     })
     expect(storeConfiguration).toMatchObject({ deploymentEpoch: 'epoch-2026-08' })
     const validator = storeConfiguration?.authorizationRevisionValidator as (input: { revision: string }) => Promise<boolean>
@@ -257,4 +258,28 @@ describe('session runtime configuration', () => {
       'PostgreSQL TLS is configured only through the trusted runtime profile.',
     )
   })
+})
+
+it.each(['249', '61001', 'no', '250.5', 'null', '0x1F4', '1e3', ' 300 ', '300\n'])('H5 rejects invalid query timeout %j', async value => {
+  await expect(createSessionRuntime({ env: { ...baseEnv, OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS: value }, fileReader })).rejects.toThrow('integer between 250 and 61000')
+})
+it.each(['5001', '6000', '61000', ''])('H5 configures bounded client query timeout %s', async value => {
+  let config
+  const runtime = await createSessionRuntime({ env: { ...baseEnv, OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS: value }, fileReader, poolFactory: configuration => { config = configuration; return { end: async () => {} } }, storeFactory: () => ({}) })
+  expect(config.query_timeout).toBe(value === '' ? 6000 : Number(value))
+  expect(config.ssl).toEqual({ ca: 'test-ca', rejectUnauthorized: true })
+  await runtime.close()
+})
+
+it.each(['250', '4999', '5000'])('J4 rejects query timeout <= statement timeout: %s', async value => {
+  const factory = vi.fn()
+  await expect(createSessionRuntime({ env: { ...baseEnv, OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS: value }, fileReader, poolFactory: factory })).rejects.toThrow('must be greater than OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS')
+  expect(factory).not.toHaveBeenCalled()
+})
+it.each(['3000', '60000'])('J4 derives query timeout from statement timeout %s', async value => {
+  let config
+  const runtime = await createSessionRuntime({ env: { ...baseEnv, OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS: value }, fileReader, poolFactory: configuration => { config = configuration; return { end: async () => {} } }, storeFactory: () => ({}) })
+  expect(config.statement_timeout).toBe(Number(value))
+  expect(config.query_timeout).toBe(Number(value) + 1000)
+  await runtime.close()
 })

@@ -1,3 +1,6 @@
+import { createAttempt, attachAttempt } from '../diagnostics.mjs'
+import { classifySourceFailure, sourceTransportError, sourceDeadlineError, sourceHttpError } from './sourceFailure.mjs'
+
 const QUERY_VERSION = 'observed.openkubes.io/v0alpha2'
 const QUERY_KIND = 'ConsoleObservedState'
 const DEFAULT_TIMEOUT_MS = 5_000
@@ -348,6 +351,11 @@ const normalizeMetricBucket = (value, path, environmentId) => {
   }
 }
 
+// Cleanup must not replace the status, contract or size failure already observed.
+const cancelBody = async (body) => {
+  try { await body?.cancel() } catch { /* Ignore cleanup errors. */ }
+}
+
 const readBoundedBody = async (response) => {
   if (!response.body) return ''
   const reader = response.body.getReader()
@@ -358,7 +366,7 @@ const readBoundedBody = async (response) => {
     if (done) break
     received += value.byteLength
     if (received > MAX_RESPONSE_BYTES) {
-      await reader.cancel()
+      await cancelBody(reader)
       throw new Error('OpenKubes observed-state response exceeds the size limit.')
     }
     chunks.push(value)
@@ -462,33 +470,65 @@ export class OpenKubesObservedStateAdapter {
   }
 
   async readSnapshot() {
+    const attempt = createAttempt()
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    const deadline = Symbol('adapter deadline')
+    let responseReceived = false
+    let response
+    const timer = setTimeout(() => controller.abort(deadline), this.timeoutMs)
     try {
-      const response = await this.fetchImpl(this.url, {
+      response = await this.fetchImpl(this.url, {
+        sourceAttempt: attempt,
         method: 'GET',
         headers: { Accept: `application/json; profile="${QUERY_VERSION}"` },
         redirect: 'error',
         signal: controller.signal,
       })
-      if (!response.ok) throw new Error(`OpenKubes observed-state query returned HTTP ${response.status}.`)
+      responseReceived = true
+      if (!response.ok) {
+        attempt.phase('AWAIT_HEADERS')
+        await cancelBody(response.body)
+        throw sourceHttpError(response.status)
+      }
+      attempt.phase('VALIDATION')
       const contentType = response.headers.get('content-type') ?? ''
       const mediaType = contentType.split(';', 1)[0].trim().toLowerCase()
       const responseProfile = contentType.match(/(?:^|;)\s*profile\s*=\s*"([^"]+)"/i)?.[1]
       if (mediaType !== 'application/json' || responseProfile !== QUERY_VERSION) {
+        await cancelBody(response.body)
         throw new ObservedStateContractError('Observed-state query response profile is incompatible.')
       }
       const declaredLength = Number.parseInt(response.headers.get('content-length') ?? '0', 10)
-      if (declaredLength > MAX_RESPONSE_BYTES) throw new Error('OpenKubes observed-state response exceeds the size limit.')
+      if (declaredLength > MAX_RESPONSE_BYTES) {
+        await cancelBody(response.body)
+        throw new Error('OpenKubes observed-state response exceeds the size limit.')
+      }
+      attempt.phase('BODY')
       const body = await readBoundedBody(response)
+      attempt.complete(null, 'BODY_COMPLETE', 'VALIDATION')
       try {
-        return normalizeOpenKubesObservedState(JSON.parse(body), { now: this.now, staleAfterMs: this.staleAfterMs })
+        const snapshot = normalizeOpenKubesObservedState(JSON.parse(body), { now: this.now, staleAfterMs: this.staleAfterMs })
+        attempt.complete(null, 'CONTRACT_VALIDATED', 'OTHER')
+        return snapshot
       } catch (error) {
         if (error instanceof ObservedStateContractError) throw error
         throw new ObservedStateContractError('Observed-state response failed structural or semantic contract validation.')
       }
+    } catch (error) {
+      if (error instanceof ObservedStateContractError) throw attachAttempt(error, attempt)
+      const diagnostic = classifySourceFailure(error)
+      // A completed TLS phase means the client completed a TLS handshake with an endpoint the configured CA trusts.
+      const tlsEstablished = Object.hasOwn(attempt.finish().phaseMs, 'tls')
+      if (controller.signal.reason === deadline && diagnostic.class !== 'TRUST_REJECTED' && diagnostic.httpStatus === 'NONE') {
+        throw attachAttempt(sourceDeadlineError(responseReceived, diagnostic.nodeCode === 'ETIMEDOUT', tlsEstablished), attempt)
+      }
+      if (responseReceived && diagnostic.nodeCode === 'ETIMEDOUT') throw attachAttempt(sourceDeadlineError(true, true), attempt)
+      throw attachAttempt(sourceTransportError(error, responseReceived, tlsEstablished), attempt)
     } finally {
+      attempt.finish()
       clearTimeout(timer)
+      // Fetch exposes no body for 204/205/304; stop any Node stream still draining.
+      if (response?.body === null) controller.abort()
     }
   }
 }

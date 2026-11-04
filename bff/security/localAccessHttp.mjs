@@ -1,7 +1,9 @@
+import { currentLifecycle, boundedCorrelation, boundedMs, startErrorCode } from '../diagnostics.mjs'
 import { LocalAccessError } from './localAccess.mjs'
 
 const PATH = '/api/console/v0/auth/local'
 const MAX_BODY_BYTES = 16 * 1_024
+const STEPS = new Set(['THROTTLE_CHECK', 'THROTTLE_FAILURE', 'THROTTLE_RESET', 'KDF', 'SESSION_STORE', 'AUDIT'])
 
 const headers = (correlationId, extra = {}) => ({
   'Cache-Control': 'no-store',
@@ -56,6 +58,7 @@ export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin }) => as
     send(response, 415, 'CONTENT_TYPE_REJECTED', correlationId)
     return true
   }
+  const started = performance.now()
   try {
     const body = await readJson(request)
     const issued = await verifier({
@@ -65,6 +68,11 @@ export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin }) => as
     response.end(JSON.stringify(issued.session))
   } catch (error) {
     const unavailable = error instanceof LocalAccessError && error.code === 'LOCAL_ACCESS_UNAVAILABLE'
+    if (unavailable) {
+      const log = (cause, failure) => console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'LOCAL_ACCESS_FAILED', cause, errorCode: startErrorCode(failure), elapsedMs: boundedMs(performance.now() - started) }))
+      log(STEPS.has(error.step) ? error.step : 'OTHER', error.cause)
+      if (Object.hasOwn(error, 'compensationError')) log('LOCAL_ACCESS_COMPENSATION', error.compensationError)
+    }
     send(response, unavailable ? 503 : 401, unavailable ? 'LOCAL_ACCESS_UNAVAILABLE' : 'LOCAL_ACCESS_REJECTED', correlationId)
   }
   return true

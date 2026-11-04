@@ -50,7 +50,7 @@ const boundedInteger = (env, name, fallback, minimum, maximum) => {
   const raw = env[name]
   if (raw === undefined || raw === '') return fallback
   const value = Number(raw)
-  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+  if (!/^[0-9]+$/.test(raw) || !Number.isInteger(value) || value < minimum || value > maximum) {
     throw new SessionRuntimeConfigurationError(`${name} must be an integer between ${minimum} and ${maximum}.`)
   }
   return value
@@ -270,13 +270,19 @@ export const createSessionRuntime = async ({
   )
   const codec = new SessionEnvelopeCodec({ primaryKeyId, keys })
 
+  const statementTimeout = boundedInteger(env, 'OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS', 5_000, 250, 60_000)
+  const queryTimeout = boundedInteger(env, 'OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS', statementTimeout + 1_000, 250, 61_000)
+  if (queryTimeout <= statementTimeout) {
+    throw new SessionRuntimeConfigurationError('OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS must be greater than OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS.')
+  }
   const pool = poolFactory({
     connectionString,
     ssl,
     max: boundedInteger(env, 'OK_CONSOLE_POSTGRES_POOL_MAX', 10, 1, 50),
     connectionTimeoutMillis: boundedInteger(env, 'OK_CONSOLE_POSTGRES_CONNECT_TIMEOUT_MS', 5_000, 250, 60_000),
     idleTimeoutMillis: boundedInteger(env, 'OK_CONSOLE_POSTGRES_IDLE_TIMEOUT_MS', 30_000, 1_000, 300_000),
-    statement_timeout: boundedInteger(env, 'OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS', 5_000, 250, 60_000),
+    query_timeout: queryTimeout,
+    statement_timeout: statementTimeout,
   })
   let sessionStore
   try {

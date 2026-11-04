@@ -12,6 +12,9 @@ import type { PlatformOverviewData } from './domain/presentationContract'
 import type { ConsoleAuthClient } from './auth/authClient'
 
 
+const wjaxPreview = vi.hoisted(() => ({ enabled: false }))
+vi.mock('./wjax/localPreview', () => ({ get wjaxLocalPreviewEnabled() { return wjaxPreview.enabled } }))
+
 const dataMode = vi.hoisted(() => ({ value: 'fixture' as 'fixture' | 'bff' }))
 vi.mock('./data/consoleData', async (importOriginal) => ({
   ...await importOriginal<typeof import('./data/consoleData')>(),
@@ -34,7 +37,7 @@ const renderSignedIn = async () => {
   await screen.findByRole('button', { name: /Sign out of OpenKubes Console/i })
 }
 
-beforeEach(() => { window.location.hash = '#/overview'; dataMode.value = 'fixture' })
+beforeEach(() => { window.location.hash = '#/overview'; dataMode.value = 'fixture'; wjaxPreview.enabled = false })
 
 const openShell = async (name = 'ok-mgmt') => {
   window.location.hash = '#/clusters'
@@ -567,4 +570,50 @@ it('shows unavailable observed metrics and no invented management plane for a te
   } finally {
     observation.mockRestore()
   }
+})
+
+
+describe('local-only W-JAX Console route', () => {
+  it('offers no W-JAX navigation or Reader access in the default Console', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch')
+    try {
+      window.location.hash = '#/wjax'
+      await renderSignedIn()
+      expect(screen.queryByRole('link', { name: /W-JAX Local Kubernetes/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Local Kubernetes' })).not.toBeInTheDocument()
+      expect(fetcher).not.toHaveBeenCalled()
+    } finally { fetcher.mockRestore() }
+  })
+
+  it('shows cluster freshness warnings with the W-JAX preview enabled', async () => {
+    wjaxPreview.enabled = true
+    window.location.hash = '#/clusters'
+    const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue({
+      ...platformFixture, source: 'bff', clusterListFreshness: 'Stale',
+    })
+    try {
+      await renderSignedIn()
+      expect(screen.getByRole('region', { name: 'W-JAX local kind lab' })).toBeInTheDocument()
+      expect(screen.getByText('Some observations are stale')).toBeInTheDocument()
+    } finally { observation.mockRestore() }
+  })
+
+  it('opens the opt-in read-only view from Console navigation', async () => {
+    wjaxPreview.enabled = true
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({
+      cluster: 'kind-wjax-demo', namespace: 'wjax-demo', mode: 'read-only-live',
+      deployments: [{ name: 'wjax-nginx', desired: 2, ready: 2 }], pods: [],
+    }) } as Response)
+    try {
+      await renderSignedIn()
+      expect(screen.getByRole('link', { name: /W-JAX Local Kubernetes/ })).toHaveAttribute('href', '#/wjax')
+      window.location.hash = '#/wjax'
+      fireEvent(window, new Event('hashchange'))
+      expect(await screen.findByRole('heading', { name: 'Local Kubernetes' })).toBeInTheDocument()
+      expect(await screen.findByText('wjax-nginx')).toBeInTheDocument()
+      expect(screen.getByText('W-JAX local Reader · read-only Kubernetes observation')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Ask OK AI/ })).not.toBeInTheDocument()
+      expect(fetcher).toHaveBeenCalledWith('/api/wjax-kind/snapshot', expect.objectContaining({ method: 'GET' }))
+    } finally { fetcher.mockRestore() }
+  })
 })

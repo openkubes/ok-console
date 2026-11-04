@@ -1,0 +1,8 @@
+.wjax-view { display: grid; gap: 18px; }
+.wjax-view .page-title, .wjax-view .panel p:last-child { margin-bottom: 0; }
+.wjax-view .wjax-timestamp { margin-top: 16px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.wjax-view .wjax-table { overflow-x: auto; }
+.wjax-view table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.wjax-view caption { margin-bottom: 14px; text-align: left; font-size: 20px; font-weight: 700; }
+.wjax-view th, .wjax-view td { padding: 12px; border-bottom: 1px solid var(--line); }
+.wjax-view th[scope="row"] { overflow-wrap: anywhere; }

@@ -434,12 +434,12 @@ describe('OpenKubes Console', () => {
     const detail = vi.spyOn(consoleData, 'getCluster').mockImplementation((id) => adapter.getCluster(id))
     try {
       const shell = await openShell()
-      expect(detail).toHaveBeenCalledExactlyOnceWith('cluster-ok-mgmt')
+      expect(detail).toHaveBeenCalledExactlyOnceWith('cluster-ok-mgmt', expect.any(AbortController))
       expect(screen.queryByText('Endpoint observed through the management plane')).not.toBeInTheDocument()
       release()
       if (status === 'resolved') {
-        expect(await screen.findByText('Endpoint observed through the management plane')).toBeInTheDocument()
-        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0)
+        expect(await screen.findByText('Last observed: Endpoint observed through the management plane')).toBeInTheDocument()
+        expect(document.querySelector('.title-actions .status')).toHaveTextContent('Unknown')
         expect(screen.getByText(/rev-new/)).toBeInTheDocument()
       } else {
         expect(await screen.findByRole('alert')).toHaveTextContent('Cluster detail is unavailable')
@@ -448,7 +448,7 @@ describe('OpenKubes Console', () => {
       fireEvent.click(shell.getByRole('button', { name: 'ok evidence explain' }))
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'ok evidence explain'),
-        entry('ai', 'This shell session holds readiness Ready for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.'),
+        entry('ai', `This shell session holds readiness Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'}) for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.`),
         proposal,
       ])
       shell.run('clear')
@@ -461,7 +461,7 @@ describe('OpenKubes Console', () => {
       shell.run('evidence')
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'evidence'),
-        entry('output', 'This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Ready\nSOURCE       bff'),
+        entry('output', `This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'})\nSOURCE       bff`),
       ])
     } finally {
       release()
@@ -513,7 +513,7 @@ describe('OpenKubes Console', () => {
     expect(screen.getByRole('dialog', { name: 'OK AI Diagnostic preview' })).toBeInTheDocument()
     expect(screen.getByText(/no live AI service or cluster actions are connected/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
-    expect(await screen.findByText(/ok-shared is currently shown as Pending/i)).toBeInTheDocument()
+    expect(await screen.findByText(/ok-shared: Fixture snapshot.*Last observed: Pending/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /View evidence · Shared services convergence/i }))
     expect(await screen.findByRole('heading', { name: 'Shared services convergence' })).toBeInTheDocument()
   })
@@ -583,6 +583,19 @@ describe('local-only W-JAX Console route', () => {
       expect(screen.queryByRole('heading', { name: 'Local Kubernetes' })).not.toBeInTheDocument()
       expect(fetcher).not.toHaveBeenCalled()
     } finally { fetcher.mockRestore() }
+  })
+
+  it('shows cluster freshness warnings with the W-JAX preview enabled', async () => {
+    wjaxPreview.enabled = true
+    window.location.hash = '#/clusters'
+    const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue({
+      ...platformFixture, source: 'bff', clusterListFreshness: 'Stale',
+    })
+    try {
+      await renderSignedIn()
+      expect(screen.getByRole('region', { name: 'W-JAX local kind lab' })).toBeInTheDocument()
+      expect(screen.getByText('Some observations are stale')).toBeInTheDocument()
+    } finally { observation.mockRestore() }
   })
 
   it('opens the opt-in read-only view from Console navigation', async () => {

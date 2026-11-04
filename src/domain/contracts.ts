@@ -40,6 +40,7 @@ export interface Capability {
 }
 
 export interface Cluster {
+  freshness?: Freshness
   id: string
   name: string
   role: 'Management plane' | 'Infrastructure plane' | 'Workload cluster'
@@ -119,6 +120,7 @@ export interface PlatformSnapshot {
   presentationVersion: typeof PRESENTATION_CONTRACT_VERSION
   source?: 'fixture' | 'bff'
   freshness?: Freshness
+  clusterListFreshness?: Freshness
   warnings?: string[]
   overview?: PlatformOverviewData
   clusters: Cluster[]
@@ -130,7 +132,7 @@ export interface PlatformSnapshot {
 }
 
 export interface ConsoleDataPort {
-  getSnapshot(): Promise<PlatformSnapshot>
-  getCluster(id: string): Promise<Cluster | undefined>
-  getEvidence(id: string): Promise<EvidenceRef | undefined>
+  getSnapshot(controller?: AbortController): Promise<PlatformSnapshot>
+  getCluster(id: string, controller?: AbortController): Promise<Cluster | undefined>
+  getEvidence(id: string, controller?: AbortController): Promise<EvidenceRef | undefined>
 }

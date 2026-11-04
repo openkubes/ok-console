@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { capabilityPresentation, clusterPresentation, conservativeVerdict, evidencePresentation, observationPresentation, observedText, overviewPresentation, placementPresentation } from './observationPresentation'
+import { useObservationSnapshot } from './useObservationSnapshot'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import DiagnosticWidget from './DiagnosticWidget'
 import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
-import { consoleData, consoleDataMode } from './data/consoleData'
+import { consoleDataMode } from './data/consoleData'
 import { platformFixture } from './data/fixtures'
 import { ConsoleDataError } from './data/bffAdapter'
 import type { AgentDefinition, Capability, Cluster, EvidenceRef, ExternalClusterConnection, ExternalClusterManagementMode, ExternalClusterRegistrationDraft, PlatformSnapshot, Readiness, WorkloadClaim } from './domain/contracts'
@@ -63,10 +65,21 @@ function StatusBadge({ status }: { status: Readiness | 'Approved' | 'Denied' | '
   return <span className={`status status-${status.toLowerCase().replace(' ', '-')}`}><Icon name={icon} size={13}/>{status}</span>
 }
 
-function EvidenceOutcome({ item }: { item: EvidenceRef }) {
-  return item.freshness === 'Stale'
+function ObservationLabel({ presentation }: { presentation: ReturnType<typeof observationPresentation> }) {
+  return <span className="observation-label">{presentation.current && <span className="live-dot"/>}{presentation.label}</span>
+}
+
+function EvidenceOutcome({ item, fixture = false }: { item: EvidenceRef; fixture?: boolean }) {
+  const presentation = evidencePresentation(item, fixture)
+  if (fixture) return <StatusBadge status={item.outcome}/>
+  return <span><ObservationLabel presentation={presentation}/>{(item.freshness !== 'Current' && item.outcome !== 'Unknown') || presentation.stale || (item.immutable && presentation.verdict !== 'Unknown')
     ? <span className="status status-unknown">Last observed: {item.outcome}</span>
-    : <StatusBadge status={item.outcome}/>
+    : <StatusBadge status={presentation.verdict === 'Unknown' ? 'Unknown' : item.outcome}/>}</span>
+}
+
+function FreshnessWarning({ data, freshness }: { data: PlatformSnapshot; freshness?: PlatformSnapshot['freshness'] }) {
+  if ((data.source !== 'bff' || freshness === 'Current') && !(data.warnings?.length)) return null
+  return <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{freshness === 'Stale' ? 'Some observations are stale' : freshness !== 'Current' && data.source === 'bff' ? 'Observation unavailable - readiness Unknown' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>
 }
 
 function Metric({ label, value, note, tone = 'blue' }: { label: string; value: string | number; note: string; tone?: string }) {
@@ -105,18 +118,24 @@ function clusterPlaneLabel(cluster: Cluster): string {
   return 'Worker power'
 }
 
+function OverviewMetric({ suppressed, ...props }: Parameters<typeof Metric>[0] & { suppressed: boolean }) {
+  return <Metric {...props} value={suppressed ? 'Unavailable' : props.value} note={suppressed ? 'Unavailable' : props.note}/>
+}
+
 function Overview({ data, identity, openCluster, openEvidence }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
+  const presentation = overviewPresentation(data)
   const overview = data.overview
   const observedMetric = (value: number | null) => value ?? 'Unavailable'
   return <>
-    <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
-    {(data.freshness === 'Stale' || (data.warnings?.length ?? 0) > 0) && <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{data.freshness === 'Stale' ? 'Some observations are stale' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>}
+    <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><ObservationLabel presentation={presentation}/> · {data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    <FreshnessWarning data={data} freshness={data.freshness}/>
+    {data.source === 'bff' && data.evidence.some(item => item.immutable) && <p className="receipt-note">Immutable Evidence receipts are retained separately from mutable observations.</p>}
     <section className="metrics-grid" aria-label="Platform metrics">
-      <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
-      <Metric label="Capabilities" value={overview ? observedMetric(overview.capabilities.total) : data.capabilities.length} note={`${overview ? observedMetric(overview.capabilities.ready) : 5} conformant · ${overview ? observedMetric(overview.capabilities.pending) : 2} converging`} tone="green"/>
-      <Metric label="Workload claims" value={overview ? observedMetric(overview.workloadClaims.total) : data.claims.length} note={`${overview ? observedMetric(overview.workloadClaims.ready) : 1} ready · ${overview ? observedMetric(overview.workloadClaims.pending) : 2} in progress`} tone="orange"/>
-      <Metric label="Open findings" value={overview ? observedMetric(overview.openFindings.total) : 2} note={`${overview ? observedMetric(overview.openFindings.critical) : 0} critical policy violations`} tone="red"/>
+      <OverviewMetric suppressed={data.source === 'bff' && !presentation.current} label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
+      <OverviewMetric suppressed={data.source === 'bff' && !presentation.current} label="Capabilities" value={overview ? observedMetric(overview.capabilities.total) : data.capabilities.length} note={`${overview ? observedMetric(overview.capabilities.ready) : 5} conformant · ${overview ? observedMetric(overview.capabilities.pending) : 2} converging`} tone="green"/>
+      <OverviewMetric suppressed={data.source === 'bff' && !presentation.current} label="Workload claims" value={overview ? observedMetric(overview.workloadClaims.total) : data.claims.length} note={`${overview ? observedMetric(overview.workloadClaims.ready) : 1} ready · ${overview ? observedMetric(overview.workloadClaims.pending) : 2} in progress`} tone="orange"/>
+      <OverviewMetric suppressed={data.source === 'bff' && !presentation.current} label="Open findings" value={overview ? observedMetric(overview.openFindings.total) : 2} note={`${overview ? observedMetric(overview.openFindings.critical) : 0} critical policy violations`} tone="red"/>
     </section>
     <section className="section-block">
       <div className="section-heading"><div><span className="eyebrow">Fleet</span><h2>Cluster posture</h2></div><button className="text-button" onClick={() => window.location.hash = '#/clusters'}>View all clusters <Icon name="arrow" size={16}/></button></div>
@@ -126,8 +145,8 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
             ? <div className="management-ribbon"><Icon name="shield" size={13}/> {clusterPlaneLabel(cluster)}</div>
             : <div className={`plane-ribbon ${cluster.profile.toLowerCase().includes('infrastructure host') ? 'infra-ribbon' : 'worker-ribbon'}`}><Icon name="cube" size={13}/> {clusterPlaneLabel(cluster)}</div>}
           <button className="card-main" onClick={() => openCluster(cluster)}>
-            <div className="cluster-card-head"><div className="cluster-symbol"><Icon name="cube" size={21}/></div><StatusBadge status={cluster.readiness}/></div>
-            <h3>{cluster.name}</h3><p>{cluster.profile}</p>
+            <div className="cluster-card-head"><div className="cluster-symbol"><Icon name="cube" size={21}/></div><StatusBadge status={data.source === 'bff' && !clusterPresentation(cluster, data).current ? 'Unknown' : cluster.readiness}/></div>
+            <h3>{cluster.name}</h3><p>{cluster.profile}</p><ObservationLabel presentation={clusterPresentation(cluster, data)}/>
             <dl className="mini-spec"><div><dt>Provider</dt><dd>{cluster.provider}</dd></div><div><dt>Region</dt><dd>{cluster.region}</dd></div><div><dt>Version</dt><dd>{cluster.version}</dd></div></dl>
           </button>
           <footer><span>{cluster.capabilityCount ?? cluster.capabilities.length} capabilities</span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></footer>
@@ -135,8 +154,8 @@ function Overview({ data, identity, openCluster, openEvidence }: { data: Platfor
       </div>}
     </section>
     <section className="two-column section-block">
-      <article className="panel"><div className="panel-title"><div><span className="eyebrow">Claims</span><h2>Recent placements</h2></div><span className="count-badge">{data.claims.length}</span></div>{data.claims.map((claim) => <button className="activity-row" key={claim.id} onClick={() => window.location.hash = '#/workloads'}><span className="activity-icon"><Icon name="workloads" size={17}/></span><span className="activity-copy"><strong>{claim.name}</strong><small>{claim.owner} → {claim.targetCluster}</small></span><StatusBadge status={claim.readiness}/><Icon name="chevron" size={16}/></button>)}</article>
-      <article className="panel trust-panel"><div className="panel-title"><div><span className="eyebrow">Trust model</span><h2>Why is the platform ready?</h2></div><Icon name="shield" size={22}/></div><p>Every status shown here resolves to a contract revision, current observation, or immutable receipt.</p><div className="trust-chain"><span>Intent</span><i/><span>Observed</span><i/><span>Evidence</span></div><button className="secondary-button" onClick={() => window.location.hash = '#/evidence'}>Explore evidence chain <Icon name="arrow" size={16}/></button></article>
+      <article className="panel"><div className="panel-title"><div><span className="eyebrow">Claims</span><h2>Recent placements</h2></div><span className="count-badge">{data.claims.length}</span></div>{data.claims.map((claim) => <button className="activity-row" key={claim.id} onClick={() => window.location.hash = '#/workloads'}><span className="activity-icon"><Icon name="workloads" size={17}/></span><span className="activity-copy"><strong>{claim.name}</strong><small>{claim.owner} → {claim.targetCluster}</small></span><StatusBadge status={data.source === 'bff' && !placementPresentation(claim, data).current ? 'Unknown' : claim.readiness}/><ObservationLabel presentation={placementPresentation(claim, data)}/><Icon name="chevron" size={16}/></button>)}</article>
+      <article className="panel trust-panel"><div className="panel-title"><div><span className="eyebrow">Trust model</span><h2>Why is the platform ready?</h2></div><Icon name="shield" size={22}/></div><p>Every status shown here resolves to a contract revision, freshness-bound observation, or immutable receipt.</p><div className="trust-chain"><span>Intent</span><i/><span>Observed</span><i/><span>Evidence</span></div><button className="secondary-button" onClick={() => window.location.hash = '#/evidence'}>Explore evidence chain <Icon name="arrow" size={16}/></button></article>
     </section>
   </>
 }
@@ -145,12 +164,13 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   return <>
     <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div>}/>
+    <FreshnessWarning data={data} freshness={data.clusterListFreshness}/>
     {wjaxLocalPreviewEnabled && (
       <section aria-label="W-JAX local kind lab" style={{ padding: '18px 20px', marginBottom: 18, border: '1px solid #65a5d255', borderRadius: 12, background: '#e8f5ff' }}>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div>
             <strong style={{ color: '#15375b' }}>kind-wjax-demo · Local lab</strong>
-            <div style={{ marginTop: 5, color: '#37546c', fontSize: 13 }}>Live, read-only Kubernetes observation · Namespace wjax-demo · Not included in fixture cluster totals</div>
+            <div style={{ marginTop: 5, color: '#37546c', fontSize: 13 }}>Read-only Kubernetes observation · Namespace wjax-demo · Not included in fixture cluster totals</div>
           </div>
           <a href="#/wjax" style={{ borderRadius: 8, padding: '10px 14px', color: '#fff', background: '#1059b2', textDecoration: 'none', fontWeight: 600 }}>View Deployments &amp; Pods →</a>
         </div>
@@ -161,7 +181,7 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
       <div className="table-head cluster-columns"><span>Cluster</span><span>Role & profile</span><span>Provider</span><span>Readiness</span><span>Evidence</span><span/></div>
       {data.clusters.length === 0 ? <EmptyState title="No clusters found" description="This is a valid empty contract response. Register and Create flows remain separate, guarded prototypes."/> : data.clusters.map((cluster) => <div className={`table-row cluster-columns ${cluster.role === 'Management plane' ? 'management-row' : ''}`} key={cluster.id}>
         <button className="cluster-name-cell" onClick={() => openCluster(cluster)}><span className="cluster-symbol small"><Icon name={cluster.role === 'Management plane' ? 'shield' : 'cube'} size={18}/></span><span><strong>{cluster.name}</strong><small>{cluster.version} · {cluster.region}</small></span></button>
-        <span><strong>{cluster.role}</strong><small>{cluster.profile}</small></span><span>{cluster.provider}</span><span><StatusBadge status={cluster.readiness}/></span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/><button className="icon-button" aria-label={`Open ${cluster.name}`} onClick={() => openCluster(cluster)}><Icon name="chevron"/></button>
+        <span><strong>{cluster.role}</strong><small>{cluster.profile}</small></span><span>{cluster.provider}</span><span><StatusBadge status={data.source === 'bff' && !clusterPresentation(cluster, data).current ? 'Unknown' : cluster.readiness}/><ObservationLabel presentation={clusterPresentation(cluster, data)}/></span><EvidenceLink id={cluster.evidenceId} evidence={data.evidence} onSelect={openEvidence}/><button className="icon-button" aria-label={`Open ${cluster.name}`} onClick={() => openCluster(cluster)}><Icon name="chevron"/></button>
       </div>)}
     </section>
   </>
@@ -170,18 +190,20 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
 function ClusterDetail({ cluster, data, detailError, close, openEvidence, openShell }: { cluster: Cluster; data: PlatformSnapshot; detailError?: ConsoleDataError; close: () => void; openEvidence: (e: EvidenceRef) => void; openShell: (cluster: Cluster) => void }) {
   const [tab, setTab] = useState('Overview')
   const clusterCapabilities = data.capabilities.filter((capability) => cluster.capabilities.includes(capability.id))
-  const stale = data.evidence.find((item) => item.id === cluster.evidenceId)?.freshness === 'Stale'
+  const presentation = clusterPresentation(cluster, data)
+  const stale = !presentation.current && data.source === 'bff'
   const clusterEvidence = data.evidence.filter((item) => item.cluster === cluster.name || item.cluster === cluster.id)
   return <>
     <button className="back-button" onClick={close}>← All clusters</button>
-    <PageTitle eyebrow={cluster.role} title={cluster.name} description={`${cluster.profile} · ${cluster.provider} · ${cluster.region}`} action={<div className="title-actions"><StatusBadge status={cluster.readiness}/><button className="shell-button" onClick={() => openShell(cluster)}><Icon name="terminal"/>Open Shell</button><button className="secondary-button">Propose change</button></div>}/>
+    <PageTitle eyebrow={cluster.role} title={cluster.name} description={`${cluster.profile} · ${cluster.provider} · ${cluster.region}`} action={<div className="title-actions"><StatusBadge status={data.source === 'bff' && !clusterPresentation(cluster, data).current ? 'Unknown' : cluster.readiness}/><button className="shell-button" onClick={() => openShell(cluster)}><Icon name="terminal"/>Open Shell</button><button className="secondary-button">Propose change</button></div>}/>
+    <FreshnessWarning data={data} freshness={cluster.freshness}/>
     {detailError && <div className="data-warning" role="alert"><Icon name="clock"/><div><strong>Cluster detail is unavailable</strong><span>{detailError.message} · {detailError.code}. The last valid summary remains visible.</span></div></div>}
     <div className="contract-strip"><div><span>Domain contract</span><strong>{cluster.contractVersion}</strong></div><div><span>Observed revision</span><strong>{cluster.revision}</strong></div><div><span>Console compatibility</span><StatusBadge status={cluster.compatibility}/></div></div>
     <div className="tabs" role="tablist">{['Overview', 'Lifecycle', 'Capabilities', 'Evidence', 'Changes'].map((item) => <button key={item} role="tab" aria-selected={tab === item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</div>
-    {tab === 'Overview' && <section className="detail-grid"><article className="panel"><div className="panel-title"><div><span className="eyebrow">{stale ? 'Last observed posture' : 'Current observation'}</span><h2>Lifecycle posture</h2></div><span className="live-label">{!stale && <span className="live-dot"/>}{stale ? 'Last observed' : 'Observed'}</span></div>{cluster.lifecycle.length === 0 ? <EmptyState title="Detail is loading" description="The summary remains visible while the read-only detail projection is requested."/> : <div className="lifecycle">{cluster.lifecycle.map((step, index) => <div className="lifecycle-step" key={step.label}><div className={`step-dot ${step.state.toLowerCase()}`}>{step.state === 'Ready' ? '✓' : index + 1}</div><div><strong>{step.label}</strong><p>{stale ? `Last observed: ${step.detail}` : step.detail}</p></div><StatusBadge status={step.state}/></div>)}</div>}</article><article className="panel"><div className="panel-title"><div><span className="eyebrow">Evidence</span><h2>Readiness basis</h2></div><Icon name="evidence"/></div>{clusterEvidence.length === 0 ? <EmptyState title="No evidence reference" description="No readiness is inferred without a redaction-safe Evidence projection."/> : clusterEvidence.map((item) => <button className="evidence-card" key={item.id} onClick={() => openEvidence(item)}><div><span>{item.type}</span><EvidenceOutcome item={item}/></div><strong>{item.title}</strong><p>{item.summary}</p><small>{item.revision} · {new Date(item.observedAt).toLocaleString()}</small></button>)}</article></section>}
-    {tab === 'Lifecycle' && <article className="panel wide-panel"><div className="panel-title"><div><span className="eyebrow">{stale ? 'Intent → last observation' : 'Intent → observation'}</span><h2>Lifecycle contract</h2></div></div><div className="timeline">{cluster.lifecycle.map((step) => <div key={step.label}><span className={`timeline-marker ${step.state.toLowerCase()}`}/><h3>{step.label}</h3><p>{stale ? `Last observed: ${step.detail}` : step.detail}</p><StatusBadge status={step.state}/></div>)}</div></article>}
-    {tab === 'Capabilities' && (cluster.capabilityDetails ? <section className="table-panel">{cluster.capabilityDetails.map((capability) => <div className="table-row bff-capability-row" key={capability.id}><span><strong>{capability.name}</strong><small>{capability.id}</small></span><StatusBadge status={capability.readiness}/><EvidenceLink id={capability.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></div>)}</section> : <CapabilityGrid capabilities={clusterCapabilities} data={data} openEvidence={openEvidence}/>)}
-    {tab === 'Evidence' && (clusterEvidence.length === 0 ? <EmptyState title="No evidence references" description="The BFF returned no authorized, redaction-safe Evidence projections for this cluster."/> : <EvidenceList evidence={clusterEvidence} onSelect={openEvidence}/>)}
+    {tab === 'Overview' && <section className="detail-grid"><article className="panel"><div className="panel-title"><div><span className="eyebrow">{presentation.stale ? 'Last observed posture' : presentation.label}</span><h2>Lifecycle posture</h2></div><span className="live-label">{presentation.current && <span className="live-dot"/>}{presentation.stale ? 'Last observed' : presentation.current ? 'Observed' : presentation.label}</span></div>{cluster.lifecycle.length === 0 ? <EmptyState title="Detail is loading" description="The summary remains visible while the read-only detail projection is requested."/> : <div className="lifecycle">{cluster.lifecycle.map((step, index) => <div className="lifecycle-step" key={step.label}><div className={`step-dot ${step.state.toLowerCase()}`}>{step.state === 'Ready' ? '✓' : index + 1}</div><div><strong>{step.label}</strong><p>{stale ? `Last observed: ${observedText(step.detail, false)}` : observedText(step.detail, presentation.current)}</p></div><StatusBadge status={data.source === 'bff' && !presentation.current ? 'Unknown' : step.state}/></div>)}</div>}</article><article className="panel"><div className="panel-title"><div><span className="eyebrow">Evidence</span><h2>Readiness basis</h2></div><Icon name="evidence"/></div>{clusterEvidence.length === 0 ? <EmptyState title="No evidence reference" description="No readiness is inferred without a redaction-safe Evidence projection."/> : clusterEvidence.map((item) => <button className="evidence-card" key={item.id} onClick={() => openEvidence(item)}><div><span>{item.type}</span><EvidenceOutcome item={item} fixture={data.source !== 'bff'}/></div><strong>{item.title}</strong><p>{observedText(item.summary, evidencePresentation(item, data.source !== 'bff').current)}</p><small>{item.revision} · {new Date(item.observedAt).toLocaleString()}</small></button>)}</article></section>}
+    {tab === 'Lifecycle' && <article className="panel wide-panel"><div className="panel-title"><div><span className="eyebrow">{stale ? 'Intent → last observation' : 'Intent → observation'}</span><h2>Lifecycle contract</h2></div></div><div className="timeline">{cluster.lifecycle.map((step) => <div key={step.label}><span className={`timeline-marker ${step.state.toLowerCase()}`}/><h3>{step.label}</h3><p>{stale ? `Last observed: ${observedText(step.detail, false)}` : observedText(step.detail, presentation.current)}</p><StatusBadge status={data.source === 'bff' && !presentation.current ? 'Unknown' : step.state}/></div>)}</div></article>}
+    {tab === 'Capabilities' && (cluster.capabilityDetails ? <section className="table-panel">{cluster.capabilityDetails.map((capability) => <div className="table-row bff-capability-row" key={capability.id}><span><strong>{capability.name}</strong><small>{capability.id}</small></span><StatusBadge status={data.source === 'bff' && !capabilityPresentation(capability, cluster, data).current ? 'Unknown' : capability.readiness}/><EvidenceLink id={capability.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></div>)}</section> : <CapabilityGrid capabilities={clusterCapabilities} data={data} openEvidence={openEvidence}/>)}
+    {tab === 'Evidence' && (clusterEvidence.length === 0 ? <EmptyState title="No evidence references" description="The BFF returned no authorized, redaction-safe Evidence projections for this cluster."/> : <EvidenceList fixture={data.source !== 'bff'} evidence={clusterEvidence} onSelect={openEvidence}/>)}
     {tab === 'Changes' && <article className="empty-state panel"><Icon name="code" size={32}/><h2>No pending changes</h2><p>Changes remain proposals until review, authorization, and execution are independently recorded.</p><button className="secondary-button">Propose change</button></article>}
   </>
 }
@@ -207,7 +229,7 @@ function Workloads({ claims, data, openEvidence }: { claims: WorkloadClaim[]; da
       const evidence = data.evidence.find((item) => item.id === claim.evidenceId)
       const replicas = observed ? evidence?.revision.match(/;replicas:([^;]+)/)?.[1] : undefined
       return <article className="claim-card" key={claim.id}>
-        <div className="claim-head"><span className="claim-kind">{claim.kind}</span><StatusBadge status={claim.readiness}/></div>
+        <div className="claim-head"><span className="claim-kind">{claim.kind}</span><StatusBadge status={data.source === 'bff' && !placementPresentation(claim, data).current ? 'Unknown' : claim.readiness}/></div>
         <h2>{claim.name}</h2><p>{claim.intent}</p>
         <div className="placement-flow"><div><span>Owner</span><strong>{claim.owner}</strong></div><Icon name="arrow"/><div><span>Placed on</span><strong>{claim.targetCluster}</strong></div></div>
         <div className="cap-tags">{claim.requiredCapabilities.map((item) => <span key={item}><Icon name="check" size={12}/>{item}</span>)}</div>
@@ -260,7 +282,7 @@ function Agents({ data, openEvidence }: { data: PlatformSnapshot; openEvidence: 
     <PageTitle eyebrow="Agentic workloads" title="AI Agents" description="Discover verified Agents, inspect their authority, and place them on conformant Worker Clusters." action={<span className="agent-contract"><Icon name="shield" size={15}/><span><small>Agent Contract</small><strong>agents.openkubes.io/v1alpha1</strong></span></span>}/>
     <section className="agent-metrics"><Metric label="Catalog" value={data.agents.length} note="Curated Agent definitions" tone="blue"/><Metric label="Verified artifacts" value={data.agents.filter((agent) => agent.verified).length} note="Signature and provenance visible" tone="green"/><Metric label="Deployments" value={data.agentDeployments.length} note="Across Worker Clusters" tone="orange"/></section>
     <div className="agent-filter"><span>Catalog</span>{(['All', 'Platform Operations', 'Developer Experience', 'Evidence & Governance'] as const).map((item) => <button className={category === item ? 'active' : ''} onClick={() => setCategory(item)} key={item}>{item}</button>)}</div>
-    <section className="agent-grid">{agents.map((agent) => <article className="agent-card" key={agent.id}><div className="agent-card-head"><span className="agent-avatar"><Icon name="agents" size={21}/></span><span className={`publisher-badge ${agent.demoOnly ? 'demo' : agent.verified ? 'verified' : 'community'}`}><Icon name={agent.demoOnly ? 'clock' : agent.verified ? 'check' : 'clock'} size={11}/>{agent.demoOnly ? 'Demo Preview' : agent.verified ? 'Verified' : 'Community'}</span></div><span className="agent-category">{agent.category}</span><h2>{agent.name}</h2><p>{agent.description}</p><div className="agent-version"><span><small>Version</small><strong>{agent.version}</strong></span><span><small>Publisher</small><strong>{agent.publisher}</strong></span><span><small>Resources</small><strong>{agent.resourceProfile}</strong></span></div><div className="agent-requires"><span>Requires</span><div>{agent.requiredCapabilities.map((id) => <strong key={id}><Icon name="capabilities" size={11}/>{capabilityName(id)}</strong>)}</div></div><div className="agent-placement"><span><Icon name="cube" size={14}/>Recommended</span><strong>{agent.recommendedCluster}</strong></div><footer><span>{agent.deployments} deployment{agent.deployments === 1 ? '' : 's'}</span><button className="primary-button" disabled={!agent.verified || agent.demoOnly} onClick={() => setDeployAgent(agent)}>{agent.demoOnly ? 'Preview only' : agent.verified ? 'Deploy Agent' : 'Review required'}<Icon name="arrow" size={14}/></button></footer></article>)}</section>
+    <section className="agent-grid">{agents.map((agent) => <article className="agent-card" key={agent.id}><div className="agent-card-head"><span className="agent-avatar"><Icon name="agents" size={21}/></span><span className={`publisher-badge ${agent.demoOnly ? 'demo' : agent.verified ? 'verified' : 'community'}`}><Icon name={agent.demoOnly ? 'clock' : agent.verified ? 'check' : 'clock'} size={11}/>{agent.demoOnly ? 'Demo Preview' : agent.verified ? 'Verified' : 'Community'}</span></div><span className="agent-category">{agent.category}</span><h2>{agent.name}</h2><p>{agent.description}</p><div className="agent-version"><span><small>Version</small><strong>{agent.version}</strong></span><span><small>Publisher</small><strong>{agent.publisher}</strong></span><span><small>Resources</small><strong>{agent.resourceProfile}</strong></span></div><div className="agent-requires"><span>Requires</span><div>{agent.requiredCapabilities.map((id) => <strong key={id}><Icon name="capabilities" size={11}/>{capabilityName(id)}</strong>)}</div></div><div className="agent-placement"><span><Icon name="cube" size={14}/>Recommended</span><strong>{agent.recommendedCluster}</strong></div><footer><span>{data.source === 'bff' ? 'Catalog definition' : <>{agent.deployments} deployment{agent.deployments === 1 ? '' : 's'}</>}</span><button className="primary-button" disabled={!agent.verified || agent.demoOnly} onClick={() => setDeployAgent(agent)}>{agent.demoOnly ? 'Preview only' : agent.verified ? 'Deploy Agent' : 'Review required'}<Icon name="arrow" size={14}/></button></footer></article>)}</section>
     <section className="section-block"><div className="section-heading"><div><span className="eyebrow">Runtime instances</span><h2>Agent deployments</h2></div><span className="count-badge">{data.agentDeployments.length}</span></div><div className="agent-deployments">{data.agentDeployments.map((deployment) => <article key={deployment.id}><span className="agent-avatar small"><Icon name="agents" size={17}/></span><span><strong>{deployment.name}</strong><small>{deployment.agentName} · {deployment.version}</small></span><span><small>Worker Cluster</small><strong>{deployment.cluster}</strong></span><span><small>Namespace</small><strong>{deployment.namespace}</strong></span><span><small>Authority</small><strong>{deployment.authority}</strong></span><StatusBadge status={deployment.readiness}/><EvidenceLink id={deployment.evidenceId} evidence={data.evidence} onSelect={openEvidence}/></article>)}</div></section>
     {deployAgent && <AgentDeployWizard agent={deployAgent} data={data} close={() => setDeployAgent(undefined)}/>}
   </>
@@ -282,14 +304,15 @@ function Capabilities({ data, openEvidence }: { data: PlatformSnapshot; openEvid
   </>
 }
 
-function EvidenceList({ evidence, onSelect }: { evidence: EvidenceRef[]; onSelect: (e: EvidenceRef) => void }) {
-  return <section className="evidence-list">{evidence.map((item) => <button className="evidence-row" onClick={() => onSelect(item)} key={item.id}><span className={`evidence-type type-${item.type.toLowerCase()}`}><Icon name={item.type === 'Authorization' ? 'shield' : 'evidence'}/>{item.type}</span><span><strong>{item.title}</strong><small>{item.cluster} · {item.contract}</small></span><EvidenceOutcome item={item}/><span className="revision">{item.revision}</span><span><strong>{new Date(item.observedAt).toLocaleDateString()}</strong><small>{new Date(item.observedAt).toLocaleTimeString()}</small></span><Icon name="chevron"/></button>)}</section>
+function EvidenceList({ evidence, onSelect, fixture = false }: { evidence: EvidenceRef[]; onSelect: (e: EvidenceRef) => void; fixture?: boolean }) {
+  return <section className="evidence-list">{evidence.map((item) => <button className="evidence-row" onClick={() => onSelect(item)} key={item.id}><span className={`evidence-type type-${item.type.toLowerCase()}`}><Icon name={item.type === 'Authorization' ? 'shield' : 'evidence'}/>{item.type}</span><span><strong>{item.title}</strong><small>{item.cluster} · {item.contract}</small></span><EvidenceOutcome item={item} fixture={fixture}/><span className="revision">{item.revision}</span><span><strong>{new Date(item.observedAt).toLocaleDateString()}</strong><small>{new Date(item.observedAt).toLocaleTimeString()}</small></span><Icon name="chevron"/></button>)}</section>
 }
 
 function Evidence({ data, openEvidence }: { data: PlatformSnapshot; openEvidence: (e: EvidenceRef) => void }) {
   const [filter, setFilter] = useState<'All' | EvidenceRef['type']>('All')
   const items = filter === 'All' ? data.evidence : data.evidence.filter((item) => item.type === filter)
-  return <><PageTitle eyebrow="Trust & provenance" title="Evidence & Audit" description="Current observations, immutable outcomes, and authority decisions remain distinct."/>
+  return <><PageTitle eyebrow="Trust & provenance" title="Evidence & Audit" description="Freshness-bound observations, immutable outcomes, and authority decisions remain distinct."/>
+    <FreshnessWarning data={data} freshness={data.evidence.some(item => item.freshness === 'Stale') ? 'Stale' : data.evidence.some(item => !item.immutable && item.freshness !== 'Current') ? 'Unknown' : data.freshness}/>
     <section className="framework-preview" aria-labelledby="framework-preview-title">
       <div className="framework-preview-heading"><div><span className="eyebrow">Roadmap preview</span><h2 id="framework-preview-title">Framework views</h2></div><span>Scope in definition</span></div>
       <div className="framework-preview-grid">
@@ -309,7 +332,7 @@ function Evidence({ data, openEvidence }: { data: PlatformSnapshot; openEvidence
         </article>
       </div>
     </section>
-    <div className="evidence-explainer"><div><span className="legend observation"/><strong>Observation</strong><small>Current, freshness-bound state</small></div><div><span className="legend transition"/><strong>Transition</strong><small>Immutable historical outcome</small></div><div><span className="legend authorization"/><strong>Authorization</strong><small>Explicit authority decision</small></div></div><div className="filter-bar">{(['All', 'Observation', 'Transition', 'Authorization'] as const).map((item) => <button className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><EvidenceList evidence={items} onSelect={openEvidence}/></>
+    <div className="evidence-explainer"><div><span className="legend observation"/><strong>Observation</strong><small>Freshness-bound observation</small></div><div><span className="legend transition"/><strong>Transition</strong><small>Immutable historical outcome</small></div><div><span className="legend authorization"/><strong>Authorization</strong><small>Explicit authority decision</small></div></div><div className="filter-bar">{(['All', 'Observation', 'Transition', 'Authorization'] as const).map((item) => <button className={`filter-chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><EvidenceList fixture={data.source !== 'bff'} evidence={items} onSelect={openEvidence}/></>
 }
 
 const createSteps = ['Draft', 'Review', 'Authorize', 'Execute', 'Evidence'] as const
@@ -327,7 +350,7 @@ const createClusterProviderGroups = [
 
 const providerIdentifier = (provider: string) => provider.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
-function CreateCluster() {
+function CreateCluster({ onSessionEnded }: { onSessionEnded: () => void }) {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('ok-edge-berlin')
   const [provider, setProvider] = useState('Bare Metal Infra')
@@ -342,6 +365,7 @@ function CreateCluster() {
     const payload = { apiVersion: 'platform.openkubes.io/v1alpha1', kind: 'OpenKubesCluster', metadata: { name: name || 'cluster-name', namespace: 'default' }, spec: { role: 'workload', implementationProfile: { provider: providerIdentifier(provider), profile: profile.toLowerCase().replace(' ', '-') }, capabilities: { required: ['observability', 'persistent-storage'] } } }
     try {
       const response = await fetch('/api/console/v0/operations/create-cluster/dry-run', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ contract: payload }) })
+      if (response.status === 401) { onSessionEnded(); return }
       const body = await response.json() as { data?: typeof dryRunResult; error?: { message?: string } }
       if (!response.ok || !body.data) throw new Error(body.error?.message ?? 'The dry-run could not be completed.')
       setDryRunResult(body.data); setDryRunState('ready'); setStep(3)
@@ -402,7 +426,7 @@ function RegisterCluster() {
           </div></fieldset>
         </>}
         {step === 1 && <>
-          <div className="panel-title"><div><span className="eyebrow">Step 2 · Read-only discovery</span><h2>Review discovered cluster facts</h2></div><span className="fixture-label"><span className="live-dot"/>Simulated fixture</span></div>
+          <div className="panel-title"><div><span className="eyebrow">Step 2 · Read-only discovery</span><h2>Review discovered cluster facts</h2></div><span className="fixture-label">Simulated fixture</span></div>
           <div className="discovery-hero"><span className="cluster-symbol"><Icon name="cube" size={21}/></span><div><strong>{name}</strong><small>Existing upstream Kubernetes cluster</small></div><StatusBadge status="Ready"/></div>
           <div className="discovery-grid"><div><span>Kubernetes</span><strong>v1.31.8</strong><small>Supported presentation</small></div><div><span>Nodes</span><strong>5</strong><small>3 control plane · 2 worker</small></div><div><span>Distribution</span><strong>Upstream</strong><small>Provider neutral</small></div><div><span>Endpoint</span><strong>Reachable</strong><small>Read-only probe</small></div></div>
           <div className="capability-assessment"><div className="panel-title"><div><span className="eyebrow">Capability assessment</span><h3>Observed, not installed</h3></div></div><div><span><Icon name="check"/>StorageClass API</span><strong>Observed</strong></div><div><span><Icon name="check"/>Ingress API</span><strong>Observed</strong></div><div><span><Icon name="clock"/>OpenKubes Evidence</span><strong>Not enrolled</strong></div></div>
@@ -440,11 +464,15 @@ function RegisterCluster() {
 type ShellEntry = {
   kind: 'system' | 'command' | 'output' | 'blocked' | 'ai' | 'proposal'
   content: string
+  generation?: number
+  observedAt?: string
+  historical?: boolean
 }
 
 const MUTATING_COMMAND = /\b(apply|create|delete|edit|patch|replace|scale|cordon|drain|uncordon|exec|rollout\s+restart|set\s+image)\b/i
 
-function simulatedShellResponse(command: string, cluster: Cluster, source: PlatformSnapshot['source']): ShellEntry[] {
+function simulatedShellResponse(command: string, cluster: Cluster, source: PlatformSnapshot['source'], presentation?: ReturnType<typeof observationPresentation>, readinessCluster = cluster): ShellEntry[] {
+  const readiness = presentation && !presentation.current ? `Unknown (last observed ${readinessCluster.readiness})` : `${readinessCluster.readiness}${presentation ? ` (${presentation.label})` : ''}`
   const normalized = command.trim().toLowerCase()
   if (MUTATING_COMMAND.test(normalized)) {
     return [{ kind: 'blocked', content: 'BLOCKED · This read-only prototype cannot invoke a mutating operation. A production request would enter Review → Authorization → Execution.' }]
@@ -452,12 +480,12 @@ function simulatedShellResponse(command: string, cluster: Cluster, source: Platf
   if (normalized.includes('why') || normalized.includes('explain') || normalized.includes('pending')) {
     const pending = cluster.lifecycle.filter((item) => item.state !== 'Ready')
     const explanation = cluster.lifecycle.length === 0
-      ? `This shell session holds readiness ${cluster.readiness} for ${cluster.name}. This shell session holds no lifecycle detail for ${cluster.name}.`
+      ? `This shell session holds readiness ${readiness} for ${cluster.name}. This shell session holds no lifecycle detail for ${cluster.name}.`
       : pending.length > 0
-      ? `This shell session holds readiness ${cluster.readiness} for ${cluster.name}.\n${pending.map((item) => `${item.label}: ${item.state} — ${item.detail}`).join('\n')}`
+      ? `This shell session holds readiness ${readiness} for ${cluster.name}.\n${pending.map((item) => `${item.label}: ${item.state} — ${item.detail}`).join('\n')}`
       : cluster.readiness === 'Ready'
-        ? `This shell session holds readiness Ready and ${cluster.lifecycle.length} lifecycle stage(s), all reporting Ready.`
-        : `This shell session holds readiness ${cluster.readiness} for ${cluster.name}. Its ${cluster.lifecycle.length} lifecycle stage(s) all report Ready; stages do not establish overall readiness.`
+        ? `This shell session holds readiness ${readiness} and ${cluster.lifecycle.length} lifecycle stage(s), all reporting Ready.`
+        : `This shell session holds readiness ${readiness} for ${cluster.name}. Its ${cluster.lifecycle.length} lifecycle stage(s) all report Ready; stages do not establish overall readiness.`
     return [
       { kind: 'ai', content: explanation },
       { kind: 'proposal', content: `Suggested read-only command · kubectl get clusterconditions -o wide` },
@@ -476,20 +504,27 @@ function simulatedShellResponse(command: string, cluster: Cluster, source: Platf
     if (cluster.lifecycle.length === 0) {
       return [{ kind: 'blocked', content: `UNAVAILABLE · This shell session holds no lifecycle detail for ${cluster.name}.` }]
     }
-    return [{ kind: 'output', content: `This shell session holds the following lifecycle snapshot:\n` + cluster.lifecycle.map((item) => `${item.label.padEnd(18)} ${item.state.padEnd(8)} ${item.detail}`).join('\n') }]
+    return [{ kind: 'output', content: `This shell session holds the following lifecycle snapshot${presentation ? ` (${readiness})` : ''}:\n` + cluster.lifecycle.map((item) => `${item.label.padEnd(18)} ${item.state.padEnd(8)} ${item.detail}`).join('\n') }]
   }
   if (normalized.includes('evidence')) {
-    return [{ kind: 'output', content: `This shell session holds the following evidence snapshot:\nEVIDENCE     ${cluster.evidenceId}\nCONTRACT     ${cluster.contractVersion}\nREVISION     ${cluster.revision}\nREADINESS    ${cluster.readiness}\nSOURCE       ${source ?? 'unspecified'}` }]
+    return [{ kind: 'output', content: `This shell session holds the following evidence snapshot:\nEVIDENCE     ${cluster.evidenceId}\nCONTRACT     ${cluster.contractVersion}\nREVISION     ${cluster.revision}\nREADINESS    ${readiness}\nSOURCE       ${source ?? 'unspecified'}` }]
   }
   return [{ kind: 'blocked', content: 'UNKNOWN · This command is not in the prototype read-only allowlist. Type “help” to see supported diagnostics.' }]
 }
 
-function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: PlatformSnapshot['source']; close: () => void }) {
+function ClusterShell({ cluster, source, presentation, readinessCluster = cluster, generation = 0, observedAt, close }: { cluster: Cluster; source: PlatformSnapshot['source']; presentation?: ReturnType<typeof observationPresentation>; readinessCluster?: Cluster; generation?: number; observedAt?: string; close: () => void }) {
+  const [previous, setPrevious] = useState({ generation, current: presentation?.current })
   const [namespace, setNamespace] = useState('all namespaces')
   const [command, setCommand] = useState('')
   const [entries, setEntries] = useState<ShellEntry[]>([
     { kind: 'system', content: `Read-only prototype session established for ${cluster.name}. No credential, kubeconfig, WebSocket, or backend connection was created.` },
   ])
+
+  if (generation !== previous.generation || presentation?.current !== previous.current) {
+    setPrevious({ generation, current: presentation?.current })
+    setEntries(items => items.map(item => item.generation !== undefined &&
+      (item.generation < generation || !presentation?.current) ? { ...item, historical: true } : item))
+  }
 
   const run = (value = command) => {
     const nextCommand = value.trim()
@@ -499,7 +534,7 @@ function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: Pl
       setCommand('')
       return
     }
-    setEntries((current) => [...current, { kind: 'command', content: nextCommand }, ...simulatedShellResponse(nextCommand, cluster, source)])
+    setEntries((current) => [...current, { kind: 'command', content: nextCommand }, ...simulatedShellResponse(nextCommand, cluster, source, presentation, readinessCluster).map(item => ({ ...item, generation, observedAt, historical: false }))])
     setCommand('')
   }
 
@@ -507,7 +542,7 @@ function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: Pl
     <section className="cluster-shell" role="dialog" aria-modal="true" aria-labelledby="shell-title">
       <header className="shell-header">
         <div className="shell-identity"><span className="shell-logo"><Icon name="terminal" size={22}/></span><div><span className="eyebrow">Cluster diagnostic session</span><h2 id="shell-title">Shell · {cluster.name}</h2></div></div>
-        <div className="shell-session"><span className="live-dot"/><span><small>Read-only prototype</small><strong>14:37 remaining</strong></span></div>
+        <div className="shell-session"><span className="session-dot"/><span><small>Read-only prototype</small><strong>14:37 remaining</strong></span></div>
         <button className="shell-close" onClick={close} aria-label="Close cluster shell"><Icon name="x"/></button>
       </header>
       <div className="shell-context">
@@ -525,7 +560,8 @@ function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: Pl
           {entry.kind === 'proposal' && <span className="entry-label"><Icon name="shield" size={14}/>Reviewable proposal</span>}
           {entry.kind === 'blocked' && <span className="entry-label"><Icon name="x" size={14}/>Guardrail</span>}
           {entry.kind === 'system' && <span className="entry-label"><Icon name="check" size={14}/>Session boundary</span>}
-          <pre>{entry.content}</pre>
+          {entry.historical && <small>Earlier output, based on data observed at {entry.observedAt && new Date(entry.observedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>}
+          <pre>{observedText(entry.content, !entry.historical)}</pre>
           {entry.kind === 'proposal' && <button onClick={() => run('kubectl get clusterconditions -o wide')}>Run proposed read-only command <Icon name="arrow" size={14}/></button>}
         </div>)}
       </div>
@@ -540,14 +576,15 @@ function ClusterShell({ cluster, source, close }: { cluster: Cluster; source: Pl
   </div>
 }
 
-function EvidenceDrawer({ item, close }: { item: EvidenceRef; close: () => void }) {
+function EvidenceDrawer({ item, close, fixture, observedStale = false }: { item: EvidenceRef; close: () => void; fixture: boolean; observedStale?: boolean }) {
   const staleReason = Date.parse(item.observedAt) > Date.now() + 60_000
     ? 'dated in the future (clock fault)'
     : 'older than the freshness window'
-  const durability = item.freshness === 'Stale'
+  const presentation = evidencePresentation(item, fixture)
+  const durability = presentation.stale || observedStale
     ? `${item.immutable ? 'Immutable receipt · ' : ''}Stale observation: ${staleReason}`
-    : item.immutable ? 'Immutable receipt' : 'Current, freshness-bound observation'
-  return <div className="drawer-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><header><div><span className="eyebrow">{item.type}</span><h2 id="evidence-title">{item.title}</h2></div><button className="icon-button" onClick={close} aria-label="Close evidence"><Icon name="x"/></button></header><EvidenceOutcome item={item}/><p className="drawer-summary">{item.summary}</p><dl className="evidence-details"><div><dt>Cluster</dt><dd>{item.cluster}</dd></div><div><dt>Contract</dt><dd>{item.contract}</dd></div><div><dt>Revision / digest</dt><dd>{item.revision}</dd></div><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Observed at</dt><dd>{new Date(item.observedAt).toLocaleString()}</dd></div><div><dt>Durability</dt><dd>{durability}</dd></div></dl><div className="provenance-box"><Icon name="shield"/><div><strong>Provenance visible</strong><p>This projection is redaction-safe fixture data. It does not expose credentials, kubeconfigs, or raw private evidence.</p></div></div><button className="secondary-button full-button" onClick={close}>Close</button></aside></div>
+    : item.immutable ? presentation.label : presentation.current ? 'Current, freshness-bound observation' : presentation.label
+  return <div className="drawer-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><header><div><span className="eyebrow">{item.type}</span><h2 id="evidence-title">{item.title}</h2></div><button className="icon-button" onClick={close} aria-label="Close evidence"><Icon name="x"/></button></header><EvidenceOutcome item={item} fixture={fixture}/><p className="drawer-summary">{observedText(item.summary, presentation.current)}</p><dl className="evidence-details"><div><dt>Cluster</dt><dd>{item.cluster}</dd></div><div><dt>Contract</dt><dd>{item.contract}</dd></div><div><dt>Revision / digest</dt><dd>{item.revision}</dd></div><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Observed at</dt><dd>{new Date(item.observedAt).toLocaleString()}</dd></div><div><dt>Durability</dt><dd>{durability}</dd></div></dl><div className="provenance-box"><Icon name="shield"/><div><strong>Provenance visible</strong><p>This projection is redaction-safe fixture data. It does not expose credentials, kubeconfigs, or raw private evidence.</p></div></div><button className="secondary-button full-button" onClick={close}>Close</button></aside></div>
 }
 
 export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }) {
@@ -557,15 +594,11 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   const [authAttempt, setAuthAttempt] = useState(0)
   const [signingOut, setSigningOut] = useState(false)
   const [signOutError, setSignOutError] = useState<string>()
-  const [data, setData] = useState<PlatformSnapshot>()
   const [page, setPage] = useState<Page>(pageFromHash)
   const [selectedCluster, setSelectedCluster] = useState<Cluster>()
   const [shellCluster, setShellCluster] = useState<Cluster>()
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRef>()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [loadError, setLoadError] = useState<ConsoleDataError>()
-  const [loadAttempt, setLoadAttempt] = useState(0)
-  const [clusterDetailError, setClusterDetailError] = useState<ConsoleDataError>()
 
   useEffect(() => {
     if (auth.mode === 'prototype') return
@@ -590,7 +623,6 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
       setSelectedEvidence(undefined)
       setShellCluster(undefined)
       setSession(undefined)
-      setData(undefined)
       window.location.hash = '#/overview'
     } catch (error) {
       setSignOutError(error instanceof ConsoleAuthError ? error.message : 'Sign-out could not be completed safely.')
@@ -599,29 +631,20 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     }
   }
 
-  const openCluster = (cluster: Cluster) => {
-    setSelectedCluster(cluster)
-    setClusterDetailError(undefined)
-    if (consoleDataMode === 'bff') {
-      consoleData.getCluster(cluster.id)
-        .then((detail) => detail && setSelectedCluster(detail))
-        .catch((error: unknown) => setClusterDetailError(error instanceof ConsoleDataError ? error : new ConsoleDataError('Cluster detail could not be loaded.', 'INTERNAL_ERROR', true)))
-    }
+  const endSession = () => {
+    setSelectedCluster(undefined); setSelectedEvidence(undefined); setShellCluster(undefined)
+    setSession(undefined); setAuthError('Your session ended. Sign in again.')
   }
-
-  useEffect(() => {
-    let active = true
-    if (!session) {
-      setData(undefined)
-      setLoadError(undefined)
-      return () => { active = false }
-    }
-    setLoadError(undefined)
-    consoleData.getSnapshot()
-      .then((snapshot) => active && setData(snapshot))
-      .catch((error: unknown) => active && setLoadError(error instanceof ConsoleDataError ? error : new ConsoleDataError('Platform data could not be loaded.', 'INTERNAL_ERROR', true)))
-    return () => { active = false }
-  }, [session, loadAttempt])
+  const observation = useObservationSnapshot(Boolean(session), selectedCluster, endSession)
+  const clusterDetailError = observation.detailError
+  const effectiveDetail = observation.detail
+  const data = observation.data && {
+    ...observation.data,
+    evidence: observation.data.evidence.map(item => effectiveDetail &&
+      (item.cluster === effectiveDetail.id || item.cluster === effectiveDetail.name)
+      ? { ...item, freshness: conservativeVerdict(item.freshness, effectiveDetail.freshness, effectiveDetail.readiness === 'Unknown' ? 'Unknown' : 'Current') } : item),
+  }
+  const openCluster = (cluster: Cluster) => setSelectedCluster(cluster)
   useEffect(() => {
     const onHash = () => {
       setPage(pageFromHash())
@@ -644,9 +667,9 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
 
   if (authStatus === 'checking') return <AuthLoading/>
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
-  if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
+  if (observation.error && !data) return <LoadFailure error={observation.error} retry={observation.retry}/>
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
+  const view = selectedCluster ? <ClusterDetail cluster={effectiveDetail ?? selectedCluster} data={data} detailError={clusterDetailError} close={() => setSelectedCluster(undefined)} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster onSessionEnded={endSession}/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
@@ -660,11 +683,11 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
-      <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="live-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
+      <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="environment-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
       <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
     </div>
-    {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget data={data} openEvidence={setSelectedEvidence}/>}
-    {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}
-    {shellCluster && <ClusterShell cluster={shellCluster} source={data.source} close={() => setShellCluster(undefined)}/>}
+    {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget generation={observation.generation} data={data} openEvidence={setSelectedEvidence}/>}
+    {selectedEvidence && <EvidenceDrawer observedStale={observation.originalEvidence?.some(item => item.id === selectedEvidence.id && item.freshness === 'Stale')} fixture={data.source !== 'bff'} item={data.evidence.find(item => item.id === selectedEvidence.id) ?? { ...selectedEvidence, freshness: 'Unknown' }} close={() => setSelectedEvidence(undefined)}/>}
+    {shellCluster && <ClusterShell generation={observation.generation} observedAt={data.generatedAt} cluster={shellCluster} readinessCluster={effectiveDetail?.id === shellCluster.id ? effectiveDetail : shellCluster} source={data.source} presentation={consoleDataMode === 'bff' ? clusterPresentation(effectiveDetail?.id === shellCluster.id ? effectiveDetail : shellCluster, data) : undefined} close={() => setShellCluster(undefined)}/>}
   </div>
 }

@@ -31,7 +31,7 @@ const counter = () => {
 }
 
 it.each([
-  ['blocked', 'THROTTLE_CHECK'], ['failure', 'THROTTLE_FAILURE'], ['success', 'THROTTLE_RESET'],
+  ['reserve', 'THROTTLE_RESERVE'], ['success', 'THROTTLE_RESET'],
   ['blocked-audit', 'AUDIT'], ['rejected-audit', 'AUDIT'], ['granted-audit', 'AUDIT'],
   ['create', 'SESSION_STORE'], ['kdf', 'KDF'], ['compensation', 'AUDIT'], ['compensation-ok', 'AUDIT'], ['compensation-absent', 'AUDIT'],
 ])('L3 real local verifier preserves cause at %s and names %s', async (mode, step) => {
@@ -43,10 +43,9 @@ it.each([
   const revoke = vi.spyOn(store, 'revoke')
   if (!['compensation-ok', 'compensation-absent'].includes(mode)) revoke.mockImplementation(() => pool.query('SELECT 1'))
   if (mode === 'compensation-absent') Object.defineProperty(store, 'revoke', { value: undefined })
-  const throttle = { blocked: async () => mode === 'blocked-audit', failure: async () => {}, success: async () => {} }
-  if (mode === 'blocked') throttle.blocked = () => pgThrottle.blocked('reader')
-  if (mode === 'failure') throttle.failure = () => pgThrottle.failure('reader')
-  if (mode === 'success') throttle.success = () => pgThrottle.success('reader')
+  const throttle = { reserve: async () => ({ blocked: mode === 'blocked-audit', globalWindow: 'window' }), success: async () => {} }
+  if (mode === 'reserve') throttle.reserve = () => pgThrottle.reserve('reader')
+  if (mode === 'success') throttle.success = () => pgThrottle.success('reader', { globalWindow: 'window' })
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle, sessionStore: mode === 'create' ? pgStore : store, authorizationRevision: 'revision', audit: ['blocked-audit', 'rejected-audit', 'granted-audit', 'compensation', 'compensation-ok', 'compensation-absent'].includes(mode) ? (event: object) => pgAudit.record(event) : async () => {}, ...(mode === 'kdf' ? { derive: () => promisify(scrypt)(password, salt, -1) } : {}) })
   const ids = counter(), log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const url = await listen({ ...ids, localAccessHandler: createLocalAccessHttpHandler({ verifier, expectedOrigin: origin }) })
@@ -67,7 +66,7 @@ it.each([
 
 it('L3 rejected credentials keep the 401 path silent', async () => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: { blocked: async () => false, failure: async () => {} }, sessionStore: { create() {} } })
+  const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: { reserve: async () => ({ blocked: false }) }, sessionStore: { create() {} } })
   const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ verifier, expectedOrigin: origin }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password, reason: 'local recovery exercise' }) })
   expect(response.status).toBe(401); expect((await response.json()).error.code).toBe('LOCAL_ACCESS_REJECTED'); expect(log).not.toHaveBeenCalled()
@@ -101,12 +100,12 @@ it('L3 unavailable line uses the lifecycle stage reached before local handling',
   const url = await listen({ localAccessHandler: (input: object) => { currentLifecycle()?.mark('AUTHZ_CHECKED'); return handler(input) } })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password, reason: 'local recovery exercise' }) })
   expect(response.status).toBe(503); expect(log).toHaveBeenCalledTimes(1)
-  expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ stage: 'AUTHZ_CHECKED', cause: 'THROTTLE_CHECK', errorCode: 'ECONNREFUSED' })
+  expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ stage: 'AUTHZ_CHECKED', cause: 'THROTTLE_RESERVE', errorCode: 'ECONNREFUSED' })
 })
 
 it.each([undefined, null, false, 0, ''])('L3 compensation logs even an absent thrown code (%s)', async value => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle: { blocked: async () => false, success: async () => {} }, sessionStore: { create: async () => ({ cookie: 'cookie' }), revoke: async () => { throw value } }, derive: async () => Buffer.from(account.verifier, 'base64'), audit: async () => { throw new Error('audit unavailable') } })
+  const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle: { reserve: async () => ({ blocked: false }), success: async () => {} }, sessionStore: { create: async () => ({ cookie: 'cookie' }), revoke: async () => { throw value } }, derive: async () => Buffer.from(account.verifier, 'base64'), audit: async () => { throw new Error('audit unavailable') } })
   const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ verifier, expectedOrigin: origin }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password, reason: 'local recovery exercise' }) })
   expect(response.status).toBe(503)

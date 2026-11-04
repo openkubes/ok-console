@@ -191,7 +191,7 @@ it('K6 L3 local route through real verifier, HTTP handler and refused pg pool lo
   expect(response.status).toBe(503); sameId(counter, response)
   expect((await response.json()).error.code).toBe('LOCAL_ACCESS_UNAVAILABLE')
   expect(log).toHaveBeenCalledTimes(1)
-  expect(JSON.parse(log.mock.calls[0][0])).toEqual({ event: 'LOCAL_ACCESS_FAILED', stage: 'REQUEST_RECEIVED', correlationId: counter.generated[0], cause: 'THROTTLE_CHECK', errorCode: 'ECONNREFUSED', elapsedMs: expect.any(Number) })
+  expect(JSON.parse(log.mock.calls[0][0])).toEqual({ event: 'LOCAL_ACCESS_FAILED', stage: 'REQUEST_RECEIVED', correlationId: counter.generated[0], cause: 'THROTTLE_RESERVE', errorCode: 'ECONNREFUSED', elapsedMs: expect.any(Number) })
 })
 
 it('L1 ConsoleBffError body and header share the independently generated id', async () => {

@@ -240,7 +240,46 @@ Migration `003_local_access_throttle.sql` adds digest-only, database-time
 throttling shared by all BFF replicas. Five failed attempts in a 15-minute
 window block that principal for 15 minutes; 50 failures across rotating
 principals also activate a shared global bucket. The digest is HMAC-peppered so
-the table does not disclose configured usernames. Edge/IP rate limiting remains
+the table does not disclose configured usernames. Before password derivation, a
+lock-free SELECT rejects known blocks. Otherwise a READ COMMITTED transaction
+locks both rows in digest order, requires exactly both expected keys, checks the
+block state again, and updates only those locked keys. Both returned rows must
+match before COMMIT; any mismatch refuses without retry or password work.
+Already-blocked attempts are audited as THROTTLED without counting or extending
+the deadline. Transactions use one captured database instant and bounded lock
+(1000 ms) and idle-in-transaction (5000 ms) timeouts, each preserving stricter server settings and capped below a positive
+statement timeout. A timeout or uncertain COMMIT refuses access.
+
+A wrong password keeps its reservation. A credential verdict (INVALID_CREDENTIAL
+or success) requires a committed reservation on both rows. Success resets the
+principal row unless another attempt established an active principal block. Success releases
+one global count only in the reserved window, identified by numeric epoch
+microseconds independently of DateStyle or TimeZone, never below zero. It clears
+a threshold block when the remaining count is below 50. In-flight correct logins
+hold one unit of budget until they finish: at global 49, two concurrent correct
+logins can produce one 200 and one 401 THROTTLED. A failed release refuses session
+creation and retains the budget for the window.
+
+A correct login during a principal block established by other attempts is refused
+and audited as Denied / THROTTLED; no session is issued. Its global reservation
+is released in a committed transaction. A correct fifth attempt may reset the
+block created by its own reservation. Transaction time is read after row locks
+are held, and one instant is used for all subsequent arithmetic.
+
+Known limitations: in-flight correct logins hold one unit of budget. Throttle
+rows are never deleted, so each unknown username adds a row; retention is a
+follow-up. Fifty wrong attempts per window from anyone block all exceptional
+local access, by design. At statement_timeout <= 1 ms, both transaction timeout
+caps are 1 ms (the exception to strict ordering).
+
+Principal HMAC inputs use `throttle:principal:` and the global bucket uses
+`throttle:global`; `__global__` and its normalized aliases are ordinary usernames.
+Rollout note: this domain separation resets effective budgets once for the
+15-minute window. Old and new replicas use different buckets during a mixed
+rollout, so roll all replicas together. No migration or physical row cleanup is
+required; old buckets cease affecting active budgets within 15 minutes.
+
+Edge/IP rate limiting remains
 a deployment control because the BFF does not invent trust in proxy headers.
 
 Every attempt requires a 12–512 character operational reason and writes
@@ -435,8 +474,8 @@ failures carry the reached stage, correlation ID (or OTHER), fixed event
 OIDC_START_FAILED and a closed cause naming the start step: TRANSACTION_STORE,
 AUDIT, AUTHORIZATION_URL, PKCE or OTHER. Discovery runs only at startup. A separate
 errorCode selects the deepest defined own data code in a cycle-bounded chain of Error causes, retaining an outer code when deeper causes have none. Parsed IdP JSON is never followed as a cause or a source of codes:
-ECONNREFUSED, ENOTFOUND, EAI_AGAIN, ECONNRESET, 57P01, 53300, 28P01,
-PG_CONNECT_TIMEOUT, PG_CONNECTION_TERMINATED, PG_POOL_TIMEOUT, PG_QUERY_TIMEOUT, PG_STATEMENT_TIMEOUT,
+ECONNREFUSED, ENOTFOUND, EAI_AGAIN, ECONNRESET, 53300, 28P01,
+PG_CONNECT_TIMEOUT, PG_CONNECTION_TERMINATED, PG_POOL_TIMEOUT, PG_QUERY_TIMEOUT, PG_STATEMENT_TIMEOUT, PG_LOCK_TIMEOUT, PG_IDLE_TRANSACTION_TIMEOUT,
 OAUTH_TIMEOUT, OAUTH_INVALID_RESPONSE, OAUTH_RESPONSE_BODY_ERROR,
 AUDIT_INPUT_INVALID, PG_UNIQUE_VIOLATION (23505), PG_CHECK_VIOLATION (23514),
 DECRYPT_FAILED, the TLS/token codes below, OTHER, or null when absent. ETIMEDOUT remains allowlisted;
@@ -479,6 +518,9 @@ OK_CONSOLE_POSTGRES_IDLE_TIMEOUT_MS and OK_CONSOLE_OIDC_TIMEOUT_SECONDS.
 Whitespace, hex and exponent notation are rejected. The statement_timeout + 1000 ms
 default assumes round-trip plus server overhead stays below one second. PG_QUERY_TIMEOUT means no reply within
 query_timeout, including a DB that completes startup then stops answering.
+PG_LOCK_TIMEOUT means SQLSTATE 55P03; PG_CONNECTION_TERMINATED includes 57P01;
+PG_IDLE_TRANSACTION_TIMEOUT means SQLSTATE 25P03. Pool errors emit a bounded
+PG_POOL_FAILED diagnostic and are contained without exiting the process.
 PG_STATEMENT_TIMEOUT means server cancellation SQLSTATE 57014, matched by code
 at the pg boundary. SQLSTATE 57014 means statement timeout or operator cancel;
 pg_cancel_backend produces the same code. Failed rotate/revoke transactions release
@@ -512,7 +554,7 @@ Projection and response-writing exceptions therefore remain visible.
 
 Local-access dependency failures emit LOCAL_ACCESS_FAILED once for the unavailable
 operation, at the reached lifecycle stage (normally REQUEST_RECEIVED). The closed
-cause steps are THROTTLE_CHECK, THROTTLE_FAILURE, THROTTLE_RESET, KDF,
+cause steps are THROTTLE_RESERVE, THROTTLE_RESET, KDF,
 SESSION_STORE and AUDIT, with OTHER for an unknown step. These identify the exact
 verifier operation without adding lifecycle stages. errorCode uses the preserved
 cause and the shared classifier. A failed compensating revoke adds a

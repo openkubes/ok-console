@@ -580,6 +580,7 @@ describe('local-only W-JAX Console route', () => {
       window.location.hash = '#/wjax'
       await renderSignedIn()
       expect(screen.queryByRole('link', { name: /W-JAX Local Kubernetes/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /User & Project Management/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('heading', { name: 'Local Kubernetes' })).not.toBeInTheDocument()
       expect(fetcher).not.toHaveBeenCalled()
     } finally { fetcher.mockRestore() }
@@ -593,7 +594,7 @@ describe('local-only W-JAX Console route', () => {
     }) } as Response)
     try {
       await renderSignedIn()
-      expect(screen.getByRole('link', { name: /W-JAX Local Kubernetes/ })).toHaveAttribute('href', '#/wjax')
+      expect(screen.getByRole('link', { name: /User & Project Management/ })).toHaveAttribute('href', '#/users')
       window.location.hash = '#/wjax'
       fireEvent(window, new Event('hashchange'))
       expect(await screen.findByRole('heading', { name: 'Local Kubernetes' })).toBeInTheDocument()
@@ -602,5 +603,47 @@ describe('local-only W-JAX Console route', () => {
       expect(screen.queryByRole('button', { name: /Ask OK AI/ })).not.toBeInTheDocument()
       expect(fetcher).toHaveBeenCalledWith('/api/wjax-kind/snapshot', expect.objectContaining({ method: 'GET' }))
     } finally { fetcher.mockRestore() }
+  })
+})
+
+ describe('Workspace preview navigation', () => {
+  it('opens the workspace preview from the primary navigation', async () => {
+    await renderSignedIn()
+    fireEvent.click(screen.getByRole('link', { name: /Developer Workspaces/ }))
+    expect(await screen.findByRole('heading', { name: 'Developer Workspaces' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Create Workspace/ })).toBeInTheDocument()
+  })
+})
+
+
+describe('Identity & access preview navigation', () => {
+  it('opens directly, preserves workspaces, resets proposals on leaving and retains the Clusters lab link', async () => {
+    wjaxPreview.enabled = true
+    window.location.hash = '#/users'
+    const request = vi.spyOn(globalThis, 'fetch')
+    try {
+      await renderSignedIn()
+      expect(await screen.findByRole('heading', { name: 'User & Project Management' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /User & Project Management/ })).toHaveTextContent('Preview · identity & access')
+      fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Add preview user' }))
+      expect(screen.getByRole('status')).toHaveTextContent('No account or access was created.')
+      fireEvent.click(screen.getByRole('link', { name: /Developer Workspaces/ }))
+      expect(await screen.findByRole('heading', { name: 'Developer Workspaces' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Create Workspace/ })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('link', { name: /User & Project Management/ }))
+      expect(await screen.findByRole('heading', { name: 'No preview users yet' })).toBeInTheDocument()
+      expect(screen.queryByRole('rowheader', { name: 'alice' })).not.toBeInTheDocument()
+      expect(request).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole('link', { name: /Clusters/ }))
+      expect(await screen.findByRole('link', { name: /View Deployments & Pods/ })).toHaveAttribute('href', '#/wjax')
+    } finally { request.mockRestore() }
+  })
+
+  it('does not expose the users route when the local preview is disabled', async () => {
+    window.location.hash = '#/users'
+    await renderSignedIn()
+    expect(screen.queryByRole('heading', { name: 'User & Project Management' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /User & Project Management/ })).not.toBeInTheDocument()
   })
 })

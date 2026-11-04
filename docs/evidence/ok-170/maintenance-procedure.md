@@ -1,6 +1,6 @@
 # OK-170 maintenance procedure — separate review required
 
-> **Outside the Scope C day.** Kept for a later full window; must be re-reviewed against the current candidate before any use.
+> **Outside the Scope C day.** Kept for a later full window; must be re-reviewed against the current candidate before any use. Its R-numbered sections, epoch/identifier ledgers, naming contract, C1 definition and freeze wording refer to the earlier full-session plan (acceptance-plan.md as of ok-console 0a164e3), not to the Scope C plan or its R1-R9 register.
 
 > **This document is not an execution approval.** Merging it authorizes no change on ok-shared. Every live step needs a separate, explicit approval of the hashed artifact package and a dated window. An event freeze is in force for the Sovereign Cloud Days demonstration on 2026-10-24 (OK-170 comment 15171): no deployment, promotion, rollout, server-side apply, ownership handoff, configuration, credential, certificate, RBAC or producer change, fault injection, negative live test, maintenance exercise or rollback before or during it, and the end of the event does not grant execution authority.
 

@@ -1,12 +1,12 @@
 # OK-170 acceptance plan: Scope C
 
-> **Planning record, not an execution approval.** Step 4 needs Arash's explicit approval of each live write: deploy C1, deploy P1 and fail-closed abort. Steps 1, 4 and 5 remain open; completed disposable-cluster work grants no ok-shared execution authority.
+> **Planning record, not an execution approval.** Step 4 as a whole, including its read-only inventory, runs only in a window Arash has explicitly approved. Each live write needs Arash's explicit approval: deploy C1, deploy P1 and fail-closed abort. Steps 1, 4 and 5 remain open; completed disposable-cluster work grants no ok-shared execution authority.
 
 ## Candidate and rollback pairs
 
 | Pair / tooling | Source |
 | --- | --- |
-| C1 Console | ok-console main `0a164e3` plus #139 (trust diagnostics), #142 (local-login throttle fails closed), #140 (per-item freshness verdict), #143 (freshness labels in the UI), merged in that order |
+| C1 Console | ok-console main `0a164e3` plus #139 (trust diagnostics), #142 (local-login throttle fails closed), #140 (per-item freshness verdict), #143 (freshness labels in the UI), to be merged in that order (all four PRs are open) |
 | P1 producer | openkubes `1b0739fc` |
 | CR / PR rollback | ok-console `0a164e3` / openkubes `94ab8d9`; the pair running before C1/P1, freshness-unaware |
 | Gate tooling | ok-console #145, independent of C1 |
@@ -29,24 +29,24 @@ Total: 6 h = 2.5 h off-cluster + 3 h live + 0.5 h record. Step 4 uses existing s
 
 ## Step 3 drill results
 
-Disposable kind v1.34.1; C1 locally merges #143 and #142 onto main; P1 is openkubes `1b0739fc`. Two consecutive green runs of the same checks; all drills recovered.
+Disposable kind v1.34.1; C1 is a local merge of #143 and #142 onto main; both are stacked on #139 (and #143 on #140), so all four PRs are included, at their current heads. P1 is openkubes `1b0739fc`. Two consecutive green runs of the same checks; all drills recovered.
 
 | Drill | Result |
 | --- | --- |
-| D1 producer down | 503 TRANSPORT_FAILURE / SOURCE_UNREACHABLE |
-| D2 invalid trust | CERTIFICATE_VERIFICATION / TRUST_REJECTED |
-| D3 stale item | Unknown while a fresh sibling stays Current; observation timestamp unchanged |
-| D4 explicit and invalid readiness | Unknown |
-| D5 rollback and forward | C1/P1 -> CR/PR -> C1/P1; image IDs, health, API and UI checked at each step. CR shows the stale item as Current, motivating step 4's fail-closed abort (R1). |
-| D6 freshness verdict removed | Freshness assertions fail, demonstrating that the drill can fail |
-| D7 wrong client identity | IDENTITY_REJECTED / INCONCLUSIVE |
+| Drill 1 producer down | 503 TRANSPORT_FAILURE / SOURCE_UNREACHABLE |
+| Drill 2 invalid trust | CERTIFICATE_VERIFICATION / TRUST_REJECTED |
+| Drill 3 stale item | Unknown while a fresh sibling stays Current; observation timestamp unchanged |
+| Drill 4 explicit and invalid readiness | Unknown |
+| Drill 5 rollback and forward | C1/P1 -> CR/PR -> C1/P1; image IDs, health, API and UI checked at each step. CR shows the stale item as Current, motivating step 4's fail-closed abort (R1). |
+| Drill 6 freshness verdict removed | Freshness assertions fail, demonstrating that the drill can fail |
+| Drill 7 wrong client identity | IDENTITY_REJECTED / INCONCLUSIVE |
 
 Scope of the drills:
 
 - Stale UI wording is "Observation unavailable - readiness Unknown". The stale item's Evidence body keeps classification Current with meta Stale as a historical record.
-- P1 reports partial in hosting-cluster mode, so the "partially degraded" banner appears on every baseline; D4 rests on the item turning Unknown.
-- D1 scales the producer to 0; hung-producer and selector-isolation cases are outside this drill. D7 covers a wrong SPIFFE URI only.
-- D3/D4 server evidence consists of BFF fields and absence of a failure log line. UI assertions cover only the Clusters list.
+- P1 reports partial in hosting-cluster mode, so the "partially degraded" banner appears on every baseline; Drill 4 rests on the item turning Unknown.
+- Drill 1 scales the producer to 0; hung-producer and selector-isolation cases are outside this drill. Drill 7 covers a wrong SPIFFE URI only.
+- Drill 3/Drill 4 server evidence consists of BFF fields and absence of a failure log line. UI assertions cover only the Clusters list.
 - One rollback cycle; mixed pairs and session or callback rejection are deferred. Forward retry is shown by code reading only.
 
 ## AC map
@@ -59,25 +59,27 @@ AC text remains in Jira; numbers and short topics below identify it without repr
 | AC2 | Console digest/image ID | Steps 1, 4 | Both steps open |
 | AC3 | Producer revision/image | Steps 1, 4 | Both steps open |
 | AC4 | OIDC login/session/logout | Deferred | Open, not waived (R6) |
-| AC5 | mTLS identity | Step 3 D2/D7 off ok-shared | Live negative (R2) |
+| AC5 | mTLS identity | Step 3 drills 2 and 7 (negatives) off ok-shared; step 4 (positive: producer data served over the mTLS path) | Live negative (R2); step 4 open |
 | AC6 | Four real-state views | Step 4: Overview, Clusters, Cluster Detail, Evidence; UI labels by #143 | Step 4 open |
 | AC7 | No raw objects/secrets in browser | Repository tests + step 4 | Step 4 open |
-| AC8 | Fail-closed | Step 3 D1-D4, D7 | Live negatives (R2) |
+| AC8 | Fail-closed | Step 3 Drill 1-Drill 4, Drill 7 | Live negatives (R2) |
 | AC9 | Mutations disabled | Step 4 | Step 4 open |
-| AC10 | Rollback and cleanup | Off-cluster step 3 D5 | Live deferred, open, not waived (R1) |
+| AC10 | Rollback and cleanup | Off-cluster step 3 Drill 5 | Live deferred, open, not waived (R1) |
 | AC11 | Evidence record | Step 5 | Open |
 | AC12 | CI green | Each PR | Required per PR |
 | AC13 | Disposition | Step 5 | Open |
 
 ## Deferred-risk register
 
+R1-R9 here are the Scope C register; the R-numbered sections of the maintenance procedure and of earlier review comments use their own numbering.
+
 | Risk | Current state | Revisit |
 | --- | --- | --- |
-| R1 | Live rollback to CR/PR would show stale data as Current (D5); step 4 abort is fail-closed | A reviewed freshness-aware rollback pair |
-| R2 | Live trust/outage drills are outside ok-shared scope; AC5/AC8 negatives shown on disposable clusters | Separate live drill window |
-| R3 | D8 breakglass not executed | Its own approval |
-| R4 | D10 ownership handoff not executed; #145 supplies the tested gate tool a later handoff would use | Its own approval |
-| R5 | D6 dry-run URL tracking not executed | Its own approval |
+| R1 | Live rollback to CR/PR would show stale data as Current (Drill 5); step 4 abort is fail-closed | A reviewed freshness-aware rollback pair |
+| R2 | Live trust/outage drills are not run on ok-shared; AC5/AC8 negatives shown on disposable clusters | Separate live drill window |
+| R3 | decision D8 breakglass not executed | Its own approval |
+| R4 | decision D10 ownership handoff not executed; #145 supplies the tested gate tool a later handoff would use | Its own approval |
+| R5 | decision D6 dry-run URL tracking not executed | Its own approval |
 | R6 | OIDC on the deployed BFF is not shown (AC4) | Arash's decision to deploy OIDC or record a deviation |
 | R7 | Stale wording implying current state addressed in #143 | Listed follow-ups: deploy wizard and Capabilities catalog wording, envelope generation-time field, non-Chromium browsers and macOS |
 | R8 | Failed local login uncounted on throttle lock timeout addressed in #142 (fails closed) | Listed follow-ups: row retention, further SQLSTATE classes, multi-pod/CNPG verification |
@@ -110,4 +112,4 @@ Allowlist safe projections before persistence. Never record Secret values/hashes
 
 - **Applies to:** Scope C and the identified source pairs; live execution remains separately approved.
 - **Shown in:** #145 gate-tooling proof and the step 3 disposable-cluster results above. These are off-cluster results, not observations of deployed C1/P1 on ok-shared.
-- **Follow-ups:** Steps 1, 4 and 5 remain open; deferred ACs and R1-R9 retain their stated disposition. No macOS access is available; Arash must verify macOS-only behavior.
+- **Follow-ups:** Steps 1, 4 and 5 remain open; deferred ACs and R1-R9 retain their stated disposition. No macOS access was available; Arash, please verify macOS-only behaviour. C1 built in step 1 is checked against the drilled heads (#142 2a96b03, #143 2af9afb); any change after these heads repeats the affected drills.

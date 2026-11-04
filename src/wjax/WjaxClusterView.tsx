@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import './wjax.css'
-import LocalUsersPrototype from './LocalUsersPrototype'
 
 type Deployment = { name: string; desired: number; ready: number }
 type Pod = { name: string; phase: string; ready: boolean; restarts: number }
@@ -76,7 +75,6 @@ export default function WjaxClusterView() {
       {observation.status === 'unavailable' && <p role="alert">Reader unavailable or response invalid. No current workload data is shown; any last-success timestamp above is historical. Check the local Reader and refresh.</p>}
       {observation.status === 'observed' && <p role="status">Read-only snapshot received. This is a point-in-time observation, not signed recovery evidence.</p>}
     </div>
-    <LocalUsersPrototype/>
     {data && <>
       <div className="panel wjax-table"><table><caption>Deployments</caption><thead><tr><th scope="col">Name</th><th scope="col">Desired replicas</th><th scope="col">Ready replicas</th><th scope="col">Ready / desired</th></tr></thead><tbody>{data.deployments.map((item) => <tr key={item.name}><th scope="row">{item.name}</th><td>{item.desired}</td><td>{item.ready}</td><td>{item.ready}/{item.desired}</td></tr>)}</tbody></table>{data.deployments.length === 0 && <p>No Deployments observed in wjax-demo.</p>}</div>
       <div className="panel wjax-table"><table><caption>Pods</caption><thead><tr><th scope="col">Name</th><th scope="col">Phase</th><th scope="col">Ready</th><th scope="col">Restarts</th></tr></thead><tbody>{data.pods.map((item) => <tr key={item.name}><th scope="row">{item.name}</th><td>{item.phase}</td><td>{item.ready ? 'Yes' : 'No'}</td><td>{item.restarts}</td></tr>)}</tbody></table>{data.pods.length === 0 && <p>No Pods observed in wjax-demo.</p>}</div>

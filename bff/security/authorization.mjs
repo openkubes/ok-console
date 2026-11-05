@@ -16,7 +16,7 @@ const validContext = (context) => context
   && typeof context.subject?.providerId === 'string'
   && typeof context.subject?.subjectId === 'string'
   && typeof context.subject?.displayName === 'string'
-  && ['OIDC', 'BreakGlass', 'Bootstrap'].includes(context.subject?.method)
+  && ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'].includes(context.subject?.method)
   && Array.isArray(context.subject?.assurance)
   && typeof context.scope?.environmentId === 'string'
   && Array.isArray(context.scope?.tenantIds)

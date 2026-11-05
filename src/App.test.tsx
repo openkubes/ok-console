@@ -76,7 +76,8 @@ describe('OpenKubes Console', () => {
     fireEvent.click(screen.getByRole('button', { name: /Sign out of OpenKubes Console/i }))
     await waitFor(() => expect(auth.logout).toHaveBeenCalledTimes(1))
     expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Local account not enabled/i })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /Local account not enabled/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Use a local account/i })).not.toBeInTheDocument()
   })
 
   it('hands the live sign-in action to the fixed OIDC client port', async () => {

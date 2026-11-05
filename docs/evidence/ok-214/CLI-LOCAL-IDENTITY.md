@@ -29,7 +29,7 @@ Chromium uses a test-only certificate exception; API and actual CLI requests ver
 issued CA and IP SAN. The application/CLI has no insecure-TLS switch. The attended
 provisioning helper also runs through a PTY and verifies 0700/0600 output permissions.
 
-## Commands and results
+## Initial implementation commands and results
 
 | Verification | Result |
 |---|---|
@@ -43,7 +43,8 @@ provisioning helper also runs through a PTY and verifies 0700/0600 output permis
 | `git diff --check` | Passed |
 
 The last small auth-source wording change was separately verified by all **12 auth
-client/component tests**, lint and build. No broader behavior changed afterward.
+client/component tests**, lint and build. The later CI-only correction below changes
+test selection/execution, not authentication behavior.
 
 Security evidence includes:
 
@@ -62,9 +63,11 @@ Security evidence includes:
 ## Pre-existing failures — separate from OK-214
 
 Untouched main was tested before implementation: **747 passed, 23 failed, 12 skipped**.
-The full implementation suite has the identical 23 failing file/case identities; a
-normalized comparison of baseline failure headings and current JSON results found no
-new failing case. Files/counts:
+The initial full implementation run without a database URL had the identical 23
+failing file/case identities. That comparison did not cover database-enabled parallel
+execution: the subsequent read-only review reproduced two additional failures from
+shared-database test interference. The CI correction below addresses that distinct
+blocker. The 23 baseline failures remain in these files:
 
 - `deploy/kubernetes/ok170.test.ts`: 2
 - `deploy/kubernetes/ok172.test.ts`: 2
@@ -95,6 +98,69 @@ resolved or completely diagnosed them. They are not waived by the local identity
   session, versus the 5–8 person-day planning estimate. This is elapsed automation time,
   not measured human engineering/review effort or production security certification.
 
-Recommendation: **GO for human review and merge of this bounded non-production feature**,
-subject to the repository's normal review/check policy. Keep the implementation PR Draft
-until reviewed. No automatic merge or deployment.
+## CI PostgreSQL isolation correction — 2026-11-05
+
+The default parallel Vitest run allowed both PostgreSQL suites to truncate the same
+database concurrently. The read-only review reproduced failures in the complete local
+identity lifecycle and existing session cleanup. This was a new CI-runner issue,
+separate from the 23 baseline deployment-test failures above.
+
+Only `package.json`, the verification/tagged-image workflows and this evidence file
+change for the correction. No IAM implementation, test assertions or deployment
+manifests change. Both database-enabled workflows now use:
+
+1. `pnpm test:non-postgres`: all other suites retain normal file parallelism; only the
+   two PostgreSQL files are selected out of this phase.
+2. A local-mode frontend build followed by
+   `OK_CONSOLE_TEST_LOCAL_BROWSER=true pnpm test:postgres`: the existing
+   `--no-file-parallelism` mechanism executes both PostgreSQL files serially, including
+   the actual browser test. Neither suite nor any individual case is suppressed.
+
+The tagged-image workflow now provisions Chromium and its dependencies using the same
+installation sequence as the existing verification workflow; enabling the browser case
+must not depend on a runner cache. No image publication or deployment was invoked.
+
+The PostgreSQL step uses `if: ${{ !cancelled() }}` so a failure in another test does not
+prevent database verification. There is no `continue-on-error`: previous failures still
+fail the job. The normal build remains after verification; image publishing conditions
+are not relaxed. This partitions CI entrypoints rather than changing Vitest's global
+parallelism or the generic `pnpm test` command.
+
+### Reproduction and results
+
+Verified on macOS arm64 with **Node 22.23.4**, matching CI's Node major, pnpm 10.17.1,
+OpenSSL and Python 3. The official Node archive was checked against its published
+SHA-256. A fresh disposable PostgreSQL 16 container was bound only to loopback, using
+image digest `sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab`.
+No hosted GitHub Actions success is claimed by these local results.
+
+With `OK_CONSOLE_TEST_POSTGRES_URL` pointing only to that disposable database:
+
+```sh
+# Parallel phase; its nonzero baseline failure status remains visible.
+CI=true pnpm test:non-postgres
+
+# Separate CI step: runs even when the preceding test phase fails.
+VITE_CONSOLE_DATA_MODE=bff VITE_CONSOLE_AUTH_MODE=local pnpm build
+CI=true OK_CONSOLE_TEST_LOCAL_BROWSER=true pnpm test:postgres
+```
+
+| Check | Result |
+|---|---|
+| Database-enabled parallel phase, run twice | Each run: **768 passed, 23 known baseline failures, zero skipped** |
+| Serialized PostgreSQL phase, three consecutive runs against the same fresh database | Each run: **26 passed, zero failed, zero skipped**; **78 passing executions** in total |
+| Combined case catalog | **817 cases covered exactly once**: 791 parallel plus 26 serialized; no omissions or cross-phase duplicates, preserving parameterized-case multiplicity |
+| Combined result for one pass through both phases | **794 passed, 23 known baseline failures, zero skipped** — not a green full suite |
+| Remaining-failure comparison | Both parallel runs match all 23 baseline file/case identities exactly; no additional failure |
+| Scoped authentication/runtime/OIDC/Bootstrap/BreakGlass/local-profile/Workspace/App regressions | **118 passed, zero skipped** |
+| Lint; default and local-mode builds; diff whitespace check | Passed |
+| Both workflow YAML files and CI command partition | Syntax and structure verified; neither workflow invokes the unpartitioned parallel database path |
+
+The result catalogs were compared with the pre-correction full-run catalog, including
+parameterized test multiplicity. Database suites were executed with the required URL
+and browser flag, not counted as skipped or inferred from discovery alone. The
+disposable database was removed after verification.
+
+Recommendation after the isolation correction: **GO for review and merge of the bounded
+non-production feature**, subject to normal review/check policy and separate tracking
+of the 23 baseline failures. Keep PR #148 Draft until approved. No merge or deployment.

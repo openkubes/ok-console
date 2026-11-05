@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:non-postgres": "vitest run --exclude bff/security/postgresSessionStore.integration.test.ts --exclude bff/security/localIdentity.integration.test.mjs",
     "test:bff": "vitest run bff",
     "test:contract": "vitest run src/domain/presentationContract.test.ts",
     "test:deployment": "vitest run deploy/kubernetes",

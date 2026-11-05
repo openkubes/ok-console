@@ -108,6 +108,7 @@ export class PostgresSessionStore {
     codec,
     deploymentEpoch,
     authorizationRevisionValidator = null,
+    contextValidator = null,
     random = randomBytes,
     lifetimesFor = sessionLifetimesFor,
     now = () => new Date(),
@@ -119,20 +120,21 @@ export class PostgresSessionStore {
     this.codec = codec
     this.deploymentEpoch = deploymentEpoch
     this.authorizationRevisionValidator = authorizationRevisionValidator
+    this.contextValidator = contextValidator
     this.random = random
     this.lifetimesFor = lifetimesFor
     this.now = now
   }
 
-  async create({ subject, scope, permissions, authorizationRevision }) {
+  async create({ subject, scope, permissions, authorizationRevision }, database = this.pool) {
     validateSessionCreationInput({ subject, scope, permissions })
     assertStoreInput({ authorizationRevision, deploymentEpoch: this.deploymentEpoch })
     try {
-      const clock = await this.pool.query('SELECT clock_timestamp() AS database_now')
+      const clock = await database.query('SELECT clock_timestamp() AS database_now')
       const lifetime = this.lifetimesFor(subject.method)
       const values = issueValues({ random: this.random, lifetime, databaseNow: clock.rows[0].database_now })
       const envelope = this.codec.encrypt({ subject, scope, permissions })
-      const result = await this.pool.query(`
+      const result = await database.query(`
         INSERT INTO ok_console.sessions (
           session_digest, session_family_digest, context_envelope, key_id, csrf_digest,
           authentication_method, authorization_revision, deployment_epoch,
@@ -175,7 +177,9 @@ export class PostgresSessionStore {
         : await this.pool.query(`
           SELECT * FROM ok_console.sessions
           WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch])
-      return result.rows[0] ? rowContext(result.rows[0], this.codec) : null
+      const context = result.rows[0] ? rowContext(result.rows[0], this.codec) : null
+      if (context && this.contextValidator && !await this.contextValidator(context)) return null
+      return context
     } catch (error) {
       throw normalizeStoreFailure(error)
     }
@@ -198,6 +202,10 @@ export class PostgresSessionStore {
         return null
       }
       const oldContext = rowContext(row, this.codec)
+      if (this.contextValidator && !await this.contextValidator(oldContext, client)) {
+        await client.query('ROLLBACK')
+        return null
+      }
       const payload = {
         subject: oldContext.subject,
         scope: oldContext.scope,
@@ -234,6 +242,10 @@ export class PostgresSessionStore {
       await client.query('COMMIT')
       const values = { sessionId: newSessionId, csrfToken }
       const context = rowContext(inserted.rows[0], this.codec)
+      if (this.contextValidator && !await this.contextValidator(context, client)) {
+        await client.query("UPDATE ok_console.sessions SET revoked_at=clock_timestamp(),revoke_reason='LOCAL_ACCOUNT_CHANGED' WHERE session_digest=$1", [newDigest])
+        return null
+      }
       const remainingSeconds = Math.max(0, Math.floor((asDate(row.absolute_expires_at).getTime() - asDate(row.database_now).getTime()) / 1_000))
       return publicIssue({ values, context, maxAgeSeconds: remainingSeconds })
     } catch (error) {

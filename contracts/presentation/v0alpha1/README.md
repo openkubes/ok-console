@@ -100,3 +100,9 @@ does not receive backend credentials to follow that reference directly.
 
 Those capabilities require separate contracts and security reviews after the
 read-only slice is proven.
+
+## OK-214 assurance variant
+
+The paired provider/consumer add the closed assurance value `Local development` for
+ordinary local sessions; they must never render them as Break glass or MFA. Existing
+values retain their semantics. Older consumers fail closed on the new variant.

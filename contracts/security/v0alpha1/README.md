@@ -42,3 +42,12 @@ value. Session creation is limited to the OIDC callback and an independently
 disabled Bootstrap/BreakGlass verifier with durable throttle and audit Evidence.
 The browser receives only `ConsoleSession`; the internal authorization context,
 provider tokens, credentials, and opaque references never enter browser storage.
+
+## OK-214 ordinary local development variant
+
+`ConsoleSession` and internal context now explicitly accept method `Local` only behind
+the restricted server-side `ok-local` profile. Existing method semantics and envelope
+shape are unchanged. Older closed-method consumers reject this variant safely; deploy
+the updated consumer/provider together. Ordinary accounts have separate identity
+records and live revision checks, including restore/rotation. See
+[the local profile runbook](../../../docs/security/ok214-local-identity.md).

@@ -55,8 +55,14 @@ jobs:
           pnpm exec playwright install --with-deps chromium
       - name: Lint
         run: pnpm lint
-      - name: Test
-        run: pnpm test
+      - name: Test non-PostgreSQL suites in parallel
+        run: pnpm test:non-postgres
+      - name: Test PostgreSQL suites serially
+        # Run even if another test fails; keep its failure visible without losing DB evidence.
+        if: ${{ !cancelled() }}
+        run: |
+          VITE_CONSOLE_DATA_MODE=bff VITE_CONSOLE_AUTH_MODE=local pnpm build
+          OK_CONSOLE_TEST_LOCAL_BROWSER=true pnpm test:postgres
       - name: Build
         run: pnpm build
       - name: Browser and accessibility evidence

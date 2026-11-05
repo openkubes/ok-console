@@ -48,7 +48,7 @@ function SessionReview({ session, title, onEnter, onBack }: { session: Prototype
   </>
 }
 
-export default function AuthEntry({ onAuthenticated, authMode = 'prototype', onStartOidc, onAuthenticateLocal, serviceError, onRetry }: {
+function ExceptionalAuthEntry({ onAuthenticated, authMode = 'prototype', onStartOidc, onAuthenticateLocal, serviceError, onRetry }: {
   onAuthenticated: (session: PrototypeSession) => void
   authMode?: AuthMode
   onStartOidc?: () => void
@@ -179,4 +179,42 @@ export default function AuthEntry({ onAuthenticated, authMode = 'prototype', onS
       <footer className="auth-panel-footer"><span>Privacy</span><span>Security</span><span>OpenKubes</span><small>console.openkubes.io/v0alpha1</small></footer>
     </section>
   </main>
+}
+
+function OrdinaryLocalLogin({ onAuthenticated, onAuthenticateLocal, serviceError }: {
+  onAuthenticated: (session: PrototypeSession) => void
+  onAuthenticateLocal?: (credentials: LocalAccessCredentials) => Promise<PrototypeSession>
+  serviceError?: string
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (pending) return
+    setPending(true)
+    setError('')
+    try {
+      const session = await onAuthenticateLocal?.({ username, password, reason: '' })
+      if (!session) throw new Error()
+      setPassword('')
+      onAuthenticated(session)
+    } catch { setError('Local sign-in could not be completed.') }
+    finally { setPassword(''); setPending(false) }
+  }
+  return <main className="auth-shell"><section className="auth-panel" aria-label="Local sign in"><div className="auth-card">
+    <h1>Sign in to OpenKubes</h1><p>Local development · ok-local · password authentication without MFA. No external identity provider is required.</p>
+    {serviceError && <p role="alert">{serviceError}</p>}
+    <form className="auth-local-form" onSubmit={submit}>
+      <label>Username<input required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" maxLength={32}/></label>
+      <label>Password<input required type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" maxLength={256}/></label>
+      {error && <p role="alert">{error}</p>}
+      <button className="auth-primary" disabled={pending} type="submit">{pending ? 'Signing in…' : 'Sign in'}</button>
+    </form><p>Signing in grants no Kubernetes privileges. User administration remains CLI-only.</p>
+  </div></section></main>
+}
+
+export default function AuthEntry(props: Parameters<typeof ExceptionalAuthEntry>[0]) {
+  return props.authMode === 'local' ? <OrdinaryLocalLogin {...props}/> : <ExceptionalAuthEntry {...props}/>
 }

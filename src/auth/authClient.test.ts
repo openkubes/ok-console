@@ -105,3 +105,15 @@ describe('Console auth client', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 })
+
+describe('OK-214 ordinary local client boundary', () => {
+  it('uses a separate same-origin login and accepts only the ordinary Local method', async () => {
+    const ordinary = { ...localSession, data: { ...localSession.data, subject: { ...localSession.data.subject, method: 'Local', assurance: ['Password','LocalDevelopment'] } } }
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(ordinary), { status: 200 }))
+    const auth = createConsoleAuthClient({mode:'local',fetcher})
+    await expect(auth.authenticateLocal({username:'reader',password:'disposable-example-password',reason:''})).resolves.toMatchObject({method:'local',source:'Ordinary local account'})
+    expect(fetcher).toHaveBeenCalledWith('/api/console/v0/local-identity/login',expect.objectContaining({credentials:'same-origin',method:'POST'}))
+    const wrong = createConsoleAuthClient({mode:'local',fetcher:async()=>new Response(JSON.stringify(localSession))})
+    await expect(wrong.authenticateLocal({username:'reader',password:'disposable-example-password',reason:''})).rejects.toBeInstanceOf(ConsoleAuthError)
+  })
+})

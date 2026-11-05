@@ -263,8 +263,8 @@ for command_name in docker kind kubectl curl git; do
   }
 done
 
-[[ "${cluster_name}" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || {
-  echo 'OK_CONSOLE_KIND_CLUSTER must be a bounded lowercase name.' >&2
+[[ "${cluster_name}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || {
+  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 63 characters.' >&2
   exit 1
 }
 [[ "${local_port}" =~ ^[0-9]{4,5}$ ]] || {
@@ -323,7 +323,11 @@ if [[ "${candidate_image}" == "${default_image}" ]] && [[ -n "$(git -C "${reposi
   exit 1
 fi
 
-if kind get clusters | grep -Fxq "${cluster_name}"; then
+if ! existing_clusters="$(kind get clusters 2>/dev/null)"; then
+  echo 'Could not list existing Kind clusters; refusing to create a cluster.' >&2
+  exit 1
+fi
+if grep -Fxq "${cluster_name}" <<<"${existing_clusters}"; then
   echo "Kind cluster ${cluster_name} already exists; refusing to modify an unowned cluster." >&2
   echo 'Delete it explicitly or select a different OK_CONSOLE_KIND_CLUSTER.' >&2
   exit 1

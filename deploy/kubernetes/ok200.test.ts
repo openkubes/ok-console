@@ -31,7 +31,8 @@ if [[ "\${1:-}" == kustomize ]]; then
   printf 'apiVersion: v1\\nkind: Pod\\nspec:\\n  containers:\\n    - image: ok-console:ok-169-local\\n'
   exit 0
 fi
-[[ "\${1:-}" == --context && "\${2:-}" == kind-test ]] || fail "$@"
+expected_context="\${EXPECTED_KIND_CONTEXT:-kind-test}"
+[[ "\${1:-}" == --context && "\${2:-}" == "\${expected_context}" ]] || fail "$@"
 if [[ "\${3:-}" == apply ]]; then
   [[ "\${4:-}" == -f && "$#" == 5 ]] || fail "$@"
   exit 0
@@ -162,7 +163,9 @@ printf 'kind' >> "\${KIND_ARGV_LOG}"
 printf ' <%s>' "$@" >> "\${KIND_ARGV_LOG}"
 printf '\n' >> "\${KIND_ARGV_LOG}"
 case "\${1:-} \${2:-}" in
-  'get clusters') [[ "\${KUBECTL_SCENARIO}" != preflight-already-exists ]] || printf 'test\\n' ;;
+  'get clusters')
+    if [[ "\${KUBECTL_SCENARIO}" == preflight-kind-list-fail ]]; then exit 17; fi
+    [[ "\${KUBECTL_SCENARIO}" != preflight-already-exists ]] || printf 'test\\n' ;;
   'create cluster')
     if [[ "\${KUBECTL_SCENARIO}" == main-baseline-trace ]]; then printf 'kind-create\n' >> "\${BASELINE_TRACE}"; fi
     : ;;
@@ -441,6 +444,65 @@ describe('OK-200 verification preflight', () => {
       const argv = await readFile(result.env.KIND_ARGV_LOG!, 'utf8')
       expect(argv).toContain(`kind <create> <cluster> <--config> <${kindConfig}> <--name> <test> <--kubeconfig> <${kubeconfig}>`)
       expect(await readFile(result.env.KUBECTL_ARGV_LOG!, 'utf8')).toContain('<--context> <kind-test>')
+    })
+  })
+
+  it('accepts owner-specific Kind DNS labels of 60 and 63 characters without real cluster operations', async () => {
+    const ownerNames = [
+      'ok-local-e2e-arash-20261105-edd83ae5428019db1593dd56e6105916',
+      `${'a'.repeat(30)}-${'b'.repeat(32)}`,
+    ]
+    expect(ownerNames.map((name) => name.length)).toEqual([60, 63])
+    for (const clusterName of ownerNames) {
+      await withTestTempDirectory(async (temporaryDirectory) => {
+        const kindConfig = join(temporaryDirectory, 'kind.yaml')
+        const kubeconfig = join(temporaryDirectory, 'kubeconfig')
+        await writeFile(kindConfig, `kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: ${clusterName}\n`)
+        const result = await runMain('integration-isolated', {
+          OK_CONSOLE_KIND_CLUSTER: clusterName,
+          OK_CONSOLE_KIND_CONFIG: kindConfig,
+          OK_CONSOLE_KUBECONFIG: kubeconfig,
+          OK_CONSOLE_MIN_KIND_VERSION: '0.33.0',
+          EXPECTED_KIND_CONTEXT: `kind-${clusterName}`,
+          EXPECTED_KUBECONFIG: kubeconfig,
+        })
+        const argv = await readFile(result.env.KIND_ARGV_LOG!, 'utf8')
+        expect(argv).toContain(`<${clusterName}>`)
+        expect(argv).toContain(`kind <create> <cluster> <--config> <${kindConfig}> <--name> <${clusterName}> <--kubeconfig> <${kubeconfig}>`)
+      })
+    }
+  })
+
+  it('rejects a 64-character Kind name before cluster creation', async () => {
+    const clusterName = `${'a'.repeat(31)}-${'b'.repeat(32)}`
+    expect(clusterName).toHaveLength(64)
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      await writeFile(kindConfig, `kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: ${clusterName}\n`)
+      const run = runMain('integration-isolated', {
+        OK_CONSOLE_KIND_CLUSTER: clusterName,
+        OK_CONSOLE_KIND_CONFIG: kindConfig,
+        OK_CONSOLE_KUBECONFIG: join(temporaryDirectory, 'kubeconfig'),
+      })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('lowercase DNS label of at most 63 characters'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expect(readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+  })
+
+  it('fails closed when listing Kind clusters fails', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('preflight-kind-list-fail', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Could not list existing Kind clusters; refusing to create a cluster.'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toBe('kind <get> <clusters>\n')
+      await expect(readFile(failure.env.DOCKER_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     })
   })
 

@@ -241,6 +241,7 @@ main() {
   local_port="${OK_CONSOLE_LOCAL_PORT:-18787}"
   kind_config="${OK_CONSOLE_KIND_CONFIG:-}"
   isolated_kubeconfig="${OK_CONSOLE_KUBECONFIG:-}"
+  minimum_kind_version="${OK_CONSOLE_MIN_KIND_VERSION:-}"
   verification_started_seconds="${SECONDS}"
   trap on_exit EXIT
   source_revision="$(git -C "${repository_root}" rev-parse HEAD)"
@@ -288,6 +289,26 @@ done
       exit 1
     }
     export KUBECONFIG="${isolated_kubeconfig}"
+  fi
+  if [[ -n "${minimum_kind_version}" ]]; then
+    [[ "${minimum_kind_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+      echo 'OK_CONSOLE_MIN_KIND_VERSION must use major.minor.patch format.' >&2
+      exit 1
+    }
+    kind_version_output="$(kind version)"
+    [[ "${kind_version_output}" =~ kind\ v([0-9]+)\.([0-9]+)\.([0-9]+) ]] || {
+      echo 'Could not determine the installed Kind version.' >&2
+      exit 1
+    }
+    installed_kind_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+    IFS='.' read -r installed_major installed_minor installed_patch <<<"${installed_kind_version}"
+    IFS='.' read -r minimum_major minimum_minor minimum_patch <<<"${minimum_kind_version}"
+    if (( 10#${installed_major} < 10#${minimum_major} ||
+          (10#${installed_major} == 10#${minimum_major} && 10#${installed_minor} < 10#${minimum_minor}) ||
+          (10#${installed_major} == 10#${minimum_major} && 10#${installed_minor} == 10#${minimum_minor} && 10#${installed_patch} < 10#${minimum_patch}) )); then
+      echo "Kind ${minimum_kind_version} or newer is required; found ${installed_kind_version}." >&2
+      exit 1
+    fi
   fi
 [[ "${candidate_image}" =~ ^[A-Za-z0-9._/@:-]+$ ]] || {
   echo 'OK_CONSOLE_IMAGE contains unsupported characters.' >&2

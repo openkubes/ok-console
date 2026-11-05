@@ -172,6 +172,8 @@ case "\${1:-} \${2:-}" in
     [[ "\${KUBECTL_SCENARIO}" != main-success-cleanup-fail ]] || exit 8
     : ;;
   'version ')
+    if [[ "\${KUBECTL_SCENARIO}" == integration-isolated ]]; then printf 'kind v0.33.0 go1.27.0 darwin/arm64\\n'; exit 0; fi
+    if [[ "\${KUBECTL_SCENARIO}" == integration-old-kind ]]; then printf 'kind v0.32.9 go1.27.0 darwin/arm64\\n'; exit 0; fi
     if [[ "\${KUBECTL_SCENARIO}" == main-rollout-fail ]]; then
       printf 'started\\n' >"\${KIND_CAPTURE_MARKER}"
       trap '' TERM
@@ -433,11 +435,29 @@ describe('OK-200 verification preflight', () => {
       const result = await runMain('integration-isolated', {
         OK_CONSOLE_KIND_CONFIG: kindConfig,
         OK_CONSOLE_KUBECONFIG: kubeconfig,
+        OK_CONSOLE_MIN_KIND_VERSION: '0.33.0',
         EXPECTED_KUBECONFIG: kubeconfig,
       })
       const argv = await readFile(result.env.KIND_ARGV_LOG!, 'utf8')
       expect(argv).toContain(`kind <create> <cluster> <--config> <${kindConfig}> <--name> <test> <--kubeconfig> <${kubeconfig}>`)
       expect(await readFile(result.env.KUBECTL_ARGV_LOG!, 'utf8')).toContain('<--context> <kind-test>')
+    })
+  })
+
+  it('rejects Kind older than the isolated kubeconfig contract before resource creation', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      await writeFile(kindConfig, 'kind: Cluster\n')
+      const run = runMain('integration-old-kind', {
+        OK_CONSOLE_KIND_CONFIG: kindConfig,
+        OK_CONSOLE_KUBECONFIG: join(temporaryDirectory, 'kubeconfig'),
+        OK_CONSOLE_MIN_KIND_VERSION: '0.33.0',
+      })
+      await expect(run).rejects.toMatchObject({ stderr: expect.stringContaining('Kind 0.33.0 or newer is required') })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toContain('kind <version>')
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).not.toContain('kind <create>')
     })
   })
 

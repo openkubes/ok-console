@@ -239,6 +239,8 @@ main() {
   cluster_name="${OK_CONSOLE_KIND_CLUSTER:-ok-console-ok169}"
   keep_cluster="${OK_CONSOLE_KEEP_CLUSTER:-false}"
   local_port="${OK_CONSOLE_LOCAL_PORT:-18787}"
+  kind_config="${OK_CONSOLE_KIND_CONFIG:-}"
+  isolated_kubeconfig="${OK_CONSOLE_KUBECONFIG:-}"
   verification_started_seconds="${SECONDS}"
   trap on_exit EXIT
   source_revision="$(git -C "${repository_root}" rev-parse HEAD)"
@@ -268,6 +270,25 @@ done
   echo 'OK_CONSOLE_LOCAL_PORT must be a four- or five-digit port.' >&2
   exit 1
 }
+  if [[ -n "${kind_config}" || -n "${isolated_kubeconfig}" ]]; then
+    [[ -n "${kind_config}" && -n "${isolated_kubeconfig}" ]] || {
+      echo 'OK_CONSOLE_KIND_CONFIG and OK_CONSOLE_KUBECONFIG must be supplied together.' >&2
+      exit 1
+    }
+    [[ "${kind_config}" == /* && "${isolated_kubeconfig}" == /* && "${kind_config}" != *$'\n'* && "${isolated_kubeconfig}" != *$'\n'* ]] || {
+      echo 'Isolated Kind config and kubeconfig paths must be absolute single-line paths.' >&2
+      exit 1
+    }
+    [[ -f "${kind_config}" && ! -L "${kind_config}" ]] || {
+      echo 'Isolated Kind config must be an existing regular non-symlink file.' >&2
+      exit 1
+    }
+    [[ ! -e "${isolated_kubeconfig}" && ! -L "${isolated_kubeconfig}" ]] || {
+      echo 'Isolated kubeconfig destination already exists; refusing to merge or overwrite it.' >&2
+      exit 1
+    }
+    export KUBECONFIG="${isolated_kubeconfig}"
+  fi
 [[ "${candidate_image}" =~ ^[A-Za-z0-9._/@:-]+$ ]] || {
   echo 'OK_CONSOLE_IMAGE contains unsupported characters.' >&2
   exit 1
@@ -287,7 +308,11 @@ if kind get clusters | grep -Fxq "${cluster_name}"; then
   exit 1
 fi
 netstat_baseline="$("${failure_capture_helper}" snapshot-netstat 2>/dev/null || true)"
-kind create cluster --name "${cluster_name}" --wait 90s
+if [[ -n "${kind_config}" ]]; then
+  kind create cluster --config "${kind_config}" --name "${cluster_name}" --kubeconfig "${isolated_kubeconfig}" --wait 90s
+else
+  kind create cluster --name "${cluster_name}" --wait 90s
+fi
 created_cluster=true
 
 if [[ "${candidate_image}" == "${default_image}" ]]; then

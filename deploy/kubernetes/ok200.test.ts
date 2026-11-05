@@ -16,6 +16,7 @@ let fixtureDirectory = ''
 let missingCurlDirectory = ''
 let noTimeoutDirectory = ''
 let baselineTraceVerifier = ''
+let bashExecutable = '/bin/bash'
 let execution = 0
 
 const kubectlStub = `#!/usr/bin/env bash
@@ -23,6 +24,7 @@ set -Eeuo pipefail
 printf 'kubectl' >> "\${KUBECTL_ARGV_LOG}"
 printf ' <%s>' "$@" >> "\${KUBECTL_ARGV_LOG}"
 printf '\n' >> "\${KUBECTL_ARGV_LOG}"
+if [[ -n "\${EXPECTED_KUBECONFIG:-}" ]]; then [[ "\${KUBECONFIG:-}" == "\${EXPECTED_KUBECONFIG}" ]] || { printf 'unexpected KUBECONFIG: %s\\n' "\${KUBECONFIG:-missing}" >&2; exit 2; }; fi
 fail() { printf 'unexpected kubectl invocation: %s\\n' "$*" >&2; exit 2; }
 if [[ "\${1:-}" == kustomize ]]; then
   [[ "$#" == 2 ]] || fail "$@"
@@ -66,7 +68,7 @@ elif [[ " $* " == *" get pods "* ]]; then
         printf 'current-pod|current-uid|True||Running\\nold-pod|old-uid|True||Running\\n'
       fi
       ;;
-    valid|main-forward-fail|main-transient|main-persistent-failure|main-forward-exit|main-success-cleanup-fail) printf 'current-pod|current-uid|True||Running\\n' ;;
+    valid|integration-isolated|main-forward-fail|main-transient|main-persistent-failure|main-forward-exit|main-success-cleanup-fail) printf 'current-pod|current-uid|True||Running\\n' ;;
     *) printf 'unknown scenario: %s\\n' "\${KUBECTL_SCENARIO}" >&2; exit 2 ;;
   esac
 elif [[ "\${1:-}" == port-forward ]]; then
@@ -113,7 +115,7 @@ server.once('error', (error) => {
 })
 server.listen(port, '127.0.0.1', () => {
   let line = ''
-  if (process.env.KUBECTL_SCENARIO === 'ready' || process.env.KUBECTL_SCENARIO.startsWith('main-') || process.env.KUBECTL_SCENARIO === 'line-then-exit' || process.env.KUBECTL_SCENARIO === 'filter-exit') {
+  if (process.env.KUBECTL_SCENARIO === 'ready' || process.env.KUBECTL_SCENARIO === 'integration-isolated' || process.env.KUBECTL_SCENARIO.startsWith('main-') || process.env.KUBECTL_SCENARIO === 'line-then-exit' || process.env.KUBECTL_SCENARIO === 'filter-exit') {
     line = 'Forwarding from 127.0.0.1:' + port + ' -> 8787'
   } else if (process.env.KUBECTL_SCENARIO === 'wrong-port') {
     line = 'Forwarding from 127.0.0.1:' + (port + 1) + ' -> 8787'
@@ -246,7 +248,7 @@ const createIsolatedToolDirectory = async (name: string, omitted: string) => {
   const directory = join(fixtureDirectory, name)
   await mkdir(directory)
   const tools = new Map([
-    ['bash', '/bin/bash'],
+    ['bash', bashExecutable],
     ['dirname', '/usr/bin/dirname'],
     ['mktemp', '/usr/bin/mktemp'],
     ['rm', '/usr/bin/rm'],
@@ -268,6 +270,7 @@ const createIsolatedToolDirectory = async (name: string, omitted: string) => {
 }
 
 beforeAll(async () => {
+  bashExecutable = (await exec('bash', ['-c', 'command -v bash'])).stdout.trim()
   fixtureDirectory = await mkdtemp(join(tmpdir(), 'ok-console-ok200-'))
   const files = new Map([
     ['kubectl', kubectlStub],
@@ -422,6 +425,49 @@ const expectNoKubectlOrDockerCalls = async (env: NodeJS.ProcessEnv) => {
 }
 
 describe('OK-200 verification preflight', () => {
+  it('uses an isolated kubeconfig and owner-rendered Kind config when supplied', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      const kubeconfig = join(temporaryDirectory, 'kubeconfig')
+      await writeFile(kindConfig, 'kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: test\n')
+      const result = await runMain('integration-isolated', {
+        OK_CONSOLE_KIND_CONFIG: kindConfig,
+        OK_CONSOLE_KUBECONFIG: kubeconfig,
+        EXPECTED_KUBECONFIG: kubeconfig,
+      })
+      const argv = await readFile(result.env.KIND_ARGV_LOG!, 'utf8')
+      expect(argv).toContain(`kind <create> <cluster> <--config> <${kindConfig}> <--name> <test> <--kubeconfig> <${kubeconfig}>`)
+      expect(await readFile(result.env.KUBECTL_ARGV_LOG!, 'utf8')).toContain('<--context> <kind-test>')
+    })
+  })
+
+  it('rejects only one isolated path before calling Docker or kubectl', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      await writeFile(kindConfig, 'kind: Cluster\n')
+      const run = runMain('valid', { OK_CONSOLE_KIND_CONFIG: kindConfig, OK_CONSOLE_KUBECONFIG: undefined })
+      await expect(run).rejects.toMatchObject({ stderr: expect.stringContaining('must be supplied together') })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+    })
+  })
+
+  it('refuses to overwrite an existing isolated kubeconfig, including a symlink', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      const kubeconfig = join(temporaryDirectory, 'kubeconfig')
+      const target = join(temporaryDirectory, 'global-config')
+      await writeFile(kindConfig, 'kind: Cluster\n')
+      await writeFile(target, 'must remain untouched')
+      await symlink(target, kubeconfig)
+      const run = runMain('integration-isolated', { OK_CONSOLE_KIND_CONFIG: kindConfig, OK_CONSOLE_KUBECONFIG: kubeconfig })
+      await expect(run).rejects.toMatchObject({ stderr: expect.stringContaining('already exists') })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(await readFile(target, 'utf8')).toBe('must remain untouched')
+    })
+  })
+
   it('does not run kubectl or docker when a required tool is missing', async () => {
     await withTestTempDirectory(async (temporaryDirectory) => {
       const run = runMain('preflight-missing-tool', { TMPDIR: temporaryDirectory }, missingCurlDirectory)

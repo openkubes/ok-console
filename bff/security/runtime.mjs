@@ -1,3 +1,5 @@
+import { LocalIdentity, ordinaryThrottlePool } from './localIdentity.mjs'
+import { createLocalIdentityHttp, validateLocalIdentityProfile } from './localIdentityHttp.mjs'
 import { timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -230,6 +232,8 @@ export const createSessionRuntime = async ({
   auditFactory = (configuration) => new PostgresLocalAccessAudit(configuration),
   authenticationAuditFactory = (configuration) => new PostgresAuthenticationAudit(configuration),
 } = {}) => {
+  const ordinaryLocal = validateLocalIdentityProfile(env)
+  let identity
   const mode = env.OK_CONSOLE_SESSION_STORE_MODE ?? 'disabled'
   if (mode === 'disabled') {
     if ((env.OK_CONSOLE_LOCAL_ACCESS_MODE ?? 'disabled') !== 'disabled') {
@@ -284,7 +288,13 @@ export const createSessionRuntime = async ({
       pool,
       codec,
       deploymentEpoch,
-      authorizationRevisionValidator: exactRevision(authorizationRevision),
+      authorizationRevisionValidator: async (input) => {
+        if (ordinaryLocal && input.revision.startsWith('local:')) {
+          return identity.current({ subject: { id: input.subjectId, method: 'Local' }, authorizationRevision: input.revision })
+        }
+        return exactRevision(authorizationRevision)(input)
+      },
+      contextValidator: async (context, database) => context.subject.method !== 'Local' || (ordinaryLocal && identity && await identity.current(context, database)),
     })
   } catch (error) {
     await pool.end().catch(() => {})
@@ -315,7 +325,7 @@ export const createSessionRuntime = async ({
         clientId,
         clientSecret,
         timeoutSeconds: boundedInteger(env, 'OK_CONSOLE_OIDC_TIMEOUT_SECONDS', 5, 1, 30),
-      })
+      }).catch((error) => { if (!ordinaryLocal) throw error; return null })
       const auditPepper = await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', fileReader)
       if (!BASE64_32_BYTE_KEY_PATTERN.test(auditPepper)) throw new SessionRuntimeConfigurationError('The authentication audit pepper file is invalid.')
       authenticationAudit = authenticationAuditFactory({ pool, pepper: Buffer.from(auditPepper, 'base64') })
@@ -326,7 +336,7 @@ export const createSessionRuntime = async ({
         authorizationRevision,
         subjects,
       })
-      oidcHandler = createOidcHttpHandler({
+      oidcHandler = protocol ? createOidcHttpHandler({
         protocol,
         transactionStore,
         sessionStore,
@@ -334,7 +344,12 @@ export const createSessionRuntime = async ({
         redirectUri,
         successRedirect,
         audit: (event) => authenticationAudit.record(event),
-      })
+      }) : async ({ response, pathname }) => {
+        if (!['/api/console/v0/auth/oidc/start','/api/console/v0/auth/oidc/callback'].includes(pathname)) return false
+        response.writeHead(503, { 'Cache-Control': 'no-store' })
+        response.end()
+        return true
+      }
     } catch (error) {
       await pool.end().catch(() => {})
       throw error
@@ -365,6 +380,10 @@ export const createSessionRuntime = async ({
       if (!authenticationAudit) authenticationAudit = authenticationAuditFactory({ pool, pepper })
       const verifier = createLocalAccessVerifier({
         mode: method, accounts, throttle, sessionStore, authorizationRevision,
+        isEnabled: ordinaryLocal && method === 'Bootstrap' ? async () => {
+          const result = await pool.query('SELECT initialized FROM ok_identity.state WHERE singleton=true')
+          return result.rowCount === 1 && (result.rows[0].initialized === false || env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true')
+        } : undefined,
         audit: async (event) => {
           await auditStore.record(event)
           await authenticationAudit.record(event)
@@ -376,9 +395,21 @@ export const createSessionRuntime = async ({
       throw error
     }
   }
+  let localIdentityHandler = null
+  if (ordinaryLocal) {
+    const pepperValue = await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', fileReader)
+    if (!BASE64_32_BYTE_KEY_PATTERN.test(pepperValue)) throw new SessionRuntimeConfigurationError('Invalid local throttle configuration.')
+    identity = new LocalIdentity({ pool, sessions: sessionStore,
+      throttle: throttleFactory({ pool: ordinaryThrottlePool(pool), pepper: Buffer.from(pepperValue, 'base64') }),
+      recoveryEnabled: env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true',
+      scope: { environmentId, tenantIds: [tenantId] }, authorizationRevision })
+    localIdentityHandler = createLocalIdentityHttp({ identity, sessions: sessionStore, expectedOrigin })
+    if (!authenticationAudit) authenticationAudit = authenticationAuditFactory({ pool, pepper: Buffer.from(pepperValue, 'base64') })
+  }
   let closed = false
   const requiredRelations = [
     'ok_console.sessions',
+    ...(ordinaryLocal ? ['ok_identity.accounts','ok_identity.state','ok_identity.audit','ok_identity.login_throttle','ok_console.local_access_throttle','ok_console.authentication_audit'] : []),
     ...(env.OK_CONSOLE_OIDC_ENABLED === 'true' ? ['ok_console.oidc_transactions'] : []),
     ...(localAccessMode !== 'disabled' ? ['ok_console.local_access_throttle', 'ok_console.local_access_audit'] : []),
     ...((env.OK_CONSOLE_OIDC_ENABLED === 'true' || localAccessMode !== 'disabled') ? ['ok_console.authentication_audit'] : []),
@@ -403,6 +434,7 @@ export const createSessionRuntime = async ({
     oidcHandler,
     localAccessHandler,
     authenticationAudit,
+    localIdentityHandler,
     ready,
     close: async () => {
       if (closed) return

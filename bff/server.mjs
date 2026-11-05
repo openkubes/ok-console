@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { createServer as createHttpsServer } from 'node:https'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'node:http'
@@ -9,7 +11,7 @@ import { createClusterDryRunHttpAdapter } from './adapters/createClusterDryRun.m
 
 export const createConsoleServer = async ({
   env = process.env,
-  serverFactory = createServer,
+  serverFactory,
   sessionRuntimeFactory = createSessionRuntime,
   sourceFactory = createObservedStateSource,
   runtimeHttpFactory = createRuntimeHttpHandler,
@@ -34,13 +36,25 @@ export const createConsoleServer = async ({
     oidcHandler: sessionRuntime.oidcHandler,
     localAccessHandler: sessionRuntime.localAccessHandler,
     authenticationAudit: sessionRuntime.authenticationAudit,
+    localIdentityHandler: sessionRuntime.localIdentityHandler,
     enableFailureInjection: env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true',
     dryRunExecutor,
     requestObserver: ({ method, pathname, correlationId }) => {
       console.log(`${method} ${pathname} · ${correlationId}`)
     },
   })
-  const server = serverFactory(runtimeHttpFactory({ apiHandler, readiness: sessionRuntime.ready }))
+  let factory = serverFactory ?? createServer
+  if (env.OK_CONSOLE_LOCAL_IDENTITY_ENABLED === 'true') {
+    const tlsFile = async (name) => {
+      if (!env[name]?.startsWith('/')) throw new Error('Local HTTPS requires absolute certificate/key paths.')
+      const bytes = await readFile(env[name])
+      if (!bytes.length || bytes.length > 65536) throw new Error('Invalid local HTTPS material.')
+      return bytes
+    }
+    const tls = { cert: await tlsFile('OK_CONSOLE_LOCAL_TLS_CERT_FILE'), key: await tlsFile('OK_CONSOLE_LOCAL_TLS_KEY_FILE'), minVersion: 'TLSv1.2' }
+    factory = serverFactory ?? ((handler) => createHttpsServer(tls, handler))
+  }
+  const server = factory(runtimeHttpFactory({ apiHandler, readiness: sessionRuntime.ready }))
   return { server, sessionRuntime, host, port, sourceMode: env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture' }
 }
 
@@ -48,7 +62,7 @@ const startConsoleServer = async () => {
   const runtime = await createConsoleServer()
   const { server, sessionRuntime, host, port, sourceMode } = runtime
   server.listen(port, host, () => {
-    console.log(`OpenKubes Console runtime listening on http://${host}:${port}`)
+    console.log(`OpenKubes Console runtime listening on ${process.env.OK_CONSOLE_LOCAL_IDENTITY_ENABLED === 'true' ? 'https' : 'http'}://${host}:${port}`)
     console.log(`Observed-state source: ${sourceMode}`)
     console.log(`Failure injection: ${process.env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true' ? 'enabled' : 'disabled'}`)
     console.log(`Session store: ${sessionRuntime.mode}`)

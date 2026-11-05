@@ -75,7 +75,7 @@ export class PostgresLocalAccessAudit {
   }
 }
 
-export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionStore, authorizationRevision, audit = async () => {}, derive = scrypt }) => {
+export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionStore, authorizationRevision, audit = async () => {}, derive = scrypt, isEnabled = async () => true }) => {
   if (!['Bootstrap', 'BreakGlass'].includes(mode) || !Array.isArray(accounts) || !throttle || !sessionStore?.create) {
     throw new LocalAccessError('INVALID_CONFIGURATION')
   }
@@ -85,7 +85,7 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
     if (!validInput({ username, password: input?.password, reason: input?.reason })) throw new LocalAccessError()
     let isBlocked
     try {
-      isBlocked = await throttle.blocked(username)
+      isBlocked = !await isEnabled() || await throttle.blocked(username)
     } catch {
       throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
     }

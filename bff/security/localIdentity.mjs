@@ -44,7 +44,7 @@ export class LocalIdentity {
   }
   async current(context, db = this.pool) {
     if (context.subject.method !== 'Local') return true
-    const result = await db.query('SELECT id,enabled,revision FROM ok_identity.accounts WHERE id=$1', [context.subject.id])
+    const result = await db.query('SELECT id,enabled,revision FROM ok_identity.accounts JOIN ok_identity.state ON singleton AND initialized WHERE id=$1', [context.subject.id])
     const row = result.rows[0]
     return !!row?.enabled && revisionFor(row) === context.authorizationRevision
   }
@@ -65,7 +65,9 @@ export class LocalIdentity {
     // Hash only after authenticating/authorizing the request. Never expose verifier fields.
     return this.transaction(async (db) => {
       // One durable lock serializes last-admin decisions, one-time bootstrap and recovery.
-      await db.query('SELECT * FROM ok_identity.state WHERE singleton=true FOR UPDATE')
+      const lockedState = await db.query('SELECT * FROM ok_identity.state WHERE singleton=true FOR UPDATE')
+      if (lockedState.rowCount !== 1) throw new IdentityError()
+      if (operation === 'recover' && !lockedState.rows[0].initialized) throw new IdentityError(409)
       await this.actor(db, context, permission)
       if (operation === 'list') {
         const result = await db.query('SELECT id,username,enabled,administrator FROM ok_identity.accounts ORDER BY username LIMIT 1000')
@@ -92,6 +94,10 @@ export class LocalIdentity {
         if (context.subject.method !== 'Bootstrap' || state.rows[0]?.initialized !== false) throw new IdentityError(409)
       }
       if (operation === 'create' && input.consoleReader !== true) throw new IdentityError(400)
+      if (operation === 'create') {
+        const count = await db.query('SELECT count(*)::int AS count FROM ok_identity.accounts')
+        if (count.rows[0].count >= 1000) throw new IdentityError(409)
+      }
       const salt = randomBytes(16).toString('base64')
       const verifier = (await this.hash(input.password, Buffer.from(salt, 'base64'))).toString('base64')
       let row
@@ -126,7 +132,7 @@ export class LocalIdentity {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
-    const selected = await this.pool.query('SELECT * FROM ok_identity.accounts WHERE username=$1', [username])
+    const selected = await this.pool.query('SELECT a.* FROM ok_identity.accounts a JOIN ok_identity.state s ON s.singleton AND s.initialized WHERE username=$1', [username])
     const row = selected.rows[0]
     const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
     const expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)

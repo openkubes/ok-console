@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 
-const METHODS = new Set(['OIDC', 'Bootstrap', 'BreakGlass'])
+const METHODS = new Set(['OIDC', 'Bootstrap', 'BreakGlass', 'Local'])
 const OUTCOMES = new Set(['Started', 'Granted', 'Denied', 'Restored', 'Rotated', 'Revoked'])
 const CAUSES = new Set(['REQUESTED', 'VERIFIED', 'INVALID_CREDENTIAL', 'THROTTLED', 'UNMAPPED_SUBJECT', 'TRANSACTION_INVALID', 'CALLBACK_REJECTED', 'SESSION_INVALID', 'CSRF_REJECTED', 'AUDIT_FAILED'])
 

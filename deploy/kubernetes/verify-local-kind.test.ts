@@ -86,16 +86,17 @@ afterEach(async () => {
 })
 
 describe('local Kind verifier bounded name and safe diagnostics contract', () => {
-  it('accepts 50 characters and rejects 51 before Kind inventory or create', async () => {
+  it('accepts 49 characters and rejects 50 before Kind inventory or create', async () => {
     const f = await fixture()
-    const tooLong = f.run('a'.repeat(51))
+    const tooLong = f.run('a'.repeat(50))
     expect(tooLong.status).not.toBe(0)
     expect(tooLong.output).toContain('stage=preflight code=KIND_NAME_TOO_LONG')
+    expect(tooLong.output).toContain('at most 49 characters')
     expect(tooLong.output).not.toContain('mock-')
     expect(await readFile(f.kindLog).then(() => true).catch(() => false)).toBe(false)
 
     await writeFile(f.kindLog, '')
-    const accepted = f.run('a'.repeat(50), { MOCK_KIND_CREATE_FAIL: 'true' })
+    const accepted = f.run('a'.repeat(49), { MOCK_KIND_CREATE_FAIL: 'true' })
     expect(accepted.status).not.toBe(0)
     expect(accepted.output).toContain('stage=kind_create code=KIND_CONFIG_OR_CREATE_FAILED')
     expect(await readFile(f.kindLog, 'utf8')).toContain('create cluster')

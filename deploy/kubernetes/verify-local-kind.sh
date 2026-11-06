@@ -279,16 +279,16 @@ for command_name in docker kind kubectl curl git; do
   }
 done
 
-if (( ${#cluster_name} > 50 )); then
+if (( ${#cluster_name} > 49 )); then
   failure_stage="preflight"
   failure_code="KIND_NAME_TOO_LONG"
-  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 50 characters.' >&2
+  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 49 characters.' >&2
   exit 1
 fi
-[[ "${cluster_name}" =~ ^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$ ]] || {
+[[ "${cluster_name}" =~ ^[a-z0-9]([a-z0-9-]{0,47}[a-z0-9])?$ ]] || {
   failure_stage="preflight"
   failure_code="UNKNOWN"
-  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 50 characters.' >&2
+  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 49 characters.' >&2
   exit 1
 }
 [[ "${local_port}" =~ ^[0-9]{4,5}$ ]] || {

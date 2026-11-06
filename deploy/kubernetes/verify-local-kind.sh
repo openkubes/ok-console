@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
   echo 'verify-local-kind.sh requires Bash 4.4 or newer.' >&2
+  echo 'OK_LOCAL_DIAGNOSTIC stage=unknown code=UNKNOWN' >&2
   exit 1
 fi
 
@@ -17,6 +18,8 @@ created_cluster=false
 port_forward_pid=""
 verification_started_seconds=0
 netstat_baseline=""
+failure_stage="unknown"
+failure_code="UNKNOWN"
 
 cleanup() {
   if [[ -n "${port_forward_pid}" ]]; then
@@ -81,6 +84,8 @@ on_exit() {
   cleanup_status="$?"
   if (( original_status == 0 && cleanup_status != 0 )); then
     original_status="${cleanup_status}"
+    failure_stage="unknown"
+    failure_code="UNKNOWN"
     if (( original_status != 130 && original_status != 143 )); then
       capture_failure
     fi
@@ -89,6 +94,13 @@ on_exit() {
   [[ -z "${port_forward_log}" ]] || rm -f "${port_forward_log}"
   if [[ -n "${failure_artifact_dir}" ]]; then
     printf 'Failure diagnostics: %s\n' "${failure_artifact_dir}" >&2
+  fi
+  if (( original_status != 0 && original_status != 130 && original_status != 143 )); then
+    case "${failure_stage}:${failure_code}" in
+      preflight:KIND_NAME_TOO_LONG|kind_inventory:KIND_LIST_FAILED|kind_create:KIND_CONFIG_OR_CREATE_FAILED|image_deploy:IMAGE_OR_DEPLOY_FAILED|temp_file:TEMP_FILE_PREPARATION_FAILED|unknown:UNKNOWN) ;;
+      *) failure_stage="unknown"; failure_code="UNKNOWN" ;;
+    esac
+    printf 'OK_LOCAL_DIAGNOSTIC stage=%s code=%s\n' "${failure_stage}" "${failure_code}" >&2
   fi
   exit "${original_status}"
 }
@@ -239,15 +251,22 @@ main() {
   cluster_name="${OK_CONSOLE_KIND_CLUSTER:-ok-console-ok169}"
   keep_cluster="${OK_CONSOLE_KEEP_CLUSTER:-false}"
   local_port="${OK_CONSOLE_LOCAL_PORT:-18787}"
+  kind_config="${OK_CONSOLE_KIND_CONFIG:-}"
+  isolated_kubeconfig="${OK_CONSOLE_KUBECONFIG:-}"
+  minimum_kind_version="${OK_CONSOLE_MIN_KIND_VERSION:-}"
   verification_started_seconds="${SECONDS}"
   trap on_exit EXIT
-  source_revision="$(git -C "${repository_root}" rev-parse HEAD)"
-  short_revision="$(git -C "${repository_root}" rev-parse --short=12 HEAD)"
+  source_revision="$(git -C "${repository_root}" rev-parse HEAD 2>/dev/null)"
+  short_revision="$(git -C "${repository_root}" rev-parse --short=12 HEAD 2>/dev/null)"
   expected_revision="${OK_CONSOLE_EXPECTED_REVISION:-${source_revision}}"
   default_image="ok-console:ok-169-${short_revision}"
   candidate_image="${OK_CONSOLE_IMAGE:-${default_image}}"
-  rendered_manifest="$(mktemp -t ok-console-ok169.XXXXXX.yaml)"
-  port_forward_log="$(mktemp -t ok-console-ok169-port-forward.XXXXXX.log)"
+  failure_stage="temp_file"
+  failure_code="TEMP_FILE_PREPARATION_FAILED"
+  rendered_manifest="$(mktemp -t ok-console-ok169.XXXXXX.yaml 2>/dev/null)"
+  port_forward_log="$(mktemp -t ok-console-ok169-port-forward.XXXXXX.log 2>/dev/null)"
+  failure_stage="unknown"
+  failure_code="UNKNOWN"
 [[ -x "${failure_capture_helper}" ]] || {
   echo 'Required local Kind failure-capture helper is missing or not executable.' >&2
   exit 1
@@ -260,14 +279,61 @@ for command_name in docker kind kubectl curl git; do
   }
 done
 
-[[ "${cluster_name}" =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || {
-  echo 'OK_CONSOLE_KIND_CLUSTER must be a bounded lowercase name.' >&2
+if (( ${#cluster_name} > 49 )); then
+  failure_stage="preflight"
+  failure_code="KIND_NAME_TOO_LONG"
+  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 49 characters.' >&2
+  exit 1
+fi
+[[ "${cluster_name}" =~ ^[a-z0-9]([a-z0-9-]{0,47}[a-z0-9])?$ ]] || {
+  failure_stage="preflight"
+  failure_code="UNKNOWN"
+  echo 'OK_CONSOLE_KIND_CLUSTER must be a lowercase DNS label of at most 49 characters.' >&2
   exit 1
 }
 [[ "${local_port}" =~ ^[0-9]{4,5}$ ]] || {
   echo 'OK_CONSOLE_LOCAL_PORT must be a four- or five-digit port.' >&2
   exit 1
 }
+  if [[ -n "${kind_config}" || -n "${isolated_kubeconfig}" ]]; then
+    [[ -n "${kind_config}" && -n "${isolated_kubeconfig}" ]] || {
+      echo 'OK_CONSOLE_KIND_CONFIG and OK_CONSOLE_KUBECONFIG must be supplied together.' >&2
+      exit 1
+    }
+    [[ "${kind_config}" == /* && "${isolated_kubeconfig}" == /* && "${kind_config}" != *$'\n'* && "${isolated_kubeconfig}" != *$'\n'* ]] || {
+      echo 'Isolated Kind config and kubeconfig paths must be absolute single-line paths.' >&2
+      exit 1
+    }
+    [[ -f "${kind_config}" && ! -L "${kind_config}" ]] || {
+      echo 'Isolated Kind config must be an existing regular non-symlink file.' >&2
+      exit 1
+    }
+    [[ ! -e "${isolated_kubeconfig}" && ! -L "${isolated_kubeconfig}" ]] || {
+      echo 'Isolated kubeconfig destination already exists; refusing to merge or overwrite it.' >&2
+      exit 1
+    }
+    export KUBECONFIG="${isolated_kubeconfig}"
+  fi
+  if [[ -n "${minimum_kind_version}" ]]; then
+    [[ "${minimum_kind_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+      echo 'OK_CONSOLE_MIN_KIND_VERSION must use major.minor.patch format.' >&2
+      exit 1
+    }
+    kind_version_output="$(kind version 2>/dev/null)"
+    [[ "${kind_version_output}" =~ kind\ v([0-9]+)\.([0-9]+)\.([0-9]+) ]] || {
+      echo 'Could not determine the installed Kind version.' >&2
+      exit 1
+    }
+    installed_kind_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+    IFS='.' read -r installed_major installed_minor installed_patch <<<"${installed_kind_version}"
+    IFS='.' read -r minimum_major minimum_minor minimum_patch <<<"${minimum_kind_version}"
+    if (( 10#${installed_major} < 10#${minimum_major} ||
+          (10#${installed_major} == 10#${minimum_major} && 10#${installed_minor} < 10#${minimum_minor}) ||
+          (10#${installed_major} == 10#${minimum_major} && 10#${installed_minor} == 10#${minimum_minor} && 10#${installed_patch} < 10#${minimum_patch}) )); then
+      echo "Kind ${minimum_kind_version} or newer is required; found ${installed_kind_version}." >&2
+      exit 1
+    fi
+  fi
 [[ "${candidate_image}" =~ ^[A-Za-z0-9._/@:-]+$ ]] || {
   echo 'OK_CONSOLE_IMAGE contains unsupported characters.' >&2
   exit 1
@@ -281,14 +347,30 @@ if [[ "${candidate_image}" == "${default_image}" ]] && [[ -n "$(git -C "${reposi
   exit 1
 fi
 
-if kind get clusters | grep -Fxq "${cluster_name}"; then
+failure_stage="kind_inventory"
+failure_code="KIND_LIST_FAILED"
+if ! existing_clusters="$(kind get clusters 2>/dev/null)"; then
+  echo 'Could not list existing Kind clusters; refusing to create a cluster.' >&2
+  exit 1
+fi
+failure_stage="unknown"
+failure_code="UNKNOWN"
+if grep -Fxq "${cluster_name}" <<<"${existing_clusters}"; then
   echo "Kind cluster ${cluster_name} already exists; refusing to modify an unowned cluster." >&2
   echo 'Delete it explicitly or select a different OK_CONSOLE_KIND_CLUSTER.' >&2
   exit 1
 fi
 netstat_baseline="$("${failure_capture_helper}" snapshot-netstat 2>/dev/null || true)"
-kind create cluster --name "${cluster_name}" --wait 90s
+failure_stage="kind_create"
+failure_code="KIND_CONFIG_OR_CREATE_FAILED"
+if [[ -n "${kind_config}" ]]; then
+  kind create cluster --config "${kind_config}" --name "${cluster_name}" --kubeconfig "${isolated_kubeconfig}" --wait 90s >/dev/null 2>&1
+else
+  kind create cluster --name "${cluster_name}" --wait 90s >/dev/null 2>&1
+fi
 created_cluster=true
+failure_stage="image_deploy"
+failure_code="IMAGE_OR_DEPLOY_FAILED"
 
 if [[ "${candidate_image}" == "${default_image}" ]]; then
   docker build \
@@ -298,7 +380,7 @@ if [[ "${candidate_image}" == "${default_image}" ]]; then
 fi
 
 if ! docker image inspect "${candidate_image}" >/dev/null 2>&1; then
-  docker pull "${candidate_image}"
+  docker pull "${candidate_image}" >/dev/null 2>&1
 fi
 image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${candidate_image}")"
 [[ "${image_revision}" == "${expected_revision}" ]] || {
@@ -306,7 +388,7 @@ image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.op
   exit 1
 }
 if [[ "${candidate_image}" != ghcr.io/* ]]; then
-  kind load docker-image --name "${cluster_name}" "${candidate_image}"
+  kind load docker-image --name "${cluster_name}" "${candidate_image}" >/dev/null 2>&1
 fi
 
 kubectl kustomize "${script_dir}/overlays/local-kind" \

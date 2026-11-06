@@ -447,12 +447,12 @@ describe('OK-200 verification preflight', () => {
     })
   })
 
-  it('accepts owner-specific Kind DNS labels of 60 and 63 characters without real cluster operations', async () => {
+  it('accepts bounded Kind names for both original E2E logical names without real cluster operations', async () => {
     const ownerNames = [
-      'ok-local-e2e-arash-20261105-edd83ae5428019db1593dd56e6105916',
-      `${'a'.repeat(30)}-${'b'.repeat(32)}`,
+      `${'ok-local-e2e-arash-20261105'.slice(0, 17)}-${'edd83ae5428019db1593dd56e6105916'}`,
+      `${'ok-local-e2e-arash-20261105-b'.slice(0, 17)}-${'0123456789abcdef0123456789abcdef'}`,
     ]
-    expect(ownerNames.map((name) => name.length)).toEqual([60, 63])
+    expect(ownerNames.map((name) => name.length)).toEqual([50, 50])
     for (const clusterName of ownerNames) {
       await withTestTempDirectory(async (temporaryDirectory) => {
         const kindConfig = join(temporaryDirectory, 'kind.yaml')
@@ -473,9 +473,9 @@ describe('OK-200 verification preflight', () => {
     }
   })
 
-  it('rejects a 64-character Kind name before cluster creation', async () => {
-    const clusterName = `${'a'.repeat(31)}-${'b'.repeat(32)}`
-    expect(clusterName).toHaveLength(64)
+  it('rejects a 51-character Kind name before cluster creation', async () => {
+    const clusterName = `${'a'.repeat(18)}-${'b'.repeat(32)}`
+    expect(clusterName).toHaveLength(51)
     await withTestTempDirectory(async (temporaryDirectory) => {
       const kindConfig = join(temporaryDirectory, 'kind.yaml')
       await writeFile(kindConfig, `kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: ${clusterName}\n`)
@@ -486,7 +486,7 @@ describe('OK-200 verification preflight', () => {
       })
       await expect(run).rejects.toMatchObject({
         code: 1,
-        stderr: expect.stringContaining('lowercase DNS label of at most 63 characters'),
+        stderr: expect.stringContaining('lowercase DNS label of at most 50 characters'),
       })
       const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
       await expect(readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })

@@ -223,8 +223,10 @@ remaining_seconds() {
 }
 
 snapshot_netstat() {
-  local counters
-  if [[ -r /proc/net/netstat ]]; then
+  local counters proc_netstat="${OK200_PROC_NET_NETSTAT:-/proc/net/netstat}"
+  # ListenOverflows and ListenDrops are Linux TcpExt counters. Darwin's
+  # `netstat -s` exposes a different set of statistics, so report unavailable.
+  if [[ "${OSTYPE:-}" == linux* && -r "${proc_netstat}" ]]; then
     counters="$(awk '
       $1 == "TcpExt:" {
         if (header == "") {
@@ -240,7 +242,7 @@ snapshot_netstat() {
         if (a == 0 || b == 0 || v[a] !~ /^[0-9]+$/ || v[b] !~ /^[0-9]+$/) exit 1
         printf "TcpExt ListenOverflows=%s ListenDrops=%s\n", v[a], v[b]
       }
-    ' /proc/net/netstat 2>/dev/null || true)"
+    ' "${proc_netstat}" 2>/dev/null || true)"
   fi
   if [[ "${counters:-}" =~ ^TcpExt\ ListenOverflows=[0-9]+\ ListenDrops=[0-9]+$ ]]; then
     printf '%s\n' "${counters}"
@@ -282,10 +284,11 @@ append_file() {
 }
 
 sanitize_command_output() {
-  local kind="$1" input="$2" line result=''
+  local kind="$1" input="$2" expected_port="${3:-}" line result=''
   local version_re='^(Client Version:|Kustomize Version:|kind v|containerd[[:space:]])[A-Za-z0-9 .:_/-]{1,220}$'
   local legacy_client_re='^Client Version:[[:space:]]+version\.Info\{[^}]*GitVersion:"(v[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*)"[^}]*\}$'
   local listener_re='^LISTEN[[:space:]]+[0-9]+[[:space:]]+[0-9]+[[:space:]]+(\[[0-9a-fA-F:]+\]|[0-9a-fA-F.*:%_-]+):[0-9]{1,5}[[:space:]]+(\[[0-9a-fA-F:]+\]|[0-9a-fA-F.*:%_-]+):(\*|[0-9]{1,5})[[:space:]]*$'
+  local lsof_listener_re='^.*[[:space:]]TCP[[:space:]]+(\[[0-9a-fA-F:]+\]|[0-9a-fA-F.*:%_-]+):([0-9]{1,5})[[:space:]]+\(LISTEN\)$'
   while IFS= read -r line || [[ -n "${line}" ]]; do
     contains_sensitive_marker "${line}" && continue
     case "${kind}" in
@@ -299,6 +302,13 @@ sanitize_command_output() {
       listener)
         if [[ "${line}" =~ ${listener_re} ]]; then
           result+="${line}"$'\n'
+        fi
+        ;;
+      lsof-listener)
+        # lsof prefixes this endpoint with process, user, and device details.
+        # Retain only the strictly matched numeric endpoint; discard the prefix.
+        if [[ "${line}" =~ ${lsof_listener_re} && "${BASH_REMATCH[2]}" == "${expected_port}" ]]; then
+          result+="TCP ${BASH_REMATCH[1]}:${BASH_REMATCH[2]} (LISTEN)"$'\n'
         fi
         ;;
     esac
@@ -321,7 +331,11 @@ run_capture_command() {
 
 run_bounded() {
   local kind="$1" file="$2" budget="$3"; shift 3
-  local raw sanitized
+  local raw sanitized expected_port=""
+  if [[ "${kind}" == lsof-listener ]]; then
+    expected_port="$1"
+    shift
+  fi
   if (( SECONDS >= deadline )); then
     append_file "${file}" $'skipped: total capture deadline reached\n' "${budget}"
     return 0
@@ -330,7 +344,7 @@ run_bounded() {
   # any artifact write. stderr is discarded wholesale because it may echo config.
   raw="$(run_capture_command "$@" 2>/dev/null | head -c 32768 || true; printf '\001')"
   raw="${raw%$'\001'}"
-  sanitized="$(sanitize_command_output "${kind}" "${raw}"; printf '\001')"
+  sanitized="$(sanitize_command_output "${kind}" "${raw}" "${expected_port}"; printf '\001')"
   sanitized="${sanitized%$'\001'}"
   [[ -n "${sanitized}" ]] || sanitized=$'unavailable or no allowlisted diagnostic output\n'
   append_file "${file}" "${sanitized}" "${budget}"
@@ -419,7 +433,13 @@ Aggregate artifact cap: ${total_cap} bytes
   fi
 
   : >"${output_dir}/listener.txt"
-  run_bounded listener "${output_dir}/listener.txt" 32768 ss -ltn "sport = :${local_port}"
+  if command -v ss >/dev/null 2>&1; then
+    run_bounded listener "${output_dir}/listener.txt" 32768 ss -ltn "sport = :${local_port}"
+  elif command -v lsof >/dev/null 2>&1; then
+    run_bounded lsof-listener "${output_dir}/listener.txt" 32768 "${local_port}" lsof -nP "-iTCP:${local_port}" -sTCP:LISTEN
+  else
+    append_file "${output_dir}/listener.txt" $'unavailable: neither ss nor lsof is installed\n' 32768
+  fi
 
   : >"${output_dir}/versions.txt"
   run_bounded versions "${output_dir}/versions.txt" 16384 kubectl version --client

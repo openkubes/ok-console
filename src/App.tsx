@@ -17,6 +17,8 @@ const UserProjectManagement = import.meta.env.DEV ? lazy(() => import('./identit
 type Page = 'wjax' | 'users' | 'overview' | 'clusters' | 'workloads' | 'agents' | 'workspaces' | 'capabilities' | 'evidence' | 'create' | 'register'
 type IconName = Exclude<Page, 'wjax'> | 'search' | 'bell' | 'chevron' | 'shield' | 'cube' | 'arrow' | 'menu' | 'x' | 'check' | 'clock' | 'external' | 'code' | 'terminal' | 'spark'
 
+const publicDemoBuild = import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true'
+
 const NAV: Array<{ id: Exclude<Page, 'wjax'>; label: string; caption: string }> = [
   { id: 'overview', label: 'Platform Overview', caption: 'Fleet & posture' },
   { id: 'clusters', label: 'Clusters', caption: 'Lifecycle contracts' },
@@ -106,12 +108,12 @@ function clusterPlaneLabel(cluster: Cluster): string {
   return 'Worker power'
 }
 
-function Overview({ data, identity, openCluster, openEvidence }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
+function Overview({ data, identity, openCluster, openEvidence, publicDemo = false }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void; publicDemo?: boolean }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   const overview = data.overview
   const observedMetric = (value: number | null) => value ?? 'Unavailable'
   return <>
-    <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    <PageTitle eyebrow="Platform posture" title={publicDemo ? 'Welcome to OpenKubes' : `Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
     {(data.freshness === 'Stale' || (data.warnings?.length ?? 0) > 0) && <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{data.freshness === 'Stale' ? 'Some observations are stale' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>}
     <section className="metrics-grid" aria-label="Platform metrics">
       <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
@@ -640,13 +642,14 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
+  const publicDemo = publicDemoBuild && auth.mode === 'prototype' && consoleDataMode === 'fixture'
   const view = selectedCluster
     ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/>
     : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView
       ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense>
     : page === 'users' && wjaxLocalPreviewEnabled && UserProjectManagement
       ? <Suspense fallback={<p role="status">Loading identity & access preview…</p>}><UserProjectManagement/></Suspense>
-    : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
+    : page === 'overview' ? <Overview data={data} identity={session.identity} publicDemo={publicDemo} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
     : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
     : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/>
     : page === 'workspaces' ? <DeveloperWorkspaces/>
@@ -669,7 +672,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="live-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
-      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
+      <main id="main-content" className="content" tabIndex={-1}>{publicDemo && <div role="note" aria-label="Simulated demo" style={{ padding: '12px 16px', marginBottom: 18, border: '1px solid #65a5d255', borderRadius: 10, background: '#e8f5ff', color: '#15375b', fontSize: 14 }}><strong>SIMULATED DEMO</strong> · Sample cluster data only. No live infrastructure or AI service is connected.</div>}{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
     </div>
     {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget data={data} openEvidence={setSelectedEvidence}/>}
     {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}

@@ -61,6 +61,27 @@ describe('OpenKubes Console', () => {
     expect(screen.queryByText('ok-mgmt')).not.toBeInTheDocument()
   })
 
+  it('labels public fixture previews and removes the personal greeting', async () => {
+    vi.stubEnv('VITE_CONSOLE_PUBLIC_DEMO', 'true')
+    try {
+      render(<App />)
+      expect(screen.getByRole('note', { name: 'Simulated demo' })).toHaveTextContent('No live infrastructure connected')
+      fireEvent.click(await screen.findByRole('button', { name: /Continue with OpenKubes Identity/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Simulate identity provider return/i }))
+      fireEvent.click(await screen.findByRole('button', { name: /Enter Console/i }))
+      expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+      expect(screen.getByRole('note', { name: 'Simulated demo' })).toHaveTextContent('No live infrastructure or AI service is connected')
+      expect(screen.getByText('Demo Visitor')).toBeInTheDocument()
+      expect(screen.queryByText('Arash Kaffamanesh')).not.toBeInTheDocument()
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it('does not label ordinary prototype sessions as public demos', async () => {
+    await renderSignedIn()
+    expect(screen.queryByRole('note', { name: 'Simulated demo' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Hello Arash' })).toBeInTheDocument()
+  })
+
   it('restores a live BFF session before exposing platform data and logs out server-side', async () => {
     const auth: ConsoleAuthClient = {
       mode: 'oidc',

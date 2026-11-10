@@ -95,7 +95,7 @@ function ExceptionalAuthEntry({ onAuthenticated, authMode = 'prototype', onStart
 
   const oidcSession: PrototypeSession = {
     method: 'oidc',
-    identity: 'Arash Kaffamanesh',
+    identity: import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true' && authMode === 'prototype' ? 'Demo Visitor' : 'Arash Kaffamanesh',
     source: provider.name,
     assurance: 'OIDC · MFA',
     expiresIn: '60 minutes · in-memory prototype',
@@ -148,6 +148,7 @@ function ExceptionalAuthEntry({ onAuthenticated, authMode = 'prototype', onStart
 
   return <>
     {stage === 'entry' && <>
+      {authMode === 'prototype' && import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true' && <div role="note" aria-label="Simulated demo" className="auth-privacy"><strong>SIMULATED DEMO</strong> · Sample data only. No live infrastructure connected.</div>}
       <div className="auth-heading"><span className="auth-kicker">Welcome</span><h1>Welcome to OpenKubes</h1><p>{authMode === 'bootstrap' ? 'Use the reviewed bootstrap account to establish the platform before federation is configured.' : 'Sign in with a configured identity provider. Your provider verifies identity; OpenKubes evaluates authority separately.'}</p></div>
       {serviceError && <div className="auth-error" role="alert">{serviceError}{onRetry && <button type="button" className="auth-text-button" onClick={onRetry}>Retry session check</button>}</div>}
       {availableProviders.length > 0 && <div className="auth-provider-list" aria-label="Configured identity providers">

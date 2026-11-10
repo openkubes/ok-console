@@ -17,7 +17,7 @@ const UserProjectManagement = import.meta.env.DEV ? lazy(() => import('./identit
 type Page = 'wjax' | 'users' | 'overview' | 'clusters' | 'workloads' | 'agents' | 'workspaces' | 'capabilities' | 'evidence' | 'create' | 'register'
 type IconName = Exclude<Page, 'wjax'> | 'search' | 'bell' | 'chevron' | 'shield' | 'cube' | 'arrow' | 'menu' | 'x' | 'check' | 'clock' | 'external' | 'code' | 'terminal' | 'spark'
 
-const publicDemoBuild = import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true'
+const publicDemoBuild = () => import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true'
 
 const NAV: Array<{ id: Exclude<Page, 'wjax'>; label: string; caption: string }> = [
   { id: 'overview', label: 'Platform Overview', caption: 'Fleet & posture' },
@@ -642,7 +642,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
-  const publicDemo = publicDemoBuild && auth.mode === 'prototype' && consoleDataMode === 'fixture'
+  const publicDemo = publicDemoBuild() && auth.mode === 'prototype' && consoleDataMode === 'fixture'
   const view = selectedCluster
     ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/>
     : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView

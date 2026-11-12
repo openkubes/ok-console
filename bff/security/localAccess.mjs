@@ -24,16 +24,15 @@ export class LocalAccessError extends Error {
 }
 
 // Check both identity and cardinality: a foreign or duplicated row is not a reservation.
-const holdsRows = (result, digests) => result.rows.length === digests.length
-  && new Set(result.rows.map(row => row.principal_digest)).size === digests.length
+const holdsBoth = (result, digests) => result.rows.length === 2
+  && new Set(result.rows.map(row => row.principal_digest)).size === 2
   && result.rows.every(row => digests.includes(row.principal_digest))
 
 export class PostgresLocalAccessThrottle {
-  constructor({ pool, pepper, afterStatement, global = true }) {
+  constructor({ pool, pepper, afterStatement }) {
     if (typeof pool?.query !== 'function' || typeof pool?.connect !== 'function'
       || !Buffer.isBuffer(pepper) || pepper.length < 32) throw new LocalAccessError('INVALID_CONFIGURATION')
     this.pool = pool
-    this.global = global !== false
     this.pepper = pepper
     // Injection seam for scheduling failures; runtime configuration never supplies it.
     this.afterStatement = afterStatement
@@ -97,7 +96,7 @@ export class PostgresLocalAccessThrottle {
 
   async reserve(username) {
     const globalDigest = this.globalDigest()
-    const digests = this.global ? [this.digest(username), globalDigest].sort() : [this.digest(username)]
+    const digests = [this.digest(username), globalDigest].sort()
     // Reject known blocks without acquiring the shared global row lock.
     const precheck = await pgQuery(this.pool, `
       SELECT principal_digest FROM ok_console.local_access_throttle
@@ -115,7 +114,7 @@ export class PostgresLocalAccessThrottle {
         FROM ok_console.local_access_throttle
         WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
       // No retry: refuse before KDF if an expected row vanished or is foreign.
-      if (!holdsRows(prior, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      if (!holdsBoth(prior, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
       const now = await this.instant(client)
       if (prior.rows.some(row => row.block_token != null && BigInt(row.block_token) > BigInt(now))) return { blocked: true }
       const lockedDigests = prior.rows.map(row => row.principal_digest)
@@ -128,7 +127,7 @@ export class PostgresLocalAccessThrottle {
         WHERE principal_digest = ANY($1::text[])
         RETURNING principal_digest, floor(extract(epoch FROM window_started_at) * 1e6)::bigint AS window,
           floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token`, [lockedDigests, globalDigest, now])
-      if (reserved.rowCount !== digests.length || !holdsRows(reserved, lockedDigests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      if (reserved.rowCount !== 2 || !holdsBoth(reserved, lockedDigests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
       return { blocked: false, globalWindow: reserved.rows.find((row) => row.principal_digest === globalDigest)?.window,
         principalBlock: reserved.rows.find(row => row.principal_digest !== globalDigest).block_token }
     })
@@ -137,13 +136,13 @@ export class PostgresLocalAccessThrottle {
   async success(username, reservation) {
     const principalDigest = this.digest(username)
     const globalDigest = this.globalDigest()
-    const digests = this.global ? [principalDigest, globalDigest].sort() : [principalDigest]
+    const digests = [principalDigest, globalDigest].sort()
     return this.transaction(async (client) => {
       const locked = await pgQuery(client, `
         SELECT principal_digest, floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token
         FROM ok_console.local_access_throttle
         WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
-      if (!holdsRows(locked, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      if (!holdsBoth(locked, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
       const now = await this.instant(client)
       const principal = locked.rows.find(row => row.principal_digest === principalDigest)
       const refused = principal.block_token != null && BigInt(principal.block_token) > BigInt(now)
@@ -152,7 +151,7 @@ export class PostgresLocalAccessThrottle {
       if (!refused) await pgQuery(client, `UPDATE ok_console.local_access_throttle SET
         failures = 0, blocked_until = NULL, window_started_at = to_timestamp($2::numeric / 1e6),
         updated_at = to_timestamp($2::numeric / 1e6) WHERE principal_digest = $1`, [principalDigest, now])
-      if (this.global) await pgQuery(client, `
+      await pgQuery(client, `
         UPDATE ok_console.local_access_throttle SET
           failures = GREATEST(failures - 1, 0),
           blocked_until = CASE WHEN failures - 1 < 50 THEN NULL ELSE blocked_until END,

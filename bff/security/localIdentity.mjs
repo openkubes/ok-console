@@ -22,10 +22,14 @@ export class LocalIdentity {
     Object.assign(this, { pool, sessions, throttle, scope, authorizationRevision, recoveryEnabled })
     this.hashing = 0
   }
-  async hash(password, salt) {
+  hashSlot() {
     if (this.hashing >= 2) throw new IdentityError()
     this.hashing++
-    try { return await scrypt(password, salt, 32, HASH) } finally { this.hashing-- }
+    let held = true
+    return () => { if (held) { held = false; this.hashing-- } }
+  }
+  async hash(password, salt, release = this.hashSlot()) {
+    try { return await scrypt(password, salt, 32, HASH) } finally { release() }
   }
   async audit(db, actor, target, action, correlationId) {
     await db.query('INSERT INTO ok_identity.audit(actor_id,target_id,action,correlation_id) VALUES($1,$2,$3,$4)', [actor, target, action, correlationId])
@@ -132,18 +136,28 @@ export class LocalIdentity {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
-    let reservation
-    try { reservation = await this.throttle.reserve(`ordinary:${username}`) } catch { throw new IdentityError() }
-    if (reservation.blocked) {
+    // Capacity refusals must not consume a principal or global attempt.
+    const releaseHash = this.hashSlot()
+    let reservation, row, expected, actual
+    try {
+      try { reservation = await this.throttle.reserve(`ordinary:${username}`) } catch { throw new IdentityError() }
+      if (reservation.blocked) {
+        await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
+        throw new IdentityError(401)
+      }
+      const selected = await this.pool.query('SELECT a.* FROM ok_identity.accounts a JOIN ok_identity.state s ON s.singleton AND s.initialized WHERE username=$1', [username])
+      row = selected.rows[0]
+      const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
+      expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)
+      actual = await this.hash(input.password, salt, releaseHash)
+    } finally { releaseHash() }
+    if (!row?.enabled || row.hash_profile !== 'scrypt-v1' || expected.length !== 32 || !timingSafeEqual(actual, expected)) {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
-    const selected = await this.pool.query('SELECT a.* FROM ok_identity.accounts a JOIN ok_identity.state s ON s.singleton AND s.initialized WHERE username=$1', [username])
-    const row = selected.rows[0]
-    const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
-    const expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)
-    const actual = await this.hash(input.password, salt)
-    if (!row?.enabled || row.hash_profile !== 'scrypt-v1' || expected.length !== 32 || !timingSafeEqual(actual, expected)) {
+    let outcome
+    try { outcome = await this.throttle.success(`ordinary:${username}`, reservation) } catch { throw new IdentityError() }
+    if (outcome?.refused) {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
@@ -158,13 +172,6 @@ export class LocalIdentity {
       await this.audit(db, row.id, row.id, 'LoginGranted', correlationId)
       return issued
     })
-    try {
-      const outcome = await this.throttle.success(`ordinary:${username}`, reservation)
-      if (outcome?.refused) throw new IdentityError(401)
-    } catch (error) {
-      await this.sessions.revoke(issued.cookie, 'THROTTLE_UNAVAILABLE').catch(() => {})
-      throw error instanceof IdentityError ? error : new IdentityError()
-    }
     return issued
   }
 }

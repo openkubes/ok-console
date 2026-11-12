@@ -505,13 +505,27 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.globalDigest()])).rows[0].failures).toBe(49)
   })
 
-  it('caps peak principal counts at 5 and preserves each block deadline during 150 wrong and 3 correct logins', async () => {
+  it.each(['load', 'own-reservation-reset', 'non-owned-reset'])('caps peak principal counts at 5 and preserves each block deadline during 150 wrong and 3 correct logins (%s)', async scenario => {
     const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 5) })
-    const { verify } = localVerifier(throttle)
-    const jobs = Array.from({ length: 150 }, () => 'wrong')
-    for (const at of [0, 40, 80]) jobs.splice(at, 0, 'correct')
-    let next = 0, peak = 0, lastDeadline: number | null = null, samples = 0
-    const sample = async () => {
+    let next = 0, peak = 0, lastDeadline: number | null = null, samples = 0, ownedResets = 0
+    // Serialize observations with settlement so a sample cannot straddle an owned reset.
+    // Reservations and KDFs still race normally.
+    let observation = Promise.resolve()
+    const observe = <T,>(fn: () => Promise<T>): Promise<T> => {
+      const result = observation.then(fn)
+      observation = result.then(() => {}, () => {})
+      return result
+    }
+    const settle = throttle.success.bind(throttle)
+    throttle.success = (username: string, reservation: { principalBlock: string | null, globalWindow: string }) => observe(async () => {
+      const result = await settle(username, reservation)
+      if (!result.refused && reservation.principalBlock !== null) {
+        ownedResets++
+        lastDeadline = null // A successful correct attempt cleared its own block.
+      }
+      return result
+    })
+    const sample = () => observe(async () => {
       const row = (await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')])).rows[0]
       if (!row) return
       samples++; peak = Math.max(peak, row.failures)
@@ -519,19 +533,40 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       const deadline = row.blocked_until?.getTime() ?? null
       if (lastDeadline !== null && Date.now() < lastDeadline) expect(deadline).toBe(lastDeadline)
       if (deadline !== null) lastDeadline = deadline
-    }
+    })
     const start = Date.now()
-    await Promise.all(Array.from({ length: 8 }, async () => {
-      while (next < jobs.length) {
-        const password = jobs[next++]
-        try { await verify(localInput(password)) } catch (error) { expect(error).toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' }) }
+    if (scenario === 'load') {
+      const { verify } = localVerifier(throttle)
+      const jobs = Array.from({ length: 150 }, () => 'wrong')
+      for (const at of [0, 40, 80]) jobs.splice(at, 0, 'correct')
+      await Promise.all(Array.from({ length: 8 }, async () => {
+        while (next < jobs.length) {
+          const password = jobs[next++]
+          try { await verify(localInput(password)) } catch (error) { expect(error).toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' }) }
+          await sample()
+        }
+      }))
+    } else {
+      // The same observer is exercised with both ownership schedules deterministically.
+      if (scenario === 'own-reservation-reset') {
+        for (let i = 0; i < 4; i++) await throttle.reserve('recovery-admin')
+        const verify = createLocalAccessVerifier({ mode: 'BreakGlass', accounts: [localAccount], throttle,
+          sessionStore: { create: () => issue() }, derive: async () => { await sample(); return Buffer.alloc(32, 2) } })
+        await expect(verify(localInput('correct'))).resolves.toHaveProperty('cookie')
+        expect(ownedResets).toBe(1)
+      } else {
+        const reservation = await throttle.reserve('recovery-admin')
+        for (let i = 0; i < 4; i++) await throttle.reserve('recovery-admin')
         await sample()
+        await expect(throttle.success('recovery-admin', reservation)).resolves.toEqual({ refused: true })
+        expect(ownedResets).toBe(0)
       }
-    }))
+      await sample()
+    }
     expect(samples).toBeGreaterThan(0); expect(peak).toBe(5)
     expect(Date.now() - start).toBeLessThan(10000)
-    console.log(`THROTTLE_LOAD wrong=150 correct=3 concurrency=8 samples=${samples} peak=${peak} ms=${Date.now() - start}`)
-  }, 10000)
+    console.log(`THROTTLE_LOAD scenario=${scenario} ${scenario === 'load' ? 'wrong=150 correct=3 concurrency=8' : 'deterministic=true'} samples=${samples} peak=${peak} ownedResets=${ownedResets} ms=${Date.now() - start}`)
+  }, 15000)
 
   it.each([['rotate', 'terminate'], ['revoke', 'terminate'], ['rotate', 'idle'], ['revoke', 'idle']])('contains session transaction errors between statements in an isolated process: %s %s', async (operation, mode) => {
     const child = spawn(process.execPath, ['bff/test-fixtures/sessionR4.mjs', operation, mode], { env: process.env })

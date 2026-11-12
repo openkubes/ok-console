@@ -412,7 +412,7 @@ export const createSessionRuntime = async ({
     const pepperValue = await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', fileReader)
     if (!BASE64_32_BYTE_KEY_PATTERN.test(pepperValue)) throw new SessionRuntimeConfigurationError('Invalid local throttle configuration.')
     identity = new LocalIdentity({ pool, sessions: sessionStore,
-      throttle: throttleFactory({ pool: ordinaryThrottlePool(pool), global: false, pepper: Buffer.from(pepperValue, 'base64') }),
+      throttle: throttleFactory({ pool: ordinaryThrottlePool(pool), pepper: Buffer.from(pepperValue, 'base64') }),
       recoveryEnabled: env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true',
       scope: { environmentId, tenantIds: [tenantId] }, authorizationRevision })
     localIdentityHandler = createLocalIdentityHttp({ identity, sessions: sessionStore, expectedOrigin })

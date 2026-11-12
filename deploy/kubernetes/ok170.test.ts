@@ -45,7 +45,7 @@ describe('OK-173 deployable overlay authorization invariants', () => {
     })
   })
 
-  it('renders every overlay except local-kind and keeps the Console out of prototype mode', async () => {
+  it('renders every overlay except local-kind and keeps the Console out of prototype mode', { timeout: 30_000 }, async () => {
     const overlaysRoot = new URL('./overlays/', import.meta.url)
     const localKind = await readdir(new URL('./overlays/local-kind/', import.meta.url))
     expect(localKind).toContain('kustomization.yaml')

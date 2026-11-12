@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import pg from 'pg'
+import { pgQuery } from './pgFailure.mjs'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 import { createLocalAccessVerifier, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
 import { PostgresAuthenticationAudit } from './authenticationAudit.mjs'
@@ -52,7 +53,7 @@ const boundedInteger = (env, name, fallback, minimum, maximum) => {
   const raw = env[name]
   if (raw === undefined || raw === '') return fallback
   const value = Number(raw)
-  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+  if (!/^[0-9]+$/.test(raw) || !Number.isInteger(value) || value < minimum || value > maximum) {
     throw new SessionRuntimeConfigurationError(`${name} must be an integer between ${minimum} and ${maximum}.`)
   }
   return value
@@ -274,13 +275,19 @@ export const createSessionRuntime = async ({
   )
   const codec = new SessionEnvelopeCodec({ primaryKeyId, keys })
 
+  const statementTimeout = boundedInteger(env, 'OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS', 5_000, 250, 60_000)
+  const queryTimeout = boundedInteger(env, 'OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS', statementTimeout + 1_000, 250, 61_000)
+  if (queryTimeout <= statementTimeout) {
+    throw new SessionRuntimeConfigurationError('OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS must be greater than OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS.')
+  }
   const pool = poolFactory({
     connectionString,
     ssl,
     max: boundedInteger(env, 'OK_CONSOLE_POSTGRES_POOL_MAX', 10, 1, 50),
     connectionTimeoutMillis: boundedInteger(env, 'OK_CONSOLE_POSTGRES_CONNECT_TIMEOUT_MS', 5_000, 250, 60_000),
     idleTimeoutMillis: boundedInteger(env, 'OK_CONSOLE_POSTGRES_IDLE_TIMEOUT_MS', 30_000, 1_000, 300_000),
-    statement_timeout: boundedInteger(env, 'OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS', 5_000, 250, 60_000),
+    query_timeout: queryTimeout,
+    statement_timeout: statementTimeout,
   })
   let sessionStore
   try {
@@ -381,7 +388,7 @@ export const createSessionRuntime = async ({
       const verifier = createLocalAccessVerifier({
         mode: method, accounts, throttle, sessionStore, authorizationRevision,
         isEnabled: ordinaryLocal && method === 'Bootstrap' ? async () => {
-          const result = await pool.query('SELECT initialized FROM ok_identity.state WHERE singleton=true')
+          const result = await pgQuery(pool, 'SELECT initialized FROM ok_identity.state WHERE singleton=true')
           return result.rowCount === 1 && (result.rows[0].initialized === false || env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true')
         } : undefined,
         audit: async (event) => {

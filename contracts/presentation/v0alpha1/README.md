@@ -49,6 +49,24 @@ Every failure contains a stable error code, a redaction-safe message,
 retryability, a correlation ID, and optional safe details. Stack traces and raw
 backend responses never cross the boundary.
 
+`Error.error.reason` is optional and absent-tolerant; the contract version remains
+`console.openkubes.io/v0alpha1`. Its value set is closed: `CERTIFICATE_VERIFICATION`,
+`TRANSPORT_FAILURE`, `TRANSPORT_AMBIGUOUS`, `PEER_TLS_ALERT`,
+`DEADLINE_EXCEEDED`, `BODY_DEADLINE_EXCEEDED`, `TLS_PROTOCOL_FAILURE`,
+`IDENTITY_REJECTED`, `HTTP_SERVER_ERROR`, `HTTP_NON_SUCCESS`, and `UNCLASSIFIED`.
+The browser rejects a present unknown reason as incompatible. Adding a reason
+value therefore requires a contract version change. No new browser UI is required.
+
+The previous schema set `error.additionalProperties: false`. A strict validator
+holding that schema rejects new 503 bodies containing `reason`; no such consumer
+was found in the workspace. An absent reason remains valid under both schemas.
+The browser's tolerance of unknown fields does not extend to unknown values of
+this recognized field.
+
+Three copies of the vocabulary are maintained: classifier outputs, schema enum,
+and the browser validator's `CONSOLE_ERROR_REASONS` tuple. The TypeScript reason
+union is derived from the tuple.
+
 ## Compatibility behavior
 
 - A different `apiVersion`, unknown `kind`, or invalid required field fails

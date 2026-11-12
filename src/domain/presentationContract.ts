@@ -19,7 +19,10 @@ export const CONSOLE_ERROR_CODES = [
   'INTERNAL_ERROR',
 ] as const
 
+export const CONSOLE_ERROR_REASONS = ['CERTIFICATE_VERIFICATION', 'TRANSPORT_FAILURE', 'TRANSPORT_AMBIGUOUS', 'PEER_TLS_ALERT', 'DEADLINE_EXCEEDED', 'BODY_DEADLINE_EXCEEDED', 'TLS_PROTOCOL_FAILURE', 'IDENTITY_REJECTED', 'HTTP_SERVER_ERROR', 'HTTP_NON_SUCCESS', 'UNCLASSIFIED'] as const
+
 export type PresentationKind = (typeof PRESENTATION_KINDS)[number]
+export type ConsoleErrorReason = (typeof CONSOLE_ERROR_REASONS)[number]
 export type ConsoleErrorCode = (typeof CONSOLE_ERROR_CODES)[number]
 export type Readiness = 'Ready' | 'Pending' | 'Failed' | 'Unknown'
 export type Compatibility = 'Supported' | 'Read only' | 'Incompatible'
@@ -58,6 +61,7 @@ export interface ConsoleErrorResponse {
     code: ConsoleErrorCode
     message: string
     retryable: boolean
+    reason?: ConsoleErrorReason
     retryAfterSeconds?: number
     details?: Array<{ field?: string; reason: string }>
   }
@@ -401,6 +405,9 @@ const validateError = (value: unknown, errors: string[]) => {
     return
   }
   if (!CONSOLE_ERROR_CODES.includes(value.code as ConsoleErrorCode)) errors.push('error.code is not supported')
+  if ('reason' in value && (typeof value.reason !== 'string' || !CONSOLE_ERROR_REASONS.some((reason) => reason === value.reason))) {
+    errors.push('error.reason is not supported')
+  }
   requireString(value, 'message', errors)
   if (typeof value.retryable !== 'boolean') errors.push('error.retryable must be a boolean')
 }

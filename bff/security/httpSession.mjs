@@ -1,3 +1,4 @@
+import { currentLifecycle, boundedCorrelation, boundedMs, startErrorCode } from '../diagnostics.mjs'
 import { SECURITY_CONTRACT_VERSION } from './authorization.mjs'
 import {
   clearCsrfCookie,
@@ -69,16 +70,25 @@ export const handleSessionHttp = async ({
     return true
   }
 
+  const started = performance.now()
+  const run = async (cause, operation) => {
+    try { return await operation() } catch (error) {
+      const step = (cause === 'SESSION_ROTATE' && error?.step === 'SESSION_ROTATE_COMMIT') || (cause === 'SESSION_REVOKE' && error?.step === 'SESSION_REVOKE_COMMIT') ? error.step : cause
+      console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'SESSION_FAILED', cause: step, errorCode: startErrorCode(error), elapsedMs: boundedMs(performance.now() - started) }))
+      currentLifecycle()?.recordFailure(error)
+      throw error
+    }
+  }
   const cookieHeader = request.headers.cookie
 
   if (pathname === SESSION_PATH && request.method === 'GET') {
-    const context = await sessionStore.resolve(cookieHeader)
+    const context = await run('SESSION_STORE', () => sessionStore.resolve(cookieHeader))
     if (!context) {
-      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session restore rejected' }).catch(() => {})
+      await run('AUDIT', () => audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session restore rejected' })).catch(() => {})
       rejectUnauthenticated(response, correlationId)
       return true
     }
-    try { await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Restored', cause: 'VERIFIED', correlationId, reason: 'Session restored' }) } catch {
+    try { await run('AUDIT', () => audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Restored', cause: 'VERIFIED', correlationId, reason: 'Session restored' })) } catch {
       sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }
@@ -87,24 +97,24 @@ export const handleSessionHttp = async ({
   }
 
   if (pathname === ROTATE_PATH && request.method === 'POST') {
-    const context = await sessionStore.resolve(cookieHeader, { touch: false })
+    const context = await run('SESSION_STORE', () => sessionStore.resolve(cookieHeader, { touch: false }))
     if (!context) {
-      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session rotation rejected' }).catch(() => {})
+      await run('AUDIT', () => audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session rotation rejected' })).catch(() => {})
       rejectUnauthenticated(response, correlationId)
       return true
     }
     if (!validateCsrf(csrfRequest(request, context, expectedOrigin))) {
-      await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Denied', cause: 'CSRF_REJECTED', correlationId, reason: 'Session rotation CSRF validation failed' }).catch(() => {})
+      await run('AUDIT', () => audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Denied', cause: 'CSRF_REJECTED', correlationId, reason: 'Session rotation CSRF validation failed' })).catch(() => {})
       sendJson(response, 403, securityError('CSRF_REJECTED', 'The session rotation request was rejected.', correlationId), correlationId)
       return true
     }
-    const rotated = await sessionStore.rotate(cookieHeader)
+    const rotated = await run('SESSION_ROTATE', () => sessionStore.rotate(cookieHeader))
     if (!rotated) {
       rejectUnauthenticated(response, correlationId)
       return true
     }
-    try { await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Rotated', cause: 'VERIFIED', correlationId, reason: 'Session rotated' }) } catch {
-      await sessionStore.revoke?.(rotated.cookie, 'AUDIT_FAILED').catch(() => {})
+    try { await run('AUDIT', () => audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Rotated', cause: 'VERIFIED', correlationId, reason: 'Session rotated' })) } catch {
+      await run('SESSION_ROTATE_COMPENSATION', () => sessionStore.revoke?.(rotated.cookie, 'AUDIT_FAILED')).catch(() => {})
       sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }
@@ -113,23 +123,23 @@ export const handleSessionHttp = async ({
   }
 
   if (pathname === SESSION_PATH && request.method === 'DELETE') {
-    const context = await sessionStore.resolve(cookieHeader, { touch: false })
+    const context = await run('SESSION_STORE', () => sessionStore.resolve(cookieHeader, { touch: false }))
     if (!context) {
-      await audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session logout rejected' }).catch(() => {})
+      await run('AUDIT', () => audit({ method: 'OIDC', outcome: 'Denied', cause: 'SESSION_INVALID', correlationId, reason: 'Session logout rejected' })).catch(() => {})
       rejectUnauthenticated(response, correlationId)
       return true
     }
     if (!validateCsrf(csrfRequest(request, context, expectedOrigin))) {
-      await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Denied', cause: 'CSRF_REJECTED', correlationId, reason: 'Session logout CSRF validation failed' }).catch(() => {})
+      await run('AUDIT', () => audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Denied', cause: 'CSRF_REJECTED', correlationId, reason: 'Session logout CSRF validation failed' })).catch(() => {})
       sendJson(response, 403, securityError('CSRF_REJECTED', 'The session logout request was rejected.', correlationId), correlationId)
       return true
     }
-    const revoked = await sessionStore.revoke(cookieHeader)
+    const revoked = await run('SESSION_REVOKE', () => sessionStore.revoke(cookieHeader))
     if (!revoked) {
       rejectUnauthenticated(response, correlationId)
       return true
     }
-    try { await audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Revoked', cause: 'VERIFIED', correlationId, reason: 'Session revoked by logout' }) } catch {
+    try { await run('AUDIT', () => audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Revoked', cause: 'VERIFIED', correlationId, reason: 'Session revoked by logout' })) } catch {
       sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }

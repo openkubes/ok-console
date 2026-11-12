@@ -316,6 +316,7 @@
             },
             "message": { "$ref": "#/$defs/nonEmptyString" },
             "retryable": { "type": "boolean" },
+            "reason": { "enum": ["CERTIFICATE_VERIFICATION", "TRANSPORT_FAILURE", "TRANSPORT_AMBIGUOUS", "PEER_TLS_ALERT", "DEADLINE_EXCEEDED", "BODY_DEADLINE_EXCEEDED", "TLS_PROTOCOL_FAILURE", "IDENTITY_REJECTED", "HTTP_SERVER_ERROR", "HTTP_NON_SUCCESS", "UNCLASSIFIED"] },
             "retryAfterSeconds": { "type": "integer", "minimum": 0 },
             "details": {
               "type": "array",

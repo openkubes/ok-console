@@ -110,7 +110,10 @@ describe('observed-state mTLS client profile', () => {
       OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE: join(root, `${identity}.crt`),
       OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE: join(root, `${identity}.key`),
     }
-    await expect(createObservedStateSource(wrongIdentity).readSnapshot()).rejects.toThrow('OpenKubes observed-state query returned HTTP 403.')
+    const error = await createObservedStateSource(wrongIdentity).readSnapshot().then(() => undefined, (failure: unknown) => failure)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('The observed platform source is unavailable.')
+    expect(classifySourceFailure(error)).toMatchObject({ class: 'INCONCLUSIVE', reason: 'IDENTITY_REJECTED', httpStatus: 'IDENTITY_REJECTED' })
   })
 
   it('requires all three bounded mounted trust files', () => {

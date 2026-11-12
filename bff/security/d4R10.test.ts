@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { Readable } from 'node:stream'
-import { createLocalAccessVerifier } from './localAccess.mjs'
-import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
+import { createSessionRuntime } from './runtime.mjs'
 import { createServer, type Socket } from 'node:net'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -81,26 +80,58 @@ it('J3 local identity successful transaction returns its healthy client to the p
   await expect(pool.query('SELECT 1')).resolves.toMatchObject({ command: 'SELECT' })
   expect(count()).toBe(1)
 })
-it.each(['statement', 'client'])('enabled-check real pg %s timeout retains its bounded HTTP diagnostics', async mode => {
-  const { pool } = await serve(socket => {
+it.each(['statement', 'client'])('enabled-check real runtime pg %s timeout retains its bounded HTTP diagnostics', async mode => {
+  const queries: string[] = []
+  const { pool } = await serve((socket, _number, data) => {
+    queries.push(data.toString('latin1'))
     if (mode === 'client') return
     const body = Buffer.from('SERROR\0VERROR\0C57014\0Mprivate enabled-query detail\0\0')
     const header = Buffer.alloc(5); header.write('E'); header.writeInt32BE(body.length + 4, 1)
     socket.write(Buffer.concat([header, body, Buffer.from('5a0000000549', 'hex')]))
   })
-  const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: {}, sessionStore: { create: vi.fn() },
-    isEnabled: async () => { const result = await pgQuery(pool, 'SELECT initialized FROM ok_identity.state WHERE singleton=true'); return result.rowCount === 1 && result.rows[0].initialized === false } })
-  const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.invalid' })
+  const origin = 'https://127.0.0.1:8787'
+  const files: Record<string, string> = {
+    '/test/postgres-url': `postgresql://x@127.0.0.1:${pool.options.port}/x`,
+    '/test/envelope-keys': JSON.stringify({ key: Buffer.alloc(32, 1).toString('base64') }),
+    '/test/pepper': Buffer.alloc(32, 2).toString('base64'),
+    '/test/accounts': JSON.stringify({ version: 'v1', accounts: [{
+      username: 'admin', identityId: 'admin', displayName: 'Admin', enabled: true,
+      environmentId: 'env', tenantIds: ['platform'], permissions: ['platform.read'],
+      salt: Buffer.alloc(16, 3).toString('base64'), verifier: Buffer.alloc(32, 4).toString('base64'),
+    }] }),
+  }
+  // Keep the default pool, verifier and HTTP factories: the enabled query must
+  // come from runtime.mjs, with errors produced by pg against the wire fake.
+  const runtime = await createSessionRuntime({
+    env: {
+      OK_CONSOLE_LOCAL_IDENTITY_ENABLED: 'true', OK_CONSOLE_PROFILE: 'ok-local', NODE_ENV: 'development',
+      OK_CONSOLE_SESSION_STORE_MODE: 'postgres', OK_CONSOLE_BFF_HOST: '127.0.0.1', OK_CONSOLE_ORIGIN: origin,
+      OK_CONSOLE_ENVIRONMENT_ID: 'env', OK_CONSOLE_TENANT_ID: 'platform',
+      OK_CONSOLE_SESSION_EPOCH: 'epoch-123', OK_CONSOLE_AUTHORIZATION_REVISION: 'mapping-1',
+      OK_CONSOLE_POSTGRES_URL_FILE: '/test/postgres-url', OK_CONSOLE_POSTGRES_ALLOW_INSECURE_LOOPBACK: 'true',
+      OK_CONSOLE_POSTGRES_STATEMENT_TIMEOUT_MS: '250', OK_CONSOLE_POSTGRES_QUERY_TIMEOUT_MS: '300',
+      OK_CONSOLE_SESSION_ENVELOPE_PRIMARY_KEY_ID: 'key', OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE: '/test/envelope-keys',
+      OK_CONSOLE_LOCAL_ACCESS_MODE: 'bootstrap', OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE: '/test/accounts',
+      OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/test/pepper',
+    },
+    fileReader: async (filename: string) => {
+      if (!Object.hasOwn(files, filename)) throw new Error('Unexpected fixture file')
+      return Buffer.from(files[filename])
+    },
+  })
+  cleanup.push(() => runtime.close())
   const request = Object.assign(Readable.from([JSON.stringify({ username: 'admin', password: 'secret', reason: 'Emergency provider recovery' })]), {
-    method: 'POST', headers: { origin: 'https://console.invalid', 'content-type': 'application/json' },
+    method: 'POST', headers: { origin, 'content-type': 'application/json' },
   })
   const response = { writeHead: vi.fn(), end: vi.fn() }
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  await handler({ request, response, pathname: '/api/console/v0/auth/local', correlationId: id })
+  expect(await runtime.localAccessHandler({ request, response, pathname: '/api/console/v0/auth/local', correlationId: id })).toBe(true)
+  expect(queries).toHaveLength(1)
+  expect(queries[0]).toContain('SELECT initialized FROM ok_identity.state WHERE singleton=true')
   expect(response.writeHead.mock.calls[0][0]).toBe(503)
   expect(log).toHaveBeenCalledTimes(1)
-  expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ cause: 'ENABLED_CHECK', errorCode: mode === 'client' ? 'PG_QUERY_TIMEOUT' : 'PG_STATEMENT_TIMEOUT' })
-  expect(JSON.stringify(log.mock.calls)).not.toMatch(/private enabled-query detail|Query read timeout/)
+  expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ event: 'LOCAL_ACCESS_FAILED', correlationId: id, cause: 'ENABLED_CHECK', errorCode: mode === 'client' ? 'PG_QUERY_TIMEOUT' : 'PG_STATEMENT_TIMEOUT' })
+  expect(JSON.stringify([log.mock.calls, response.end.mock.calls])).not.toMatch(/private enabled-query detail|Query read timeout/)
 })
 it.each(['GET', 'POST', 'DELETE'])('J6 real session store %s failure emits one bounded correlated line', async method => {
   const { pool } = await serve(() => {})

@@ -22,6 +22,7 @@ import { ObservedStateContractError } from './adapters/openKubesObservedState.mj
 import { authorizedSnapshot } from './authorizedSnapshot.mjs'
 
 const ROUTE_PREFIX = '/api/console/v0'
+const ROUTE_PATTERN_PREFIX = ROUTE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const DEFAULT_IDENTITY = {
   id: 'user-arash',
   displayName: 'Arash Kaffamanesh',
@@ -143,10 +144,10 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     warnings.push({ code: 'SOURCE_STALE', message: 'The local failure injector marked this observation stale.' })
   }
   if (failure === 'degraded') {
-    warnings.push({ code: 'PARTIAL_DATA', message: 'The local failure injector omitted non-essential source data.' })
+    warnings.unshift({ code: 'PARTIAL_DATA', message: 'The local failure injector omitted non-essential source data.' })
   }
 
-  const clusterMatch = pathname.match(/^\/api\/console\/v0\/clusters\/([^/]+)$/)
+  const clusterMatch = pathname.match(new RegExp(`^${ROUTE_PATTERN_PREFIX}/clusters/([^/]+)$`))
   const coversObservations = pathname === `${ROUTE_PREFIX}/overview` || pathname === `${ROUTE_PREFIX}/clusters` || clusterMatch
   if (coversObservations) {
     freshness = failure === 'stale' ? 'Stale' : coveredFreshness(
@@ -189,7 +190,7 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     return successResponse('ClusterDetail', clusterDetailProjection(cluster), meta)
   }
 
-  const evidenceMatch = pathname.match(/^\/api\/console\/v0\/evidence\/([^/]+)$/)
+  const evidenceMatch = pathname.match(new RegExp(`^${ROUTE_PATTERN_PREFIX}/evidence/([^/]+)$`))
   if (evidenceMatch) {
     const id = decodeURIComponent(evidenceMatch[1])
     const evidence = snapshot.evidence.find((item) => item.id === id)
@@ -198,7 +199,7 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     const evidenceMeta = responseMeta({
       ...meta,
       observedAt: evidence.observedAt,
-      freshness: evidenceStale ? 'Stale' : 'Current',
+      freshness: evidenceStale ? 'Stale' : snapshot.sourceHealth?.freshness === 'Current' && evidence.freshness === 'Current' ? 'Current' : 'Unknown',
       warnings: [
         ...warnings,
         ...(evidence.freshness === 'Stale' && freshness === 'Current' ? [{ code: 'SOURCE_STALE', message: 'This Evidence is outside the configured freshness window.' }] : []),

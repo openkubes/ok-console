@@ -462,3 +462,49 @@ it('R9 unknown envelope verdict cannot become Current', async () => {
   })
   for (const path of ['overview', 'clusters', `clusters/${payload.data.clusters[0].id}`]) expectFreshness((await get(path)).body, 'Unknown')
 })
+
+
+it.each([
+  ['Current', 'Current', 'Current'],
+  ['Current', 'Stale', 'Stale'],
+  ['Stale', 'Current', 'Stale'],
+  ['Stale', 'Stale', 'Stale'],
+  ['Unknown', 'Stale', 'Stale'],
+  ['Stale', 'Unknown', 'Stale'],
+  ['Unknown', 'Unknown', 'Unknown'],
+  ...[undefined, null, 'Unknown', 'foreign', 123].flatMap(verdict => [
+    [verdict, 'Current', 'Unknown'],
+    ['Current', verdict, 'Unknown'],
+  ]),
+])('Evidence route envelope %s and item %s yield %s', async (envelopeVerdict, itemVerdict, expected) => {
+  const payload = await envelope()
+  const item = payload.data.evidence[0]
+  const get = await serve(payload, ['platform'], now, snapshot => {
+    snapshot.sourceHealth.freshness = envelopeVerdict
+    snapshot.evidence.find((evidence: { id: string }) => evidence.id === item.id).freshness = itemVerdict
+    return snapshot
+  })
+  const response = await get(`evidence/${item.id}`)
+  expect(response.status).toBe(200)
+  expect(response.body.meta.freshness).toBe(expected)
+  expect(response.body.data.outcome).toBe(item.outcome)
+  expect(response.body.meta.warnings).toContainEqual(expect.objectContaining({ code: 'REDACTED' }))
+})
+
+
+it('degraded injector keeps PARTIAL_DATA first when source warnings already exist', async () => {
+  const payload = await envelope()
+  const sourceWarning = { code: 'SOURCE_STALE', message: 'The source observation is stale.' }
+  const get = await serve(payload, ['platform'], now, snapshot => {
+    snapshot.sourceHealth.freshness = 'Stale'
+    snapshot.sourceHealth.warnings = [sourceWarning]
+    return snapshot
+  })
+  const response = await get('overview?failure=degraded')
+  expect(response.status).toBe(200)
+  expect(response.body.meta.freshness).toBe('Stale')
+  expect(response.body.meta.warnings).toEqual([
+    { code: 'PARTIAL_DATA', message: 'The local failure injector omitted non-essential source data.' },
+    sourceWarning,
+  ])
+})

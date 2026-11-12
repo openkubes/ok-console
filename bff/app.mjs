@@ -22,6 +22,7 @@ import { ObservedStateContractError } from './adapters/openKubesObservedState.mj
 import { authorizedSnapshot } from './authorizedSnapshot.mjs'
 
 const ROUTE_PREFIX = '/api/console/v0'
+const ROUTE_PATTERN_PREFIX = ROUTE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const DEFAULT_IDENTITY = {
   id: 'user-arash',
   displayName: 'Arash Kaffamanesh',
@@ -105,16 +106,60 @@ const failureResponse = (failure) => {
   }
 }
 
+// The snapshot here is already tenant-authorized. Missing Evidence is an unknown
+// observation, while an unrelated cluster must not affect a detail response.
+const coveredFreshness = (snapshot, clusterId, includePlacements) => {
+  const clusters = snapshot.clusters.filter((cluster) => clusterId === null || cluster.id === clusterId)
+  const clusterIds = new Set(clusters.map((cluster) => cluster.id))
+  const evidence = snapshot.evidence.filter((item) => clusterIds.has(item.clusterId))
+  const byId = new Map(snapshot.evidence.map((item) => [item.id, item]))
+  const references = [
+    ...clusters.flatMap((cluster) => [cluster.evidenceId, ...cluster.capabilities.map((item) => item.evidenceId)]),
+    ...(includePlacements ? snapshot.placements.filter((item) => clusterIds.has(item.targetClusterId)).map((item) => item.evidenceId) : []),
+  ]
+  const verdicts = [...evidence.map((item) => item.freshness), ...references.map((id) => byId.get(id)?.freshness)]
+  if (snapshot.sourceHealth?.freshness === 'Stale' || verdicts.includes('Stale')) return 'Stale'
+  if (snapshot.sourceHealth?.freshness !== 'Current' || verdicts.some((verdict) => verdict !== 'Current')) return 'Unknown'
+  return 'Current'
+}
+
 const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failure }) => {
   const warnings = [...(snapshot.sourceHealth?.warnings ?? [])]
   let freshness = snapshot.sourceHealth?.freshness ?? 'Current'
 
   if (failure === 'stale') {
+    snapshot = structuredClone(snapshot)
+    for (const cluster of snapshot.clusters) {
+      cluster.readiness = 'Unknown'
+      for (const capability of cluster.capabilities) capability.readiness = 'Unknown'
+      for (const stage of cluster.lifecycle) stage.state = 'Unknown'
+    }
+    for (const placement of snapshot.placements) placement.readiness = 'Unknown'
+    for (const category of ['capabilities', 'workloadClaims']) {
+      for (const field of ['ready', 'pending', 'failed', 'unknown']) snapshot.metrics[category][field] = null
+    }
+    snapshot.metrics.openFindings.total = null
+    snapshot.metrics.openFindings.critical = null
     freshness = 'Stale'
     warnings.push({ code: 'SOURCE_STALE', message: 'The local failure injector marked this observation stale.' })
   }
   if (failure === 'degraded') {
-    warnings.push({ code: 'PARTIAL_DATA', message: 'The local failure injector omitted non-essential source data.' })
+    warnings.unshift({ code: 'PARTIAL_DATA', message: 'The local failure injector omitted non-essential source data.' })
+  }
+
+  const clusterMatch = pathname.match(new RegExp(`^${ROUTE_PATTERN_PREFIX}/clusters/([^/]+)$`))
+  const coversObservations = pathname === `${ROUTE_PREFIX}/overview` || pathname === `${ROUTE_PREFIX}/clusters` || clusterMatch
+  if (coversObservations) {
+    freshness = failure === 'stale' ? 'Stale' : coveredFreshness(
+      snapshot, clusterMatch ? decodeURIComponent(clusterMatch[1]) : null, pathname === `${ROUTE_PREFIX}/overview`,
+    )
+    if (freshness === 'Stale') {
+      // Envelope and injector warnings may already describe the stale observation.
+      const firstStale = warnings.findIndex((warning) => warning.code === 'SOURCE_STALE')
+      const deduplicated = warnings.filter((warning, index) => warning.code !== 'SOURCE_STALE' || index === firstStale)
+      warnings.splice(0, warnings.length, ...deduplicated)
+      if (firstStale === -1) warnings.push({ code: 'SOURCE_STALE', message: 'An authorized observation is outside its configured freshness window.' })
+    }
   }
 
   const meta = responseMeta({
@@ -138,7 +183,6 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     return successResponse('ClusterList', clusterListProjection(snapshot), meta)
   }
 
-  const clusterMatch = pathname.match(/^\/api\/console\/v0\/clusters\/([^/]+)$/)
   if (clusterMatch) {
     const id = decodeURIComponent(clusterMatch[1])
     const cluster = snapshot.clusters.find((item) => item.id === id)
@@ -146,15 +190,21 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     return successResponse('ClusterDetail', clusterDetailProjection(cluster), meta)
   }
 
-  const evidenceMatch = pathname.match(/^\/api\/console\/v0\/evidence\/([^/]+)$/)
+  const evidenceMatch = pathname.match(new RegExp(`^${ROUTE_PATTERN_PREFIX}/evidence/([^/]+)$`))
   if (evidenceMatch) {
     const id = decodeURIComponent(evidenceMatch[1])
     const evidence = snapshot.evidence.find((item) => item.id === id)
     if (!evidence) throw new ConsoleBffError(404, 'NOT_FOUND', 'The requested evidence reference was not found.')
+    const evidenceStale = freshness === 'Stale' || evidence.freshness === 'Stale'
     const evidenceMeta = responseMeta({
       ...meta,
       observedAt: evidence.observedAt,
-      warnings: [...warnings, { code: 'REDACTED', message: 'Private evidence payload is not included in the presentation response.' }],
+      freshness: evidenceStale ? 'Stale' : snapshot.sourceHealth?.freshness === 'Current' && evidence.freshness === 'Current' ? 'Current' : 'Unknown',
+      warnings: [
+        ...warnings,
+        ...(evidence.freshness === 'Stale' && freshness === 'Current' ? [{ code: 'SOURCE_STALE', message: 'This Evidence is outside the configured freshness window.' }] : []),
+        { code: 'REDACTED', message: 'Private evidence payload is not included in the presentation response.' },
+      ],
     })
     return successResponse('EvidenceReference', evidenceProjection(evidence), evidenceMeta)
   }

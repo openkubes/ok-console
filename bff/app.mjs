@@ -105,6 +105,23 @@ const failureResponse = (failure) => {
   }
 }
 
+// The snapshot here is already tenant-authorized. Missing Evidence is an unknown
+// observation, while an unrelated cluster must not affect a detail response.
+const coveredFreshness = (snapshot, clusterId, includePlacements) => {
+  const clusters = snapshot.clusters.filter((cluster) => clusterId === null || cluster.id === clusterId)
+  const clusterIds = new Set(clusters.map((cluster) => cluster.id))
+  const evidence = snapshot.evidence.filter((item) => clusterIds.has(item.clusterId))
+  const byId = new Map(snapshot.evidence.map((item) => [item.id, item]))
+  const references = [
+    ...clusters.flatMap((cluster) => [cluster.evidenceId, ...cluster.capabilities.map((item) => item.evidenceId)]),
+    ...(includePlacements ? snapshot.placements.filter((item) => clusterIds.has(item.targetClusterId)).map((item) => item.evidenceId) : []),
+  ]
+  const verdicts = [...evidence.map((item) => item.freshness), ...references.map((id) => byId.get(id)?.freshness)]
+  if (snapshot.sourceHealth?.freshness === 'Stale' || verdicts.includes('Stale')) return 'Stale'
+  if (snapshot.sourceHealth?.freshness !== 'Current' || verdicts.some((verdict) => verdict !== 'Current')) return 'Unknown'
+  return 'Current'
+}
+
 const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failure }) => {
   const warnings = [...(snapshot.sourceHealth?.warnings ?? [])]
   let freshness = snapshot.sourceHealth?.freshness ?? 'Current'
@@ -129,6 +146,21 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     warnings.push({ code: 'PARTIAL_DATA', message: 'The local failure injector omitted non-essential source data.' })
   }
 
+  const clusterMatch = pathname.match(/^\/api\/console\/v0\/clusters\/([^/]+)$/)
+  const coversObservations = pathname === `${ROUTE_PREFIX}/overview` || pathname === `${ROUTE_PREFIX}/clusters` || clusterMatch
+  if (coversObservations) {
+    freshness = failure === 'stale' ? 'Stale' : coveredFreshness(
+      snapshot, clusterMatch ? decodeURIComponent(clusterMatch[1]) : null, pathname === `${ROUTE_PREFIX}/overview`,
+    )
+    if (freshness === 'Stale') {
+      // Envelope and injector warnings may already describe the stale observation.
+      const firstStale = warnings.findIndex((warning) => warning.code === 'SOURCE_STALE')
+      const deduplicated = warnings.filter((warning, index) => warning.code !== 'SOURCE_STALE' || index === firstStale)
+      warnings.splice(0, warnings.length, ...deduplicated)
+      if (firstStale === -1) warnings.push({ code: 'SOURCE_STALE', message: 'An authorized observation is outside its configured freshness window.' })
+    }
+  }
+
   const meta = responseMeta({
     correlationId,
     observedAt: snapshot.observedAt,
@@ -150,7 +182,6 @@ const routeResponse = ({ pathname, snapshot, identity, now, correlationId, failu
     return successResponse('ClusterList', clusterListProjection(snapshot), meta)
   }
 
-  const clusterMatch = pathname.match(/^\/api\/console\/v0\/clusters\/([^/]+)$/)
   if (clusterMatch) {
     const id = decodeURIComponent(clusterMatch[1])
     const cluster = snapshot.clusters.find((item) => item.id === id)

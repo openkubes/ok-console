@@ -30,9 +30,9 @@ afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
   }
 })
-const serve = async (payload: Awaited<ReturnType<typeof envelope>>, tenantIds = ['platform']) => {
+const serve = async (payload: Awaited<ReturnType<typeof envelope>>, tenantIds = ['platform'], clock = now, transform = (snapshot: ReturnType<typeof normalize>) => snapshot) => {
   const server = createServer(createConsoleBffHandler({
-    source: { readSnapshot: async () => normalize(payload) }, now, enableFailureInjection: true,
+    source: { readSnapshot: async () => transform(normalizeOpenKubesObservedState(payload, { now: clock })) }, now: clock, enableFailureInjection: true,
     authorizer: async (...args: Parameters<typeof prototypeAuthorizer>) => ({
       ...await prototypeAuthorizer(...args),
       scope: { environmentId: payload.data.environment.id, tenantIds },
@@ -317,10 +317,148 @@ it.each(['item', 'envelope', 'injection'])('H3 %s staleness clears every current
   const payload = await envelope()
   const original = structuredClone(payload.data.metrics[0])
   if (kind === 'item') payload.data.evidence[0].observedAt = new Date(NOW - 300001).toISOString()
-  if (kind === 'envelope') payload.metadata.observedAt = new Date(NOW - 300001).toISOString()
+  if (kind !== 'injection') payload.metadata.observedAt = new Date(NOW - 300001).toISOString()
   const get = await serve(payload)
   const overview = (await get(`overview${kind === 'injection' ? '?failure=stale' : ''}`)).body.data
   expectUnknownMetrics(overview)
   expect(overview.capabilities.total).toBe(original.capabilities.total)
   expect(overview.workloadClaims.total).toBe(original.workloadClaims.total)
+})
+
+
+const expectFreshness = (body: { meta: { freshness: string, warnings?: { code: string }[] } }, freshness: string) => {
+  expect(body.meta.freshness).toBe(freshness)
+  expect((body.meta.warnings ?? []).filter(item => item.code === 'SOURCE_STALE')).toHaveLength(freshness === 'Stale' ? 1 : 0)
+}
+
+it('R1 stale-only tenant B and fresh tenant A get authorized freshness on all three routes', async () => {
+  const payload = await envelope()
+  const hidden = payload.data.clusters[1]
+  hidden.ownership.tenantId = 'tenant-b'
+  for (const capability of hidden.capabilities) capability.ownership.tenantId = 'tenant-b'
+  for (const item of payload.data.placements) if (item.targetClusterId === hidden.id) item.ownership.tenantId = 'tenant-b'
+  for (const item of payload.data.evidence) if (item.clusterId === hidden.id) {
+    item.ownership.tenantId = 'tenant-b'
+    item.observedAt = new Date(NOW - 300001).toISOString()
+  }
+  expect(normalize(payload).sourceHealth.freshness).toBe('Current')
+  for (const [tenant, cluster, freshness] of [
+    ['tenant-b', hidden.id, 'Stale'], ['platform', payload.data.clusters[0].id, 'Current'],
+  ]) {
+    const get = await serve(payload, [tenant])
+    for (const path of ['overview', 'clusters', `clusters/${cluster}`]) {
+      const response = await get(path)
+      expect(response.status).toBe(200)
+      expectFreshness(response.body, freshness)
+    }
+  }
+})
+
+it('R2 mixed list matches the stale contract example and detail counts only its cluster', async () => {
+  const payload = await envelope()
+  const staleCluster = payload.data.clusters[1]
+  for (const item of payload.data.evidence) if (item.clusterId === staleCluster.id) item.observedAt = new Date(NOW - 300001).toISOString()
+  const get = await serve(payload)
+  const example = JSON.parse(await readFile(new URL('../contracts/presentation/v0alpha1/examples/cluster-list.json', import.meta.url), 'utf8'))
+  const list = await get('clusters')
+  expect(list.status).toBe(200)
+  expect(list.body.meta.freshness).toBe(example.meta.freshness)
+  expectFreshness(list.body, 'Stale')
+  expect(list.body.data.items).toHaveLength(payload.data.clusters.length)
+  for (const cluster of payload.data.clusters) {
+    const detail = await get(`clusters/${cluster.id}`)
+    expect(detail.status).toBe(200)
+    expectFreshness(detail.body, cluster.id === staleCluster.id ? 'Stale' : 'Current')
+  }
+})
+
+it('R3 real hosting-external producer golden ClusterList is Stale', async () => {
+  const fixtures = JSON.parse(await readFile(new URL('./openKubesObservedState.fixtures.json', import.meta.url), 'utf8'))
+  expect(fixtures.producerRevision).toBe('1b0739f')
+  expect(fixtures.producerSha256).toBe('e798f2dca87405ef9dfc93dd81c519396d5252f2ff678602304788261c8ccf39')
+  const payload = fixtures.snapshots['hosting-external']
+  const clock = () => new Date('2026-10-22T14:01:34+02:00')
+  expect(normalizeOpenKubesObservedState(payload, { now: clock }).sourceHealth.freshness).toBe('Current')
+  const get = await serve(payload, ['platform'], clock)
+  const response = await get('clusters')
+  expect(response.status).toBe(200)
+  expectFreshness(response.body, 'Stale')
+  expect(response.body.data.items.filter((item: { readiness: string }) => item.readiness === 'Unknown')).toHaveLength(3)
+})
+
+it('R4 stale envelope clears metrics for a tenant with no Evidence', async () => {
+  const payload = await envelope()
+  const bucket = structuredClone(payload.data.metrics[0])
+  bucket.ownership.tenantId = 'metrics-only'
+  payload.data.metrics.push(bucket)
+  payload.metadata.observedAt = new Date(NOW - 300001).toISOString()
+  const get = await serve(payload, ['metrics-only'])
+  const response = await get('overview')
+  expect(response.status).toBe(200)
+  expectUnknownMetrics(response.body.data)
+  expect(response.body.data.capabilities.total).toBe(bucket.capabilities.total)
+  expectFreshness(response.body, 'Stale')
+})
+
+it.each(['bad-time', null, 123, '', undefined])('R5 invalid Evidence timestamp %s yields Unknown on covered routes', async observedAt => {
+  const payload = await envelope()
+  const cluster = payload.data.clusters[0]
+  payload.data.evidence.find((item: { id: string }) => item.id === cluster.evidenceId).observedAt = observedAt
+  const get = await serve(payload)
+  for (const path of ['overview', 'clusters', `clusters/${cluster.id}`]) {
+    const response = await get(path)
+    expect(response.status).toBe(200)
+    expectFreshness(response.body, 'Unknown')
+  }
+  expectFreshness((await get(`clusters/${payload.data.clusters[1].id}`)).body, 'Current')
+})
+
+it.each([undefined, null, 'Unknown', 'foreign'])('R6 invalid verdict %s is Unknown; Stale takes precedence', async verdict => {
+  const payload = await envelope()
+  const cluster = payload.data.clusters[0]
+  const get = await serve(payload, ['platform'], now, snapshot => {
+    snapshot.evidence.find((item: { id: string }) => item.id === cluster.evidenceId).freshness = verdict
+    return snapshot
+  })
+  for (const path of ['overview', 'clusters', `clusters/${cluster.id}`]) expectFreshness((await get(path)).body, 'Unknown')
+  payload.data.evidence.find((item: { id: string }) => item.id === payload.data.clusters[1].evidenceId).observedAt = new Date(NOW - 300001).toISOString()
+  for (const path of ['overview', 'clusters']) expectFreshness((await get(path)).body, 'Stale')
+  expectFreshness((await get(`clusters/${cluster.id}`)).body, 'Unknown')
+})
+
+it.each(['envelope', 'injection', 'both'])('R7 %s yields exactly one SOURCE_STALE on all three routes', async kind => {
+  const payload = await envelope()
+  if (kind !== 'injection') payload.metadata.observedAt = new Date(NOW - 300001).toISOString()
+  const get = await serve(payload)
+  for (const path of ['overview', 'clusters', `clusters/${payload.data.clusters[0].id}`]) {
+    const response = await get(`${path}${kind !== 'envelope' ? '?failure=stale' : ''}`)
+    expect(response.status).toBe(200)
+    expectFreshness(response.body, 'Stale')
+  }
+})
+
+
+it.each(['capability', 'placement'])('R8 missing %s Evidence makes covered responses Unknown', async kind => {
+  const payload = await envelope()
+  const cluster = payload.data.clusters[0]
+  const item = kind === 'capability' ? cluster.capabilities[0] : payload.data.placements[0]
+  // Use a distinct Evidence reference so the parent cluster remains current.
+  const evidence = structuredClone(payload.data.evidence.find((entry: { id: string }) => entry.id === cluster.evidenceId))
+  evidence.id = 'evidence-missing-observation'
+  evidence.observedAt = 'bad-time'
+  payload.data.evidence.push(evidence)
+  item.evidenceId = evidence.id
+  if (kind === 'placement') item.targetClusterId = cluster.id
+  const get = await serve(payload)
+  expectFreshness((await get('overview')).body, 'Unknown')
+  for (const path of ['clusters', `clusters/${cluster.id}`]) expectFreshness((await get(path)).body, kind === 'capability' ? 'Unknown' : 'Current')
+})
+
+it('R9 unknown envelope verdict cannot become Current', async () => {
+  const payload = await envelope()
+  const get = await serve(payload, ['platform'], now, snapshot => {
+    snapshot.sourceHealth.freshness = 'Unknown'
+    return snapshot
+  })
+  for (const path of ['overview', 'clusters', `clusters/${payload.data.clusters[0].id}`]) expectFreshness((await get(path)).body, 'Unknown')
 })

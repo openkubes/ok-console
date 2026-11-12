@@ -5,6 +5,7 @@ import { X509Certificate } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:https'
+import { TLSSocket } from 'node:tls'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -34,7 +35,10 @@ beforeAll(async () => {
   createCa('trusted-ca')
   createCa('rogue-ca')
   issue('localhost', 'trusted-ca', 'serverAuth', 'DNS:localhost')
-  issue('console-bff', 'trusted-ca', 'clientAuth', 'URI:spiffe://openkubes.io/ns/openkubes-console/sa/ok-console-bff')
+  issue('console-bff', 'trusted-ca', 'clientAuth', 'URI:spiffe://openkubes.io/ns/openkubes-console/sa/ok-console')
+
+  issue('old-console', 'trusted-ca', 'clientAuth', 'URI:spiffe://openkubes.io/ns/openkubes-console/sa/ok-console-bff')
+  issue('other-client', 'trusted-ca', 'clientAuth', 'URI:spiffe://openkubes.io/ns/other-namespace/sa/ok-console')
 
   const fixture = await new FixtureObservedStateAdapter().readSnapshot()
   const envelope = {
@@ -56,7 +60,13 @@ beforeAll(async () => {
     requestCert: true,
     rejectUnauthorized: true,
     minVersion: 'TLSv1.2',
-  }, (_request, response) => {
+  }, (request, response) => {
+    const peer = (request.socket as TLSSocket).getPeerCertificate()
+    if (peer.subjectaltname !== 'URI:spiffe://openkubes.io/ns/openkubes-console/sa/ok-console') {
+      response.writeHead(403, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: 'workload_identity_required' }))
+      return
+    }
     const body = JSON.stringify(envelope)
     response.writeHead(200, { 'Content-Type': 'application/json; profile="observed.openkubes.io/v0alpha2"', 'Content-Length': Buffer.byteLength(body) })
     response.end(body)
@@ -92,6 +102,15 @@ describe('observed-state mTLS client profile', () => {
 
     expect(snapshot.sourceRevision).toBe('kubernetes:v1.35.5+rke2r1;nodes:31461260;deployment:31452633')
     expect(snapshot.clusters[0].name).toBe('ok-mgmt')
+  })
+
+  it.each(['old-console', 'other-client'])('rejects the trusted but wrong %s workload identity', async (identity) => {
+    const wrongIdentity = {
+      ...environment(),
+      OK_CONSOLE_OBSERVED_STATE_CLIENT_CERT_FILE: join(root, `${identity}.crt`),
+      OK_CONSOLE_OBSERVED_STATE_CLIENT_KEY_FILE: join(root, `${identity}.key`),
+    }
+    await expect(createObservedStateSource(wrongIdentity).readSnapshot()).rejects.toThrow('OpenKubes observed-state query returned HTTP 403.')
   })
 
   it('requires all three bounded mounted trust files', () => {

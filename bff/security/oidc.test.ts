@@ -189,10 +189,10 @@ it('classifies real pg pool refusal by store and audit step with preserved own r
   } finally { await pool.end() }
 })
 
-it.each(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', '57P01', '53300', '28P01', 'private', null, 503, undefined])('bounds root OIDC errorCode %s through cause chains', async (code) => {
+it.each(['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', '57P01', 'PG_LOCK_TIMEOUT', 'PG_IDLE_TRANSACTION_TIMEOUT', '53300', '28P01', 'private', null, 503, undefined])('bounds root OIDC errorCode %s through cause chains', async (code) => {
   const root = Object.assign(new Error('private'), code === undefined ? {} : { code })
   const error = new Error('private wrapper', { cause: new Error('private wrapper', { cause: root }) })
-  expect(await startFailure({ protocol: { codeVerifier: () => { throw error } } })).toMatchObject({ cause: 'PKCE', errorCode: code === undefined ? null : typeof code === 'string' && code !== 'private' ? code : 'OTHER' })
+  expect(await startFailure({ protocol: { codeVerifier: () => { throw error } } })).toMatchObject({ cause: 'PKCE', errorCode: code === undefined ? null : typeof code === 'string' && !['private', '57P01'].includes(code) ? code : 'OTHER' })
 })
 it('ignores inherited OIDC codes and accessors and terminates cyclic causes', async () => {
   const cycle = { code: 'ENOTFOUND', cause: {} }; cycle.cause = cycle

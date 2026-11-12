@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { boundedCorrelation, boundedMs, currentLifecycle, startErrorCode } from '../diagnostics.mjs'
-import { pgQuery, pgConnect } from './pgFailure.mjs'
+import { classifyPgError, pgQuery, pgConnect } from './pgFailure.mjs'
 import { SECURITY_CONTRACT_VERSION, authorizeSecurityContext } from './authorization.mjs'
 import { SessionEnvelopeError } from './envelope.mjs'
 import {
@@ -189,12 +189,38 @@ export class PostgresSessionStore {
     }
   }
 
+  async transaction(operation) {
+    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
+    let failure, result
+    const recordFailure = error => { failure ??= classifyPgError(error) }
+    client.on('error', recordFailure)
+    const checked = { query: async (...args) => {
+      try {
+        if (failure) throw failure
+        const value = await pgQuery(client, ...args)
+        if (failure) throw failure
+        return value
+      } catch (error) {
+        recordFailure(error)
+        throw failure
+      }
+    } }
+    try {
+      result = await operation(checked)
+    } catch (error) {
+      recordFailure(error)
+    } finally {
+      try { client.release(failure) } catch (error) { recordFailure(error) }
+      finally { client.removeListener('error', recordFailure) }
+    }
+    if (failure) throw normalizeStoreFailure(failure)
+    return result
+  }
+
   async rotate(cookieHeader) {
     const oldSessionId = readSessionCookie(cookieHeader)
     if (!oldSessionId) return null
-    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
-    let failure
-    try {
+    return this.transaction(async client => {
       await pgQuery(client, 'BEGIN')
       const selected = await pgQuery(client, `
         SELECT *, clock_timestamp() AS database_now
@@ -256,21 +282,14 @@ export class PostgresSessionStore {
       }
       const remainingSeconds = Math.max(0, Math.floor((asDate(row.absolute_expires_at).getTime() - asDate(row.database_now).getTime()) / 1_000))
       return publicIssue({ values, context, maxAgeSeconds: remainingSeconds })
-    } catch (error) {
-      failure = error
-      throw normalizeStoreFailure(error)
-    } finally {
-      client.release(failure)
-    }
+    })
   }
 
   async revoke(cookieHeader, reason = 'LOGOUT') {
     const sessionId = readSessionCookie(cookieHeader)
     if (!sessionId) return false
     if (!validSessionString(reason)) throw new SessionStoreError('INVALID_INPUT')
-    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
-    let failure
-    try {
+    return this.transaction(async client => {
       await pgQuery(client, 'BEGIN')
       const selected = await pgQuery(client, `
         SELECT session_family_digest
@@ -291,12 +310,7 @@ export class PostgresSessionStore {
         throw error
       })
       return true
-    } catch (error) {
-      failure = error
-      throw normalizeStoreFailure(error)
-    } finally {
-      client.release(failure)
-    }
+    })
   }
 
   async authorize(cookieHeader, request) {

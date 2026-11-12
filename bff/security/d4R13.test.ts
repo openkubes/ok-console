@@ -19,21 +19,21 @@ const serve = async (reply: (socket: Socket, query: string) => void) => {
   cleanup.push(() => pool.end()); return { pool, queries, count: () => count }
 }
 
-it.each(['blocked', 'failure', 'success', 'record'] as const)('M1 real pg wire 57014 at local-access %s crosses pg boundary', async site => {
+it.each(['reserve', 'success', 'record'] as const)('M1 real pg wire 57014 at local-access %s crosses pg boundary', async site => {
   const { pool } = await serve(socket => socket.write(Buffer.concat([packet('E', Buffer.from('SERROR\0VERROR\0C57014\0Munrelated private message\0\0')), ready])))
   const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32) })
   const audit = new PostgresLocalAccessAudit({ pool, pepper: Buffer.alloc(32) })
-  const error = await (site === 'record' ? audit.record({ principal: 'reader', method: 'Bootstrap', outcome: 'Denied', cause: 'INVALID_CREDENTIAL', reason: 'local recovery exercise', correlationId: 'corr-test' }) : throttle[site]('reader')).catch(error => error)
+  const error = await (site === 'record' ? audit.record({ principal: 'reader', method: 'Bootstrap', outcome: 'Denied', cause: 'INVALID_CREDENTIAL', reason: 'local recovery exercise', correlationId: 'corr-test' }) : throttle[site]('reader', { globalWindow: 'window' })).catch(error => error)
   expect(startErrorCode(error)).toBe('PG_STATEMENT_TIMEOUT')
 })
 it('R1 invalid credential failure is counted before an audit outage is attempted', async () => {
   let failures = 0
   const attempted: string[] = []
   const verify = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], authorizationRevision: 'rev', sessionStore: { create: vi.fn() },
-    throttle: { blocked: async () => false, failure: async () => { await new Promise(r => setTimeout(r, 5)); failures++; attempted.push('failure') }, success: vi.fn() },
+    throttle: { reserve: async () => { await new Promise(r => setTimeout(r, 5)); failures++; attempted.push('reserve'); return { blocked: false } }, success: vi.fn() },
     derive: async () => Buffer.alloc(32), audit: async () => { attempted.push('audit'); expect(failures).toBe(1); throw new Error('audit unavailable') },
   })
   await expect(verify({ username: 'reader', password: 'wrong', reason: 'local recovery exercise' })).rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'AUDIT' })
   expect(failures).toBe(1)
-  expect(attempted).toEqual(['failure', 'audit'])
+  expect(attempted).toEqual(['reserve', 'audit'])
 })

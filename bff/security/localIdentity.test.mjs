@@ -31,3 +31,50 @@ describe('OK-214 ordinary-local startup boundary', () => {
     expect(status).toBe(503)
   })
 })
+
+describe('ordinary throttle pool boundary', () => {
+  it('rewrites pool and transaction queries, forwards listeners and releases errors', async () => {
+    const { ordinaryThrottlePool } = await import('./localIdentity.mjs')
+    const { EventEmitter } = await import('node:events')
+    const calls = []
+    const client = Object.assign(new EventEmitter(), {
+      query: async (...args) => { calls.push(args); return {rows:[]} },
+      release: (error) => { calls.push(['release',error]) },
+    })
+    const wrapped = ordinaryThrottlePool({query:client.query,connect:async()=>client})
+    const sql = 'SELECT * FROM ok_console.local_access_throttle'
+    await wrapped.query(sql,['pool'])
+    const db = await wrapped.connect()
+    await db.query(sql,['client'])
+    expect(calls.slice(0,2)).toEqual([
+      ['SELECT * FROM ok_identity.login_throttle',['pool']],
+      ['SELECT * FROM ok_identity.login_throttle',['client']],
+    ])
+    const observed = []
+    const listener = (error) => observed.push(error)
+    db.on('error',listener)
+    client.emit('error',Object.assign(new Error('private ok_identity.login_throttle'),{code:'42501',detail:'private SQL'}))
+    expect(observed[0].code).toBe('42501')
+    expect(JSON.stringify(observed)).not.toContain('private')
+    expect(observed[0].message).not.toContain('ok_identity')
+    expect(observed[0].cause).toBeUndefined()
+    db.off('error',listener)
+    expect(client.listenerCount('error')).toBe(0)
+    db.on('error',listener)
+    db.removeListener('error',listener)
+    expect(client.listenerCount('error')).toBe(0)
+    db.release(observed[0])
+    expect(calls[2]).toEqual(['release',observed[0]])
+  })
+  it('sanitizes pool query and connection acquisition errors', async () => {
+    // Real-driver error coverage lives in the PostgreSQL integration suite.
+    const { ordinaryThrottlePool } = await import('./localIdentity.mjs')
+    const error = Object.assign(new Error('private ok_identity.login_throttle'),{code:'42501',detail:'private SQL'})
+    const fail = async () => { throw error }
+    const wrapped = ordinaryThrottlePool({query:fail,connect:fail})
+    for (const operation of [()=>wrapped.query('SELECT 1'),()=>wrapped.connect()]) {
+      await expect(operation()).rejects.toMatchObject({message:'Ordinary login throttle operation failed.',code:'42501'})
+      await expect(operation()).rejects.not.toHaveProperty('detail')
+    }
+  })
+})

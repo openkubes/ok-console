@@ -197,7 +197,7 @@ describe('session runtime configuration', () => {
   })
 
   it('wires bootstrap only from mounted verifier mappings with durable throttle and audit ports', async () => {
-    const throttleFactory = vi.fn(() => ({ blocked: vi.fn(), failure: vi.fn(), success: vi.fn() }))
+    const throttleFactory = vi.fn(() => ({ reserve: vi.fn(), success: vi.fn() }))
     const auditFactory = vi.fn(() => ({ record: vi.fn() }))
     const authenticationAuditFactory = vi.fn(() => ({ record: vi.fn() }))
     const runtime = await createSessionRuntime({

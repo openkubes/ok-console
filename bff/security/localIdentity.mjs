@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID, scrypt as derive, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
+import { classifyPgError } from './pgFailure.mjs'
 
 const scrypt = promisify(derive)
 const HASH = { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }
@@ -21,10 +22,14 @@ export class LocalIdentity {
     Object.assign(this, { pool, sessions, throttle, scope, authorizationRevision, recoveryEnabled })
     this.hashing = 0
   }
-  async hash(password, salt) {
+  hashSlot() {
     if (this.hashing >= 2) throw new IdentityError()
     this.hashing++
-    try { return await scrypt(password, salt, 32, HASH) } finally { this.hashing-- }
+    let held = true
+    return () => { if (held) { held = false; this.hashing-- } }
+  }
+  async hash(password, salt, release = this.hashSlot()) {
+    try { return await scrypt(password, salt, 32, HASH) } finally { release() }
   }
   async audit(db, actor, target, action, correlationId) {
     await db.query('INSERT INTO ok_identity.audit(actor_id,target_id,action,correlation_id) VALUES($1,$2,$3,$4)', [actor, target, action, correlationId])
@@ -131,17 +136,28 @@ export class LocalIdentity {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
-    if (await this.throttle.blocked(`ordinary:${username}`)) {
+    // Capacity refusals must not consume a principal or global attempt.
+    const releaseHash = this.hashSlot()
+    let reservation, row, expected, actual
+    try {
+      try { reservation = await this.throttle.reserve(`ordinary:${username}`) } catch { throw new IdentityError() }
+      if (reservation.blocked) {
+        await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
+        throw new IdentityError(401)
+      }
+      const selected = await this.pool.query('SELECT a.* FROM ok_identity.accounts a JOIN ok_identity.state s ON s.singleton AND s.initialized WHERE username=$1', [username])
+      row = selected.rows[0]
+      const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
+      expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)
+      actual = await this.hash(input.password, salt, releaseHash)
+    } finally { releaseHash() }
+    if (!row?.enabled || row.hash_profile !== 'scrypt-v1' || expected.length !== 32 || !timingSafeEqual(actual, expected)) {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
-    const selected = await this.pool.query('SELECT a.* FROM ok_identity.accounts a JOIN ok_identity.state s ON s.singleton AND s.initialized WHERE username=$1', [username])
-    const row = selected.rows[0]
-    const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
-    const expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)
-    const actual = await this.hash(input.password, salt)
-    if (!row?.enabled || row.hash_profile !== 'scrypt-v1' || expected.length !== 32 || !timingSafeEqual(actual, expected)) {
-      await this.throttle.failure(`ordinary:${username}`)
+    let outcome
+    try { outcome = await this.throttle.success(`ordinary:${username}`, reservation) } catch { throw new IdentityError() }
+    if (outcome?.refused) {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)
     }
@@ -156,15 +172,49 @@ export class LocalIdentity {
       await this.audit(db, row.id, row.id, 'LoginGranted', correlationId)
       return issued
     })
-    try { await this.throttle.success(`ordinary:${username}`) } catch {
-      await this.sessions.revoke(issued.cookie, 'THROTTLE_UNAVAILABLE').catch(() => {})
-      throw new IdentityError()
-    }
     return issued
   }
 }
 
 // Ordinary login failures cannot exhaust the independent exceptional-access throttle.
-export const ordinaryThrottlePool = (pool) => ({
-  query: (sql, args) => pool.query(sql.replaceAll('ok_console.local_access_throttle', 'ok_identity.login_throttle'), args),
-})
+// Sanitize at this boundary: pg errors can include the rewritten SQL/table in detail.
+const throttleError = (error) => {
+  const classified = classifyPgError(error)
+  const safe = new Error('Ordinary login throttle operation failed.')
+  const code = Object.getOwnPropertyDescriptor(classified ?? {}, 'code')?.value
+  if (typeof code === 'string') safe.code = code
+  return safe
+}
+export const ordinaryThrottlePool = (pool) => {
+  const query = (target) => async (sql, ...args) => {
+    try { return await target.query(sql.replaceAll('ok_console.local_access_throttle', 'ok_identity.login_throttle'), ...args) }
+    catch (error) { throw throttleError(error) }
+  }
+  return {
+    query: query(pool),
+    connect: async () => {
+      let client
+      try { client = await pool.connect() } catch (error) { throw throttleError(error) }
+      const listeners = new Map()
+      const wrapped = {
+        query: query(client),
+        on: (event, listener) => {
+          const safe = event === 'error' ? (error) => listener(throttleError(error)) : listener
+          listeners.set(listener, safe)
+          client.on(event, safe)
+          return wrapped
+        },
+        removeListener: (event, listener) => {
+          client.removeListener(event, listeners.get(listener) ?? listener)
+          listeners.delete(listener)
+          return wrapped
+        },
+        off: (event, listener) => wrapped.removeListener(event, listener),
+        release: (error) => {
+          try { return client.release(error) } catch (failure) { throw throttleError(failure) }
+        },
+      }
+      return wrapped
+    },
+  }
+}

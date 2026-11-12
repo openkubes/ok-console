@@ -1,13 +1,25 @@
 # OK-170 ok-shared development integration evidence
 
-Status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
+> **This document is not an execution approval.** Merging it authorizes no change on ok-shared. Every live step needs a separate, explicit approval of the hashed artifact package and a dated window. The Sovereign Cloud Days event on 2026-10-24 has ended; the recorded freeze (OK-170 comment 15171) prohibited OK-170 deployment, promotion, rollout, server-side apply, ownership handoff, configuration, credential, certificate, RBAC or producer change, fault injection, negative live test, maintenance exercise or rollback before or during it, and the end of the event does not grant execution authority. Until Arash explicitly lifts the freeze, no ok-shared access of any kind is permitted, including read-only access and server dry-runs.
 
-This record supersedes the Phase-A-only acceptance wording below. The current
+## Post-event review package — planning only
+
+The event has ended. Scope C is one working day of 6 h; this planning record grants no execution approval. Historical records below remain dated evidence, not current deployment assertions.
+
+| Review entry | Contract |
+| --- | --- |
+| [Scope C acceptance plan](acceptance-plan.md) | The 6 h plan, completed off-cluster drills, AC map, deferred risks and recorded decisions |
+| [Deferred full-window procedure](maintenance-procedure.md) | Outside Scope C; kept for a later full window and must be re-reviewed against the current candidate before use |
+| Live approval | Step 4 requires Arash's explicit approval of each live write: deploy C1, deploy P1 and fail-closed abort. Existing sign-in configuration; no OIDC change. |
+
+Historical status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
+
+This record supersedes the Phase-A-only acceptance wording below. That recorded
 development deployment is useful for recovery work, but it is not a completed
 live-integration claim. Independent review requires the predecessor tickets to
 reach GO and a fresh Phase-B evidence bundle before promotion.
 
-## Current Phase-B observation (2026-09-10)
+## Historical Phase-B observation (2026-09-10)
 
 - Console: 2/2 Ready on `ok-shared`, BreakGlass/OIDC/PostgreSQL profile;
   running digest `sha256:dc98054b520bb89b4b8aae1b77e1da8ffa86bbdf359efbeb9e350caa3a79261b`.
@@ -45,7 +57,7 @@ those remain operator/browser evidence items for the independent review.
 
 ## Identified target
 
-- Context: `ok-shared-admin@ok-shared`
+- Operator target: context named in the tracked verifier; value not repeated
 - Cluster: `ok-shared`
 - Purpose: shared OpenKubes development environment for the Console
 - Kubernetes: v1.34.1
@@ -80,21 +92,11 @@ policy. OIDC, PostgreSQL, local access and the observed-state producer are
 disabled; data is fixture-backed and read-only. Access is initially bounded to
 port-forwarding rather than publishing an unauthenticated Ingress.
 
-Run a render-only preflight:
+**Historical preview commands — retired, not to be run.** The removed preview verifier formerly offered render-only and apply modes, including the OK_CONSOLE_APPLY flag. This record supplies no runnable preview procedure; use only a separately approved current package.
 
-```bash
-./deploy/kubernetes/verify-ok-shared-preview.sh
-```
-
-After the PR is reviewed and merged, explicitly apply and verify:
-
-```bash
-OK_CONSOLE_APPLY=true ./deploy/kubernetes/verify-ok-shared-preview.sh
-```
-
-The verifier refuses a different current context, refuses a pre-existing
-namespace it does not own, rejects unresolved placeholders or Secret objects,
-verifies rollout/image/security state, and exercises liveness, readiness and
+The retired verifier refused a different current context and a pre-existing
+namespace it did not own, rejected unresolved placeholders or Secret objects,
+verified rollout/image/security state, and exercised liveness, readiness and
 the Console root through a bounded local port-forward.
 
 ## Phase B blockers for live observed state
@@ -128,7 +130,7 @@ revision `358945a641ce77b039b2dfd8e210c99c0c1b893b`.
 The guarded verifier completed successfully with:
 
 ```text
-Context: ok-shared-admin@ok-shared
+Context: <redacted>
 Namespace: openkubes-console
 Deployment: ok-console
 Desired / updated / available replicas: 2 / 2 / 2
@@ -148,17 +150,8 @@ default-deny and same-namespace-only preview policies were present.
 The verifier exercised `/health/live`, `/health/ready`, and the React root page
 through a temporary local port-forward. No Ingress, Secret, OIDC client,
 PostgreSQL database, certificate, producer, OpenKubes CRD, or mutation workflow
-was created. The preview remains deployed for bounded inspection; its existence
+was created. The historical record describes the preview as deployed for bounded inspection; its existence
 must not be described as live observed-state or production authentication
 evidence.
 
-For another bounded visual session:
-
-```bash
-kubectl --context ok-shared-admin@ok-shared \
-  --namespace openkubes-console \
-  port-forward service/ok-console 8787:8787
-```
-
-Then open <http://127.0.0.1:8787>. Stopping the port-forward removes external
-access but leaves the verified preview workload running.
+**Historical port-forward — not to be run.** The retired preview used a temporary Service port-forward. Its former loopback URL and command are intentionally omitted; this history grants no access or execution authority.

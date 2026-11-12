@@ -3,10 +3,11 @@ import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { execFileSync, execFile } from 'node:child_process'
-import { scryptSync } from 'node:crypto'
+import { createHmac, scryptSync } from 'node:crypto'
 import { createServer } from 'node:net'
 import pg from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import https from 'node:https'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 import { PostgresSessionStore } from './postgresSessionStore.mjs'
 import { PostgresLocalAccessThrottle } from './localAccess.mjs'
@@ -19,10 +20,12 @@ const url = process.env.OK_CONSOLE_TEST_POSTGRES_URL
 const suite = url ? describe : describe.skip
 const password = 'Disposable test credential 214!'
 const scope = { environmentId: 'community-preview', tenantIds: ['platform'] }
+const barrier = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 const bootstrap = { subject: { id: 'named-bootstrap', method: 'Bootstrap' }, scope, permissions: ['local.users.initialize','local.users.recover'], authorizationRevision: 'mapping-1' }
 
 suite('OK-214 real PostgreSQL local identity', () => {
-  let pool, sessions, identity, directory, runtime, origin, ca, env
+  let pool, sessions, identity, directory, runtime, origin, ca, env, runtimePool
+  const throttleConfigurations = []
   const cookieHeader = (client) => [...client.cookies].map(([k,v]) => `${k}=${v}`).join('; ')
   const client = () => new LocalIdentityClient({ origin, ca })
   const login = async (name) => { const c = client(); await c.request('/api/console/v0/local-identity/login', { username: name, password }); return c }
@@ -75,7 +78,10 @@ suite('OK-214 real PostgreSQL local identity', () => {
         identityId:'named-bootstrap',displayName:'Named Bootstrap',environmentId:scope.environmentId,tenantIds:['platform'],permissions:bootstrap.permissions,
       }] })),
     }
-    runtime = await createConsoleServer({ env })
+    runtime = await createConsoleServer({ env, sessionRuntimeFactory: options => createSessionRuntime({ ...options,
+      poolFactory: configuration => { runtimePool = new pg.Pool(configuration); return runtimePool },
+      throttleFactory: configuration => { throttleConfigurations.push(configuration); return new PostgresLocalAccessThrottle(configuration) },
+    }) })
     await new Promise((resolve) => runtime.server.listen(port,'127.0.0.1',resolve))
   },30000)
   beforeEach(async () => {
@@ -87,6 +93,169 @@ suite('OK-214 real PostgreSQL local identity', () => {
     await pool?.end()
     if (directory) await rm(directory,{recursive:true,force:true})
   })
+
+  const postLogin = (username, value = password) => new Promise((resolve,reject) => {
+    const request = https.request(new URL('/api/console/v0/local-identity/login',origin), {
+      method:'POST',ca,headers:{Origin:origin,'Content-Type':'application/json'},
+    }, response => { response.resume(); response.on('end',()=>resolve(response)) })
+    request.on('error',reject)
+    request.end(JSON.stringify({username,password:value}))
+  })
+
+  it('wires runtime throttle factories and HTTP logins to independent principal and global rows', async () => {
+    const pepper = Buffer.alloc(32,2)
+    expect(throttleConfigurations).toHaveLength(2)
+    expect(throttleConfigurations[0]).toEqual({pool:runtimePool,pepper})
+    const ordinary = throttleConfigurations[1]
+    expect(ordinary).toEqual({pool:expect.any(Object),pepper})
+    expect(ordinary.pool).not.toBe(runtimePool)
+    expect(ordinary.pool.query).toBeTypeOf('function')
+    expect(ordinary.pool.connect).toBeTypeOf('function')
+    const hmac = value => createHmac('sha256',pepper).update(value).digest('base64url')
+    const expectedRows = username => [hmac(`throttle:principal:${username}`),hmac('throttle:global')]
+    expect((await postLogin('sprayed-user','wrong')).statusCode).toBe(401)
+    const ordinaryRows = (await pool.query('SELECT principal_digest,failures FROM ok_identity.login_throttle ORDER BY principal_digest')).rows
+    expect(ordinaryRows).toHaveLength(2)
+    expect(ordinaryRows).toEqual(expect.arrayContaining(expectedRows('ordinary:sprayed-user').map(principal_digest=>({principal_digest,failures:1}))))
+    expect((await pool.query('SELECT * FROM ok_console.local_access_throttle')).rows).toEqual([])
+    const seed = client()
+    try { await seed.request('/api/console/v0/auth/local',{username:'named-bootstrap',password,reason:'Runtime throttle isolation verification'}) }
+    finally { await seed.close() }
+    const exceptionalRows=(await pool.query('SELECT principal_digest,failures FROM ok_console.local_access_throttle')).rows
+    expect(exceptionalRows).toHaveLength(2)
+    expect(exceptionalRows).toEqual(expect.arrayContaining(expectedRows('named-bootstrap').map(principal_digest=>({principal_digest,failures:0}))))
+    expect((await pool.query('SELECT principal_digest,failures FROM ok_identity.login_throttle ORDER BY principal_digest')).rows).toEqual(ordinaryRows)
+  },15000)
+
+  it('P7 refuses unrelated hash saturation without consuming the admin attempts', async () => {
+    await init()
+    const hash = identity.hash.bind(identity)
+    for (let round=0;round<5;round++) {
+      const entered=barrier(), finish=barrier()
+      let running=0
+      const spy=vi.spyOn(identity,'hash').mockImplementation(async (...args) => {
+        if (++running===2) entered.resolve()
+        await finish.promise
+        return hash(...args)
+      })
+      const pending=[0,1].map(i=>identity.login({username:`other-${round}-${i}`,password:'wrong'},'unrelated').catch(error=>error))
+      try {
+        await entered.promise
+        await expect(identity.login({username:'admin-one',password},'capacity')).rejects.toMatchObject({status:503})
+        expect((await pool.query('SELECT * FROM ok_identity.login_throttle WHERE principal_digest=$1',[identity.throttle.digest('ordinary:admin-one')])).rows).toEqual([])
+        expect((await pool.query('SELECT failures FROM ok_identity.login_throttle WHERE principal_digest=$1',[identity.throttle.globalDigest()])).rows[0].failures).toBe((round+1)*2)
+      } finally { finish.resolve(); await Promise.all(pending); spy.mockRestore() }
+      expect(identity.hashing).toBe(0)
+    }
+    expect(await sessions.resolve((await identity.login({username:'admin-one',password},'after-saturation')).cookie)).not.toBeNull()
+    expect((await pool.query('SELECT failures,blocked_until FROM ok_identity.login_throttle WHERE principal_digest=$1',[identity.throttle.digest('ordinary:admin-one')])).rows[0]).toEqual({failures:0,blocked_until:null})
+    console.log('P7 unrelated=10 capacity503=5 adminFailures=0 correctAfterwards=200')
+  },20000)
+
+  it('P2 eight parallel correct logins reserve only two attempts and do not self-lock', async () => {
+    await init()
+    const entered=barrier(),finish=barrier(), hash=identity.hash.bind(identity)
+    let running=0
+    const spy=vi.spyOn(identity,'hash').mockImplementation(async (...args)=>{
+      if (++running===2) entered.resolve()
+      await finish.promise
+      return hash(...args)
+    })
+    const pending=Array.from({length:8},()=>identity.login({username:'admin-one',password},'parallel').catch(error=>error))
+    try {
+      await entered.promise
+      expect((await pool.query('SELECT failures,blocked_until FROM ok_identity.login_throttle')).rows)
+        .toEqual([{failures:2,blocked_until:null},{failures:2,blocked_until:null}])
+    } finally { finish.resolve() }
+    const results=await Promise.all(pending)
+    spy.mockRestore()
+    expect(results.filter(result=>result.cookie)).toHaveLength(2)
+    expect(results.filter(result=>result.status===503)).toHaveLength(6)
+    expect(results.filter(result=>result.status===401)).toHaveLength(0)
+    expect(identity.hashing).toBe(0)
+    expect((await pool.query('SELECT failures,blocked_until FROM ok_identity.login_throttle')).rows)
+      .toEqual([{failures:0,blocked_until:null},{failures:0,blocked_until:null}])
+    await expect(identity.login({username:'admin-one',password},'after-parallel')).resolves.toHaveProperty('cookie')
+    console.log('P2 parallel=8 granted=2 capacity503=6 denied401=0 reservedPeak=2 finalPrincipal=0 finalGlobal=0 subsequent=200')
+  },15000)
+
+  it('denies an ordinary HTTP login when concurrent wrong attempts own the block during its KDF', async () => {
+    await init()
+    for (let i=0;i<2;i++) await identity.throttle.reserve('ordinary:admin-one')
+    const entered=barrier(),finish=barrier(), hash=LocalIdentity.prototype.hash
+    const spy=vi.spyOn(LocalIdentity.prototype,'hash').mockImplementation(async function(...args) {
+      if (args[0]===password) { entered.resolve(); await finish.promise }
+      return hash.apply(this,args)
+    })
+    const pending=postLogin('admin-one')
+    try {
+      await entered.promise
+      for (let i=0;i<2;i++) expect((await postLogin('admin-one','wrong')).statusCode).toBe(401)
+      const before=(await pool.query('SELECT failures,blocked_until FROM ok_identity.login_throttle WHERE principal_digest=$1',[identity.throttle.digest('ordinary:admin-one')])).rows[0]
+      expect(before).toEqual({failures:5,blocked_until:expect.any(Date)})
+      finish.resolve()
+      const response=await pending
+      expect(response.statusCode).toBe(401)
+      expect(response.headers['set-cookie']).toBeUndefined()
+      expect((await pool.query("SELECT action FROM ok_identity.audit WHERE action LIKE 'Login%' ORDER BY event_id")).rows)
+        .toEqual([{action:'LoginDenied'},{action:'LoginDenied'},{action:'LoginDenied'}])
+      expect((await pool.query('SELECT * FROM ok_console.sessions WHERE revoked_at IS NULL')).rows).toEqual([])
+      expect((await pool.query('SELECT * FROM ok_console.sessions')).rows).toEqual([])
+      expect((await pool.query('SELECT failures,blocked_until FROM ok_identity.login_throttle WHERE principal_digest=$1',[identity.throttle.digest('ordinary:admin-one')])).rows[0]).toEqual(before)
+    } finally { finish.resolve(); await pending; spy.mockRestore() }
+  },15000)
+
+  it('contains a server-ended ordinary reservation in an isolated HTTP process and evicts its client', async () => {
+    const source = `
+      import pg from 'pg'
+      import { createServer } from 'node:http'
+      import { createSessionRuntime } from './bff/security/runtime.mjs'
+      import { PostgresLocalAccessThrottle } from './bff/security/localAccess.mjs'
+      const admin = new pg.Pool({connectionString:process.env.OK_CONSOLE_TEST_POSTGRES_URL})
+      let pool, fired=false, pid, removed=false
+      const runtime = await createSessionRuntime({env:JSON.parse(process.env.OK214_RUNTIME_ENV),
+        poolFactory: configuration => {
+          pool=new pg.Pool({...configuration,max:1})
+          pool.on('remove',client=>{if(client.processID===pid) removed=true})
+          return pool
+        },
+        throttleFactory: configuration => new PostgresLocalAccessThrottle({...configuration,
+          afterStatement: async ({client,sql})=>{
+            if(fired || configuration.pool===pool || !sql.includes('FOR UPDATE')) return
+            fired=true
+            pid=(await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid
+            await admin.query('SELECT pg_terminate_backend($1)',[pid])
+            await new Promise(resolve=>setTimeout(resolve,100))
+          },
+        }),
+      })
+      const server=createServer(async (request,response)=>runtime.localIdentityHandler({request,response,
+        pathname:'/api/console/v0/local-identity/login',correlationId:'ended-ordinary'}))
+      try {
+        await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
+        const response=await fetch('http://127.0.0.1:'+server.address().port+'/api/console/v0/local-identity/login',{
+          method:'POST',headers:{origin:runtime.expectedOrigin,'content-type':'application/json'},
+          body:JSON.stringify({username:'admin-one',password:'irrelevant'}),
+        })
+        const body=await response.json(), failedPoolCount=pool.totalCount
+        const next=(await pool.query('SELECT pg_backend_pid() AS pid,42 AS answer')).rows[0]
+        const sessions=(await admin.query('SELECT count(*)::int AS n FROM ok_console.sessions')).rows[0].n
+        console.log(JSON.stringify({status:response.status,cookie:response.headers.get('set-cookie'),body,
+          fired,alive:true,removed,failedPoolCount,nextWorks:next.answer===42 && next.pid!==pid,sessions}))
+      } finally {
+        server.closeAllConnections()
+        await new Promise(resolve=>server.close(resolve))
+        await runtime.close(); await admin.end()
+      }
+    `
+    const result=await new Promise((resolve,reject)=>execFile(process.execPath,['--input-type=module','-e',source],{
+      env:{...process.env,OK214_RUNTIME_ENV:JSON.stringify(env)},timeout:10000,
+    },(error,stdout,stderr)=>error?reject(error):resolve({stdout,stderr})))
+    expect(result.stderr).toBe('')
+    expect(JSON.parse(result.stdout.trim())).toEqual({status:503,cookie:null,body:{error:{code:'LOCAL_IDENTITY_REJECTED',message:'Local identity request could not be completed.'}},
+      fired:true,alive:true,removed:true,failedPoolCount:0,nextWorks:true,sessions:0})
+    console.log('ORDINARY_PG_END status=503 alive=true removed=true failedPoolCount=0 nextWorks=true sessions=0')
+  },15000)
 
   it('completes authenticated Bootstrap -> admin -> create/list -> local login -> disable -> all session paths rejected over verified HTTPS', async () => {
     const seed = client()
@@ -230,9 +399,112 @@ suite('OK-214 real PostgreSQL local identity', () => {
   it('applies durable ordinary throttling across instances without blocking exceptional access', async () => {
     for(let i=0;i<5;i++) await expect(identity.login({username:'unknown-user',password},'denied')).rejects.toBeDefined()
     const throttle=new PostgresLocalAccessThrottle({pool:ordinaryThrottlePool(pool),pepper:Buffer.alloc(32,2)})
-    expect(await throttle.blocked('ordinary:unknown-user')).toBe(true)
-    expect(await new PostgresLocalAccessThrottle({pool,pepper:Buffer.alloc(32,2)}).blocked('named-bootstrap')).toBe(false)
+    expect(await throttle.reserve('ordinary:unknown-user')).toEqual({blocked:true})
+    expect(await new PostgresLocalAccessThrottle({pool,pepper:Buffer.alloc(32,2)}).reserve('named-bootstrap')).toMatchObject({blocked:false})
     expect(JSON.stringify((await pool.query('SELECT * FROM ok_identity.login_throttle')).rows)).not.toContain('unknown-user')
+  },15000)
+
+  it('counts five bad ordinary passwords and refuses a correct sixth before KDF', async () => {
+    await init()
+    const hash = vi.spyOn(identity, 'hash')
+    try {
+      for (let i = 0; i < 5; i++) await expect(identity.login({username:'admin-one',password:'wrong'}, 'bad')).rejects.toMatchObject({status:401})
+      expect(hash).toHaveBeenCalledTimes(5)
+      expect((await pool.query('SELECT failures FROM ok_identity.login_throttle')).rows).toEqual([{failures:5},{failures:5}])
+      await expect(identity.login({username:'admin-one',password}, 'blocked')).rejects.toMatchObject({status:401})
+      expect(identity.hashing).toBe(0)
+      expect(hash).toHaveBeenCalledTimes(5)
+      const response = await new Promise((resolve,reject) => {
+        const request = https.request(new URL('/api/console/v0/local-identity/login',origin), {
+          method:'POST',ca,headers:{Origin:origin,'Content-Type':'application/json'},
+        }, response => { response.resume(); response.on('end',()=>resolve(response)) })
+        request.on('error',reject)
+        request.end(JSON.stringify({username:'admin-one',password}))
+      })
+      expect(response.statusCode).toBe(401)
+      expect(response.headers['set-cookie']).toBeUndefined()
+      expect((await pool.query('SELECT count(*)::int AS n FROM ok_console.sessions')).rows[0].n).toBe(0)
+      expect((await pool.query("SELECT count(*)::int AS n FROM ok_identity.audit WHERE action='LoginDenied'")).rows[0].n).toBe(7)
+    } finally { hash.mockRestore() }
+  },15000)
+
+  it('sanitizes real PostgreSQL query errors through pool and transaction clients', async () => {
+    const wrapped = ordinaryThrottlePool(pool)
+    const db = await wrapped.connect()
+    try {
+      for (const target of [wrapped,db]) {
+        let caught
+        try { await target.query('SELECT missing_column FROM ok_console.local_access_throttle') } catch (error) { caught=error }
+        expect(caught).toMatchObject({code:'42703',message:'Ordinary login throttle operation failed.'})
+        expect(caught.cause).toBeUndefined()
+        expect(caught.detail).toBeUndefined()
+        expect(caught.stack).not.toContain('ok_identity.login_throttle')
+      }
+    } finally { db.release() }
+  })
+
+  it('refuses reservation INSERT failures with 503 before KDF and without a session', async () => {
+    await init()
+    const database = new URL(await readFile(env.OK_CONSOLE_POSTGRES_URL_FILE,'utf8'))
+    const restricted = new pg.Pool({connectionString:database.toString()})
+    const failed = new LocalIdentity({pool:restricted, sessions, throttle:new PostgresLocalAccessThrottle({pool:ordinaryThrottlePool(restricted),pepper:Buffer.alloc(32,2)}),scope})
+    const hash = vi.spyOn(failed, 'hash')
+    await pool.query('REVOKE INSERT ON ok_identity.login_throttle FROM ok214_runtime')
+    try {
+      await expect(failed.login({username:'admin-one',password}, 'unavailable')).rejects.toMatchObject({status:503})
+      expect(failed.hashing).toBe(0)
+      expect(hash).not.toHaveBeenCalled()
+      const response = await new Promise((resolve,reject) => {
+        const request = https.request(new URL('/api/console/v0/local-identity/login',origin), {
+          method:'POST',ca,headers:{Origin:origin,'Content-Type':'application/json'},
+        }, response => { response.resume(); response.on('end',()=>resolve(response)) })
+        request.on('error',reject)
+        request.end(JSON.stringify({username:'admin-one',password}))
+      })
+      expect(response.statusCode).toBe(503)
+      expect(response.headers['set-cookie']).toBeUndefined()
+      expect((await pool.query('SELECT count(*)::int AS n FROM ok_console.sessions')).rows[0].n).toBe(0)
+      expect((await pool.query('SELECT count(*)::int AS n FROM ok_console.local_access_throttle')).rows[0].n).toBe(0)
+    } finally {
+      await pool.query('GRANT INSERT ON ok_identity.login_throttle TO ok214_runtime')
+      hash.mockRestore()
+      await restricted.end()
+    }
+  },15000)
+
+  it('caps sprayed ordinary usernames at the shared global row in the ordinary table only', async () => {
+    const ordinary = new PostgresLocalAccessThrottle({pool:ordinaryThrottlePool(pool),pepper:Buffer.alloc(32,2)})
+    for (let i=0;i<50;i++) expect(await ordinary.reserve(`ordinary:spray-${i}`)).toMatchObject({blocked:false})
+    expect(await ordinary.reserve('ordinary:spray-50')).toEqual({blocked:true})
+    const rows = (await pool.query('SELECT principal_digest,failures,blocked_until FROM ok_identity.login_throttle')).rows
+    expect(rows).toHaveLength(51)
+    expect(rows.find(row=>row.principal_digest===ordinary.globalDigest())).toMatchObject({failures:50,blocked_until:expect.any(Date)})
+    expect(rows.filter(row=>row.principal_digest!==ordinary.globalDigest()).every(row=>row.failures===1 && row.blocked_until===null)).toBe(true)
+    expect((await pool.query('SELECT count(*)::int AS n FROM ok_console.local_access_throttle')).rows[0].n).toBe(0)
+    expect(await new PostgresLocalAccessThrottle({pool,pepper:Buffer.alloc(32,2)}).reserve('named-bootstrap')).toMatchObject({blocked:false})
+  },15000)
+
+  it.each(['throw','refused'])('issues no session when settlement is %s', async (failure) => {
+    await init()
+    const settle = vi.spyOn(identity.throttle,'success').mockImplementationOnce(async () => {
+      if (failure === 'throw') throw new Error('settlement unavailable')
+      return {refused:true}
+    })
+    try {
+      await expect(identity.login({username:'admin-one',password}, 'settle')).rejects.toMatchObject({status:failure==='throw'?503:401})
+      expect(settle).toHaveBeenCalledWith('ordinary:admin-one',expect.objectContaining({blocked:false}))
+      expect((await pool.query('SELECT * FROM ok_console.sessions')).rows).toHaveLength(0)
+      expect((await pool.query("SELECT action FROM ok_identity.audit WHERE correlation_id='settle'")).rows)
+        .toEqual(failure==='refused' ? [{action:'LoginDenied'}] : [])
+    } finally { settle.mockRestore() }
+  },15000)
+
+  it('settles a successful principal and global reservation without touching exceptional rows', async () => {
+    await init()
+    const issued = await identity.login({username:'admin-one',password},'success')
+    expect(await sessions.resolve(issued.cookie)).not.toBeNull()
+    expect((await pool.query('SELECT failures,blocked_until FROM ok_identity.login_throttle')).rows).toEqual([{failures:0,blocked_until:null},{failures:0,blocked_until:null}])
+    expect((await pool.query('SELECT count(*)::int AS n FROM ok_console.local_access_throttle')).rows[0].n).toBe(0)
   },15000)
 
   it('fails closed when identity, session or throttle tables are unavailable', async () => {

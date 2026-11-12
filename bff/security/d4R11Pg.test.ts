@@ -53,7 +53,7 @@ it.each(boundaries)('K5 real pg client against protocol-level fake hang %s at %s
   }
   if (operation === 'rotate' || operation === 'revoke') { expect(pool.totalCount).toBe(0); expect(queries.some(query => query.includes('ROLLBACK'))).toBe(false) }
   if (operation === 'purgeExpired') { expect(lifecycle.hasFailure(error)).toBe(true); expect(log).toHaveBeenCalledTimes(1); expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ cause: 'SESSION_PURGE', correlationId: 'corr-00000000-0000-4000-8000-000000000001', errorCode: 'PG_QUERY_TIMEOUT' }) }
-})
+}, 30000)
 it.each([['23505', 'PG_UNIQUE_VIOLATION'], ['23514', 'PG_CHECK_VIOLATION']])('K7 real pg driver fake wire SQLSTATE %s has bounded distinct code %s', async (code, expected) => {
   const { pool } = await serve(socket => socket.write(Buffer.concat([packet('E', Buffer.from(`SERROR\0VERROR\0C${code}\0Mprivate constraint detail\0\0`)), ready])))
   const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test' })

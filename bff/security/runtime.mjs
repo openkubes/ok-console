@@ -1,3 +1,5 @@
+import { startErrorCode } from '../diagnostics.mjs'
+import { classifyPgError } from './pgFailure.mjs'
 import { LocalIdentity, ordinaryThrottlePool } from './localIdentity.mjs'
 import { createLocalIdentityHttp, validateLocalIdentityProfile } from './localIdentityHttp.mjs'
 import { timingSafeEqual } from 'node:crypto'
@@ -288,6 +290,9 @@ export const createSessionRuntime = async ({
     idleTimeoutMillis: boundedInteger(env, 'OK_CONSOLE_POSTGRES_IDLE_TIMEOUT_MS', 30_000, 1_000, 300_000),
     query_timeout: queryTimeout,
     statement_timeout: statementTimeout,
+  })
+  pool.on?.('error', error => {
+    console.error(JSON.stringify({ event: 'PG_POOL_FAILED', errorCode: startErrorCode(classifyPgError(error)) }))
   })
   let sessionStore
   try {

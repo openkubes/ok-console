@@ -18,6 +18,7 @@ import { createObservedStateSource } from './source.mjs'
 type JsonRecord = Record<string, unknown>
 type MutableEnvelope = {
   apiVersion: string
+  kind: string
   data: {
     environment: { id: string }
     metrics: Array<JsonRecord>
@@ -67,6 +68,15 @@ const observedEnvelope = async (metadata: JsonRecord = {}) => {
   }
 }
 
+// Every ownership-bearing kind uses the same whole-envelope rejection boundary.
+const ownershipTargets: Array<[string, (envelope: MutableEnvelope) => JsonRecord]> = [
+  ['cluster', (envelope) => envelope.data.clusters[0]],
+  ['capability', (envelope) => envelope.data.clusters[0].capabilities[0]],
+  ['placement', (envelope) => envelope.data.placements[0]],
+  ['evidence', (envelope) => envelope.data.evidence[0]],
+  ['metric bucket', (envelope) => envelope.data.metrics[0]],
+]
+
 const assignClusterTenant = (envelope: MutableEnvelope, clusterId: string, tenantId: string) => {
   const ownership = { environmentId: envelope.data.environment.id, tenantId }
   const cluster = envelope.data.clusters.find((item) => item.id === clusterId)
@@ -101,6 +111,8 @@ const expectContractFailure = async (envelope: unknown, authorizer = prototypeAu
 
   expect(response.status).toBe(502)
   expect(body).toMatchObject({ kind: 'Error', error: { code: 'CONTRACT_INCOMPATIBLE', retryable: false } })
+  expect(body).not.toHaveProperty('data')
+  expect(body).not.toHaveProperty('items')
   expect(JSON.stringify(body)).not.toContain('other-tenant')
   expect(JSON.stringify(body)).not.toContain('missing-cluster')
   expect(JSON.stringify(body)).not.toContain('missing-evidence')
@@ -233,17 +245,45 @@ describe('OpenKubes observed-state query adapter', () => {
     await expectContractFailure(envelope)
   })
 
-  it.each([
-    ['empty tenant', (envelope: MutableEnvelope) => { (envelope.data.clusters[0].ownership as JsonRecord).tenantId = '' }],
-    ['whitespace tenant', (envelope: MutableEnvelope) => { (envelope.data.clusters[0].ownership as JsonRecord).tenantId = ' team-a ' }],
-    ['control character', (envelope: MutableEnvelope) => { (envelope.data.clusters[0].ownership as JsonRecord).tenantId = 'team\na' }],
-    ['oversize tenant', (envelope: MutableEnvelope) => { (envelope.data.clusters[0].ownership as JsonRecord).tenantId = 't'.repeat(257) }],
-    ['non-string environment', (envelope: MutableEnvelope) => { (envelope.data.clusters[0].ownership as JsonRecord).environmentId = 7 }],
-  ])('rejects invalid ownership strings: %s', async (_label, mutate) => {
+  it.each(ownershipTargets.flatMap(([kind, target]) => [
+    ['null', null], ['number', 7], ['string', 'platform'], ['array', []], ['empty object', {}],
+  ].map(([shape, value]) => [kind, shape, target, value] as const)))(
+    'rejects malformed %s ownership: %s', async (_kind, _shape, target, value) => {
+      const envelope = await observedEnvelope() as unknown as MutableEnvelope
+      target(envelope).ownership = value
+      await expectContractFailure(envelope)
+    },
+  )
+
+  it.each(ownershipTargets)('rejects extra fields in %s ownership', async (_kind, target) => {
     const envelope = await observedEnvelope() as unknown as MutableEnvelope
-    mutate(envelope)
+    ;(target(envelope).ownership as JsonRecord).role = 'admin'
     await expectContractFailure(envelope)
   })
+
+  it('rejects an envelope kind mismatch', async () => {
+    const envelope = await observedEnvelope()
+    envelope.kind = 'AnotherObservedState'
+    await expectContractFailure(envelope)
+  })
+
+  it.each(ownershipTargets.flatMap(([kind, target]) => [
+    ['numeric tenant', 'tenantId', 7],
+    ['object tenant', 'tenantId', {}],
+    ['empty environment', 'environmentId', ''],
+    ['whitespace environment', 'environmentId', '   '],
+    ['empty tenant', 'tenantId', ''],
+    ['whitespace tenant', 'tenantId', ' team-a '],
+    ['control character', 'tenantId', 'team\na'],
+    ['oversize tenant', 'tenantId', 't'.repeat(257)],
+    ['non-string environment', 'environmentId', 7],
+  ].map(([label, field, value]) => [kind, label, target, field as string, value] as const)))(
+    'rejects invalid ownership strings: %s / %s', async (_kind, _label, target, field, value) => {
+      const envelope = await observedEnvelope() as unknown as MutableEnvelope
+      ;(target(envelope).ownership as JsonRecord)[field] = value
+      await expectContractFailure(envelope)
+    },
+  )
 
   it('rejects ownership from a different environment', async () => {
     const envelope = await observedEnvelope() as unknown as MutableEnvelope

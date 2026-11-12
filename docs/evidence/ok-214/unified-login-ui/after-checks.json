@@ -1,0 +1,230 @@
+[
+  {
+    "mode": "local",
+    "viewport": "desktop",
+    "brandingHash": "c8adf6f109e1876193f61295bfcd4b57fbddc47e191162f3de87264d83af31cd",
+    "domHash": "5605a0030962c686a8955ec2bf7d354e5ebb6ccd8e9d48354180b8add56c3e55",
+    "layout": [
+      772.09375,
+      247.984375,
+      515,
+      489.03125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": []
+  },
+  {
+    "mode": "prototype",
+    "viewport": "desktop",
+    "brandingHash": "b1c6e1a82911b6d40cd3dd386428599ad91af63c109dc419f811421fe81517db",
+    "domHash": "fe593040fb0ff49832674ea68d0cd7599b625d0adb3d1de8cded9ca6d56be215",
+    "layout": [
+      772.09375,
+      214.984375,
+      515,
+      555.03125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              ".auth-local-entry > span > small"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #7b8391, background color: #f6f7f9, font size: 6.0pt (8px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "mode": "oidc",
+    "viewport": "desktop",
+    "brandingHash": "da727e4579cb2574bd5b15f1c34de673d8d087efe10183f33e6e2f71f78d14ea",
+    "domHash": "18ba0f504b911b03e57bbbaa952a9be45b84df9faaa6de87a91eb678fa008e77",
+    "layout": [
+      772.09375,
+      298.984375,
+      515,
+      387.03125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": []
+  },
+  {
+    "mode": "bootstrap",
+    "viewport": "desktop",
+    "brandingHash": "da727e4579cb2574bd5b15f1c34de673d8d087efe10183f33e6e2f71f78d14ea",
+    "domHash": "0d5afaf91c4f1cf9f7bb1d73e2f9f1d66d14d34361701b567038ea09adf7e054",
+    "layout": [
+      772.09375,
+      296.484375,
+      515,
+      392.03125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              "button > span > small"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #7b8391, background color: #f6f7f9, font size: 6.0pt (8px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "mode": "breakglass",
+    "viewport": "desktop",
+    "brandingHash": "da727e4579cb2574bd5b15f1c34de673d8d087efe10183f33e6e2f71f78d14ea",
+    "domHash": "51c916061bdeb0c77ef08b7908d6df3bbffe36a831ecc7c6b68d7d82e43fc5fd",
+    "layout": [
+      772.09375,
+      252.484375,
+      515,
+      480.03125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              ".auth-local-entry > span > small"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #7b8391, background color: #f6f7f9, font size: 6.0pt (8px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "mode": "local",
+    "viewport": "mobile",
+    "brandingHash": "d6d85c7e51cecc1cc4843b46209b906bcd9ca46f9c6a8c1ae73f1f8afdd0a687",
+    "domHash": "5605a0030962c686a8955ec2bf7d354e5ebb6ccd8e9d48354180b8add56c3e55",
+    "layout": [
+      10,
+      289.875,
+      370,
+      435.828125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": []
+  },
+  {
+    "mode": "prototype",
+    "viewport": "mobile",
+    "brandingHash": "d6d85c7e51cecc1cc4843b46209b906bcd9ca46f9c6a8c1ae73f1f8afdd0a687",
+    "domHash": "fe593040fb0ff49832674ea68d0cd7599b625d0adb3d1de8cded9ca6d56be215",
+    "layout": [
+      10,
+      289.875,
+      370,
+      507.625
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              ".auth-local-entry > span > small"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #7b8391, background color: #f6f7f9, font size: 6.0pt (8px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "mode": "oidc",
+    "viewport": "mobile",
+    "brandingHash": "d6d85c7e51cecc1cc4843b46209b906bcd9ca46f9c6a8c1ae73f1f8afdd0a687",
+    "domHash": "18ba0f504b911b03e57bbbaa952a9be45b84df9faaa6de87a91eb678fa008e77",
+    "layout": [
+      10,
+      289.875,
+      370,
+      346.625
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": []
+  },
+  {
+    "mode": "bootstrap",
+    "viewport": "mobile",
+    "brandingHash": "d6d85c7e51cecc1cc4843b46209b906bcd9ca46f9c6a8c1ae73f1f8afdd0a687",
+    "domHash": "0d5afaf91c4f1cf9f7bb1d73e2f9f1d66d14d34361701b567038ea09adf7e054",
+    "layout": [
+      10,
+      289.875,
+      370,
+      338.828125
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              "button > span > small"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #7b8391, background color: #f6f7f9, font size: 6.0pt (8px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "mode": "breakglass",
+    "viewport": "mobile",
+    "brandingHash": "d6d85c7e51cecc1cc4843b46209b906bcd9ca46f9c6a8c1ae73f1f8afdd0a687",
+    "domHash": "51c916061bdeb0c77ef08b7908d6df3bbffe36a831ecc7c6b68d7d82e43fc5fd",
+    "layout": [
+      10,
+      289.875,
+      370,
+      439.625
+    ],
+    "errors": [],
+    "overflow": false,
+    "violations": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "nodes": [
+          {
+            "target": [
+              ".auth-local-entry > span > small"
+            ],
+            "summary": "Fix any of the following:\n  Element has insufficient color contrast of 3.56 (foreground color: #7b8391, background color: #f6f7f9, font size: 6.0pt (8px), font weight: normal). Expected contrast ratio of 4.5:1"
+          }
+        ]
+      }
+    ]
+  }
+]

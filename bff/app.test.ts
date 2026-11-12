@@ -319,6 +319,53 @@ describe('OK-173 object authorization', () => {
     expect(JSON.stringify(session.body)).not.toContain('tenantIds')
   })
 
+  it('does not expose foreign objects, aggregates or derived metadata through any read route', async () => {
+    const raw = await mixedSnapshot()
+    // Capability IDs are unique only within a cluster; mark the hidden instances.
+    for (const cluster of raw.clusters.filter((item: { ownership: { tenantId: string } }) => item.ownership.tenantId === 'B')) {
+      for (const capability of cluster.capabilities) capability.id = `foreign-only-${capability.id}`
+    }
+    // Only foreign evidence contributes the redaction warning.
+    for (const item of raw.evidence) item.redacted = item.ownership.tenantId === 'B'
+    raw.sourceHealth = { freshness: 'Current', warnings: [
+      { code: 'REDACTED', message: 'Sensitive Evidence summary content was redacted at the Console source boundary.' },
+    ] }
+    await startMixed(raw)
+    for (const route of ['session', 'overview', 'clusters', 'clusters/cluster-ok-ai', 'evidence/ev-ai-ready']) {
+      const { response, body } = await getJson(`/api/console/v0/${route}`)
+      expect(response.status, route).toBe(200)
+      expect(validateConsoleResponse(body), route).toEqual({ valid: true, errors: [] })
+      const serialized = JSON.stringify(body)
+      for (const cluster of raw.clusters.filter((item: { ownership: { tenantId: string } }) => item.ownership.tenantId === 'B')) {
+        expect(serialized, route).not.toContain(cluster.id)
+        for (const capability of cluster.capabilities) expect(serialized, route).not.toContain(capability.id)
+      }
+      for (const item of [...raw.evidence, ...raw.placements].filter((item) => item.ownership.tenantId === 'B')) {
+        expect(serialized, route).not.toContain(item.id)
+      }
+      expect(serialized, route).not.toContain(raw.sourceHealth.warnings[0].message)
+      if (!route.startsWith('evidence/')) {
+        expect((body.meta as { warnings?: Array<{ code: string }> }).warnings ?? [], route)
+          .not.toContainEqual(expect.objectContaining({ code: 'REDACTED' }))
+      }
+      if (route === 'overview') {
+        expect(body).toMatchObject({ data: {
+          clusters: { total: 1 }, capabilities: { total: 3 }, workloadClaims: { total: 1 },
+          openFindings: { total: 2 }, managementPlane: null, recentPlacements: [{ id: 'claim-private-ai' }],
+        } })
+        expect((body.data as { recentPlacements: unknown[] }).recentPlacements).toHaveLength(1)
+      }
+      if (route === 'clusters') expect((body.data as { items: unknown[] }).items).toHaveLength(1)
+    }
+    for (const [route, id] of [['clusters', 'cluster-ok-mgmt'], ['evidence', 'ev-mgmt-ready']]) {
+      const foreign = await getJson(`/api/console/v0/${route}/${id}`)
+      const missing = await getJson(`/api/console/v0/${route}/random-missing-id`)
+      expect(foreign.response.status).toBe(404)
+      expect(missing.response.status).toBe(404)
+      expect(foreign.body).toEqual(missing.body)
+    }
+  })
+
   it.each([
     ['clusters', 'cluster-ok-mgmt'], ['evidence', 'ev-mgmt-ready'],
   ])('makes foreign %s indistinguishable from missing ids', async (route, foreignId) => {

@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
+import { accessSync, constants } from 'node:fs'
 import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -23,13 +24,15 @@ set -Eeuo pipefail
 printf 'kubectl' >> "\${KUBECTL_ARGV_LOG}"
 printf ' <%s>' "$@" >> "\${KUBECTL_ARGV_LOG}"
 printf '\n' >> "\${KUBECTL_ARGV_LOG}"
+if [[ -n "\${EXPECTED_KUBECONFIG:-}" ]]; then [[ "\${KUBECONFIG:-}" == "\${EXPECTED_KUBECONFIG}" ]] || { printf 'unexpected KUBECONFIG: %s\\n' "\${KUBECONFIG:-missing}" >&2; exit 2; }; fi
 fail() { printf 'unexpected kubectl invocation: %s\\n' "$*" >&2; exit 2; }
 if [[ "\${1:-}" == kustomize ]]; then
   [[ "$#" == 2 ]] || fail "$@"
   printf 'apiVersion: v1\\nkind: Pod\\nspec:\\n  containers:\\n    - image: ok-console:ok-169-local\\n'
   exit 0
 fi
-[[ "\${1:-}" == --context && "\${2:-}" == kind-test ]] || fail "$@"
+expected_context="\${EXPECTED_KIND_CONTEXT:-kind-test}"
+[[ "\${1:-}" == --context && "\${2:-}" == "\${expected_context}" ]] || fail "$@"
 if [[ "\${3:-}" == apply ]]; then
   [[ "\${4:-}" == -f && "$#" == 5 ]] || fail "$@"
   exit 0
@@ -66,7 +69,7 @@ elif [[ " $* " == *" get pods "* ]]; then
         printf 'current-pod|current-uid|True||Running\\nold-pod|old-uid|True||Running\\n'
       fi
       ;;
-    valid|main-forward-fail|main-transient|main-persistent-failure|main-forward-exit|main-success-cleanup-fail) printf 'current-pod|current-uid|True||Running\\n' ;;
+    valid|integration-isolated|main-forward-fail|main-transient|main-persistent-failure|main-forward-exit|main-success-cleanup-fail) printf 'current-pod|current-uid|True||Running\\n' ;;
     *) printf 'unknown scenario: %s\\n' "\${KUBECTL_SCENARIO}" >&2; exit 2 ;;
   esac
 elif [[ "\${1:-}" == port-forward ]]; then
@@ -113,7 +116,7 @@ server.once('error', (error) => {
 })
 server.listen(port, '127.0.0.1', () => {
   let line = ''
-  if (process.env.KUBECTL_SCENARIO === 'ready' || process.env.KUBECTL_SCENARIO.startsWith('main-') || process.env.KUBECTL_SCENARIO === 'line-then-exit' || process.env.KUBECTL_SCENARIO === 'filter-exit') {
+  if (process.env.KUBECTL_SCENARIO === 'ready' || process.env.KUBECTL_SCENARIO === 'integration-isolated' || process.env.KUBECTL_SCENARIO.startsWith('main-') || process.env.KUBECTL_SCENARIO === 'line-then-exit' || process.env.KUBECTL_SCENARIO === 'filter-exit') {
     line = 'Forwarding from 127.0.0.1:' + port + ' -> 8787'
   } else if (process.env.KUBECTL_SCENARIO === 'wrong-port') {
     line = 'Forwarding from 127.0.0.1:' + (port + 1) + ' -> 8787'
@@ -160,7 +163,9 @@ printf 'kind' >> "\${KIND_ARGV_LOG}"
 printf ' <%s>' "$@" >> "\${KIND_ARGV_LOG}"
 printf '\n' >> "\${KIND_ARGV_LOG}"
 case "\${1:-} \${2:-}" in
-  'get clusters') [[ "\${KUBECTL_SCENARIO}" != preflight-already-exists ]] || printf 'test\\n' ;;
+  'get clusters')
+    if [[ "\${KUBECTL_SCENARIO}" == preflight-kind-list-fail ]]; then exit 17; fi
+    [[ "\${KUBECTL_SCENARIO}" != preflight-already-exists ]] || printf 'test\\n' ;;
   'create cluster')
     if [[ "\${KUBECTL_SCENARIO}" == main-baseline-trace ]]; then printf 'kind-create\n' >> "\${BASELINE_TRACE}"; fi
     : ;;
@@ -170,6 +175,8 @@ case "\${1:-} \${2:-}" in
     [[ "\${KUBECTL_SCENARIO}" != main-success-cleanup-fail ]] || exit 8
     : ;;
   'version ')
+    if [[ "\${KUBECTL_SCENARIO}" == integration-isolated ]]; then printf 'kind v0.33.0 go1.27.0 darwin/arm64\\n'; exit 0; fi
+    if [[ "\${KUBECTL_SCENARIO}" == integration-old-kind ]]; then printf 'kind v0.32.9 go1.27.0 darwin/arm64\\n'; exit 0; fi
     if [[ "\${KUBECTL_SCENARIO}" == main-rollout-fail ]]; then
       printf 'started\\n' >"\${KIND_CAPTURE_MARKER}"
       trap '' TERM
@@ -242,17 +249,77 @@ case "\${1:-}" in
 esac
 `
 
+const findExecutable = (name: string) => {
+  for (const directory of (process.env.PATH ?? '').split(':')) {
+    const candidate = join(directory, name)
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Continue searching PATH when this entry is missing or not executable.
+    }
+  }
+  return undefined
+}
+
+const resolveExecutable = (name: string) => {
+  const candidate = findExecutable(name)
+  if (!candidate) throw new Error(`Required host executable is unavailable: ${name}`)
+  return candidate
+}
+
+const timeoutStub = `#!${process.execPath}
+const fs = require('node:fs')
+const { spawn } = require('node:child_process')
+const args = process.argv.slice(2)
+const duration = args.find((value) => /^\\d+s$/.test(value))
+if (duration === '29s' && process.env.KUBECTL_SCENARIO === 'main-capture-helper-fail') {
+  fs.writeFileSync(process.env.CAPTURE_OUTER_MARKER, 'outer-helper-failed\\n')
+  process.exit(42)
+}
+if (duration === '29s') fs.appendFileSync(process.env.CAPTURE_OUTER_MARKER, 'capture-started\\n')
+if (!duration) process.exit(125)
+const nativeTimeout = ${JSON.stringify(findExecutable('timeout') ?? '')}
+if (nativeTimeout) {
+  const native = spawn(nativeTimeout, args, { stdio: 'inherit' })
+  native.on('error', () => process.exit(127))
+  native.on('close', (code, signal) => process.exit(code ?? (signal ? 128 : 0)))
+} else {
+const command = args.slice(args.indexOf(duration) + 1)
+if (!command.length) process.exit(125)
+const child = spawn(command[0], command.slice(1), { stdio: 'inherit' })
+let timedOut = false
+let killTimer
+const timeout = setTimeout(() => {
+  timedOut = true
+  child.kill('SIGTERM')
+  killTimer = setTimeout(() => child.kill('SIGKILL'), 1000)
+}, Number(duration.slice(0, -1)) * 1000)
+child.on('error', () => process.exit(127))
+child.on('close', (code, signal) => {
+  clearTimeout(timeout)
+  clearTimeout(killTimer)
+  process.exit(timedOut ? 124 : (code ?? (signal ? 128 : 0)))
+})
+}
+`
+
 const createIsolatedToolDirectory = async (name: string, omitted: string) => {
   const directory = join(fixtureDirectory, name)
   await mkdir(directory)
   const tools = new Map([
-    ['bash', '/bin/bash'],
-    ['dirname', '/usr/bin/dirname'],
-    ['mktemp', '/usr/bin/mktemp'],
-    ['rm', '/usr/bin/rm'],
-    ['sed', '/usr/bin/sed'],
-    ['grep', '/usr/bin/grep'],
-    ['awk', '/usr/bin/awk'],
+    ['bash', resolveExecutable('bash')],
+    ['node', process.execPath],
+    ['dirname', resolveExecutable('dirname')],
+    ['mktemp', resolveExecutable('mktemp')],
+    ['rm', resolveExecutable('rm')],
+    ['sed', resolveExecutable('sed')],
+    ['grep', resolveExecutable('grep')],
+    ['awk', resolveExecutable('awk')],
+    ['head', resolveExecutable('head')],
+    ['date', resolveExecutable('date')],
+    ['wc', resolveExecutable('wc')],
+    ['cat', resolveExecutable('cat')],
     ['docker', join(fixtureDirectory, 'docker')],
     ['kind', join(fixtureDirectory, 'kind')],
     ['kubectl', join(fixtureDirectory, 'kubectl')],
@@ -268,6 +335,9 @@ const createIsolatedToolDirectory = async (name: string, omitted: string) => {
 }
 
 beforeAll(async () => {
+  const bash = await exec('bash', ['-c', 'printf "%s.%s\\n" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"'])
+  const [bashMajor, bashMinor] = bash.stdout.trim().split('.').map(Number)
+  expect(bashMajor > 4 || (bashMajor === 4 && bashMinor >= 4), `Tests require Bash 4.4 or newer; found ${bash.stdout.trim()}. On macOS install Homebrew Bash and put it first on PATH.`).toBe(true)
   fixtureDirectory = await mkdtemp(join(tmpdir(), 'ok-console-ok200-'))
   const files = new Map([
     ['kubectl', kubectlStub],
@@ -277,17 +347,7 @@ beforeAll(async () => {
     ['git', gitStub],
     ['curl', curlStub],
     ['capture-recorder', captureRecorderStub],
-    ['timeout', `#!/usr/bin/env bash
-set -Eeuo pipefail
-if [[ "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
-  printf 'capture-started\\n' >> "\${CAPTURE_OUTER_MARKER}"
-fi
-if [[ "\${KUBECTL_SCENARIO}" == main-capture-helper-fail && "\${1:-}" == --signal=TERM && "\${3:-}" == 29s ]]; then
-  printf 'outer-helper-failed\\n' >"\${CAPTURE_OUTER_MARKER}"
-  exit 42
-fi
-exec /usr/bin/timeout "$@"
-`],
+    ['timeout', timeoutStub],
     ['sleep', '#!/usr/bin/env bash\nif [[ "${KUBECTL_SCENARIO}" == main-forward-exit ]]; then /bin/sleep 0.1; fi\n'],
   ])
   await Promise.all([...files].map(([name, contents]) => writeFile(join(fixtureDirectory, name), contents)))
@@ -416,12 +476,144 @@ const cleanupFailureArtifact = async (failure: { stderr?: string }) => {
   if (directory) await rm(directory, { recursive: true, force: true })
 }
 
+const procCountersAvailable = () => {
+  if (process.platform === 'darwin') return false
+  if (process.platform !== 'linux') throw new Error(`Unsupported test platform for OK-200 capture: ${process.platform}`)
+  const source = process.env.OK200_PROC_NET_NETSTAT || '/proc/net/netstat'
+  try {
+    accessSync(source, constants.R_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const expectNoKubectlOrDockerCalls = async (env: NodeJS.ProcessEnv) => {
   await expect(readFile(env.KUBECTL_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   await expect(readFile(env.DOCKER_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
 }
 
 describe('OK-200 verification preflight', () => {
+  it('uses an isolated kubeconfig and owner-rendered Kind config when supplied', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      const kubeconfig = join(temporaryDirectory, 'kubeconfig')
+      await writeFile(kindConfig, 'kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: test\n')
+      const result = await runMain('integration-isolated', {
+        OK_CONSOLE_KIND_CONFIG: kindConfig,
+        OK_CONSOLE_KUBECONFIG: kubeconfig,
+        OK_CONSOLE_MIN_KIND_VERSION: '0.33.0',
+        EXPECTED_KUBECONFIG: kubeconfig,
+      })
+      const argv = await readFile(result.env.KIND_ARGV_LOG!, 'utf8')
+      expect(argv).toContain(`kind <create> <cluster> <--config> <${kindConfig}> <--name> <test> <--kubeconfig> <${kubeconfig}>`)
+      expect(await readFile(result.env.KUBECTL_ARGV_LOG!, 'utf8')).toContain('<--context> <kind-test>')
+    })
+  })
+
+  it('accepts bounded 49-character Kind names for both original E2E logical names without real cluster operations', async () => {
+    const ownerNames = [
+      `${'ok-local-e2e-arash-20261105'.slice(0, 16)}-${'edd83ae5428019db1593dd56e6105916'}`,
+      `${'ok-local-e2e-arash-20261105-b'.slice(0, 16)}-${'0123456789abcdef0123456789abcdef'}`,
+    ]
+    expect(ownerNames.map((name) => name.length)).toEqual([49, 49])
+    for (const clusterName of ownerNames) {
+      await withTestTempDirectory(async (temporaryDirectory) => {
+        const kindConfig = join(temporaryDirectory, 'kind.yaml')
+        const kubeconfig = join(temporaryDirectory, 'kubeconfig')
+        await writeFile(kindConfig, `kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: ${clusterName}\n`)
+        const result = await runMain('integration-isolated', {
+          OK_CONSOLE_KIND_CLUSTER: clusterName,
+          OK_CONSOLE_KIND_CONFIG: kindConfig,
+          OK_CONSOLE_KUBECONFIG: kubeconfig,
+          OK_CONSOLE_MIN_KIND_VERSION: '0.33.0',
+          EXPECTED_KIND_CONTEXT: `kind-${clusterName}`,
+          EXPECTED_KUBECONFIG: kubeconfig,
+        })
+        const argv = await readFile(result.env.KIND_ARGV_LOG!, 'utf8')
+        expect(argv).toContain(`<${clusterName}>`)
+        expect(argv).toContain(`kind <create> <cluster> <--config> <${kindConfig}> <--name> <${clusterName}> <--kubeconfig> <${kubeconfig}>`)
+      })
+    }
+  })
+
+  it('rejects a 50-character Kind name before cluster creation', async () => {
+    const clusterName = `${'a'.repeat(17)}-${'b'.repeat(32)}`
+    expect(clusterName).toHaveLength(50)
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      await writeFile(kindConfig, `kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: ${clusterName}\n`)
+      const run = runMain('integration-isolated', {
+        OK_CONSOLE_KIND_CLUSTER: clusterName,
+        OK_CONSOLE_KIND_CONFIG: kindConfig,
+        OK_CONSOLE_KUBECONFIG: join(temporaryDirectory, 'kubeconfig'),
+      })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('lowercase DNS label of at most 49 characters'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expect(readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+  })
+
+  it('fails closed when listing Kind clusters fails', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const run = runMain('preflight-kind-list-fail', { TMPDIR: temporaryDirectory })
+      await expect(run).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining('Could not list existing Kind clusters; refusing to create a cluster.'),
+      })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toBe('kind <get> <clusters>\n')
+      await expect(readFile(failure.env.DOCKER_ARGV_LOG!, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+  })
+
+  it('rejects Kind older than the isolated kubeconfig contract before resource creation', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      await writeFile(kindConfig, 'kind: Cluster\n')
+      const run = runMain('integration-old-kind', {
+        OK_CONSOLE_KIND_CONFIG: kindConfig,
+        OK_CONSOLE_KUBECONFIG: join(temporaryDirectory, 'kubeconfig'),
+        OK_CONSOLE_MIN_KIND_VERSION: '0.33.0',
+      })
+      await expect(run).rejects.toMatchObject({ stderr: expect.stringContaining('Kind 0.33.0 or newer is required') })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).toContain('kind <version>')
+      expect(await readFile(failure.env.KIND_ARGV_LOG!, 'utf8')).not.toContain('kind <create>')
+    })
+  })
+
+  it('rejects only one isolated path before calling Docker or kubectl', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      await writeFile(kindConfig, 'kind: Cluster\n')
+      const run = runMain('valid', { OK_CONSOLE_KIND_CONFIG: kindConfig, OK_CONSOLE_KUBECONFIG: undefined })
+      await expect(run).rejects.toMatchObject({ stderr: expect.stringContaining('must be supplied together') })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+    })
+  })
+
+  it('refuses to overwrite an existing isolated kubeconfig, including a symlink', async () => {
+    await withTestTempDirectory(async (temporaryDirectory) => {
+      const kindConfig = join(temporaryDirectory, 'kind.yaml')
+      const kubeconfig = join(temporaryDirectory, 'kubeconfig')
+      const target = join(temporaryDirectory, 'global-config')
+      await writeFile(kindConfig, 'kind: Cluster\n')
+      await writeFile(target, 'must remain untouched')
+      await symlink(target, kubeconfig)
+      const run = runMain('integration-isolated', { OK_CONSOLE_KIND_CONFIG: kindConfig, OK_CONSOLE_KUBECONFIG: kubeconfig })
+      await expect(run).rejects.toMatchObject({ stderr: expect.stringContaining('already exists') })
+      const failure = await run.catch((error: { env: NodeJS.ProcessEnv; stderr: string }) => error)
+      await expectNoKubectlOrDockerCalls(failure.env)
+      expect(await readFile(target, 'utf8')).toBe('must remain untouched')
+    })
+  })
+
   it('does not run kubectl or docker when a required tool is missing', async () => {
     await withTestTempDirectory(async (temporaryDirectory) => {
       const run = runMain('preflight-missing-tool', { TMPDIR: temporaryDirectory }, missingCurlDirectory)
@@ -670,8 +862,13 @@ main "$@"
       expect(capture).toContain('error: kubectl was unable to forward the requested port (details omitted)')
       expect(capture).not.toMatch(/planted-|Authorization|https:|apiVersion/i)
       const netstat = await readFile(join(directory!, 'netstat.txt'), 'utf8')
-      expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
-      expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      if (procCountersAvailable()) {
+        expect(netstat).toMatch(/^start TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+        expect(netstat).toMatch(/^delta TcpExt ListenOverflows=\d+ ListenDrops=\d+$/m)
+      } else {
+        expect(netstat).toMatch(/^start TcpExt ListenOverflows=unavailable ListenDrops=unavailable$/m)
+        expect(netstat).toMatch(/^delta TcpExt ListenOverflows=unavailable ListenDrops=unavailable$/m)
+      }
       await cleanupFailureArtifact(failure)
     })
   })

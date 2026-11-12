@@ -45,6 +45,35 @@ describe('exceptional local access verifier', () => {
     expect(derive).not.toHaveBeenCalled()
   })
 
+  it('denies disabled local access before throttle, password work or session issuance', async () => {
+    const isEnabled = vi.fn(async () => false)
+    const { verify, throttle, derive, sessionStore, audit } = setup({ isEnabled })
+    await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject<Partial<LocalAccessError>>({ code: 'LOCAL_ACCESS_REJECTED' })
+    expect(isEnabled).toHaveBeenCalledTimes(1)
+    expect(throttle.reserve).not.toHaveBeenCalled()
+    expect(derive).not.toHaveBeenCalled()
+    expect(sessionStore.create).not.toHaveBeenCalled()
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'Denied', cause: 'THROTTLED' }))
+  })
+
+  it('fails closed at ENABLED_CHECK before any downstream operation', async () => {
+    const cause = new Error('private enabled-check failure')
+    const { verify, throttle, derive, sessionStore, audit } = setup({ isEnabled: async () => { throw cause } })
+    await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'ENABLED_CHECK', cause })
+    expect(throttle.reserve).not.toHaveBeenCalled()
+    expect(derive).not.toHaveBeenCalled()
+    expect(sessionStore.create).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+  })
+
+  it('treats an undefined enabled-check option as enabled', async () => {
+    const { verify } = setup({ isEnabled: undefined })
+    await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .resolves.toMatchObject({ cookie: 'session' })
+  })
+
   it('requires a bounded operational reason before verification', async () => {
     const { verify, derive } = setup()
     await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'short' })).rejects.toBeInstanceOf(LocalAccessError)

@@ -336,6 +336,7 @@ The real-source path consumes the versioned read-only query envelope
 `observed.openkubes.io/v0alpha2` / `ConsoleObservedState`. Every cluster,
 capability, placement and evidence object carries `ownership`
 (`environmentId`, `tenantId`), and metrics arrive as one bucket per owner.
+Ownership must contain exactly `environmentId` and `tenantId`; unknown ownership keys are rejected.
 The BFF rejects an envelope with missing or inconsistent ownership, duplicate
 ids or unresolved or cross-owner references, then filters every object to the
 tenants the session may see (its tenants intersected with
@@ -554,7 +555,7 @@ Projection and response-writing exceptions therefore remain visible.
 
 Local-access dependency failures emit LOCAL_ACCESS_FAILED once for the unavailable
 operation, at the reached lifecycle stage (normally REQUEST_RECEIVED). The closed
-cause steps are THROTTLE_RESERVE, THROTTLE_RESET, KDF,
+cause steps are ENABLED_CHECK, THROTTLE_RESERVE, THROTTLE_RESET, KDF,
 SESSION_STORE and AUDIT, with OTHER for an unknown step. These identify the exact
 verifier operation without adding lifecycle stages. errorCode uses the preserved
 cause and the shared classifier. A failed compensating revoke adds a
@@ -733,3 +734,10 @@ Four D2 result lines, verbatim from the coordinator transcript:
 {"label":"3-still-stepped","processWallTime":"2026-10-27T11:42:41.768Z","result":"FAIL","failureLine":{"time":"2026-10-27T11:42:41.801Z","stage":"SOURCE_ATTEMPT_START","route":"OTHER","correlationId":"corr-00000000-0000-4000-8000-000000000000","class":"TRUST_REJECTED","reason":"CERTIFICATE_VERIFICATION","nodeCode":"CERT_NOT_YET_VALID","httpStatus":"NONE","failedStage":"TLS_HANDSHAKE","elapsedMs":33,"phaseMs":{"dns":13,"connect":12},"wallClockStepMs":0,"clockOffsetMs":-30000,"clockStepSinceLastObservationMs":0,"lastObservationAgeMs":5,"stages":[]}}
 {"label":"4-step-reverted","processWallTime":"2026-10-27T11:43:11.803Z","result":"OK","status":200}
 ```
+
+Ordinary local identity uses the same counted-before-password reservation contract
+with `global: false` and the independent `ok_identity.login_throttle` table. Its
+principal limit remains five attempts per 15 minutes; username spraying cannot
+activate an installation-wide ordinary-login lockout. Exceptional access retains
+the shared global budget of 50 and its independent table. Disabled Bootstrap
+access is checked before any reservation.

@@ -90,7 +90,8 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
         throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE', { cause, step })
       }
     }
-    const isBlocked = await run('THROTTLE_CHECK', async () => !await isEnabled() || await throttle.blocked(username))
+    const isBlocked = !await run('ENABLED_CHECK', isEnabled)
+      || await run('THROTTLE_CHECK', () => throttle.blocked(username))
     if (isBlocked) {
       await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
       throw new LocalAccessError()

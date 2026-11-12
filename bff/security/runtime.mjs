@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import pg from 'pg'
+import { pgQuery } from './pgFailure.mjs'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 import { createLocalAccessVerifier, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
 import { PostgresAuthenticationAudit } from './authenticationAudit.mjs'
@@ -387,7 +388,7 @@ export const createSessionRuntime = async ({
       const verifier = createLocalAccessVerifier({
         mode: method, accounts, throttle, sessionStore, authorizationRevision,
         isEnabled: ordinaryLocal && method === 'Bootstrap' ? async () => {
-          const result = await pool.query('SELECT initialized FROM ok_identity.state WHERE singleton=true')
+          const result = await pgQuery(pool, 'SELECT initialized FROM ok_identity.state WHERE singleton=true')
           return result.rowCount === 1 && (result.rows[0].initialized === false || env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true')
         } : undefined,
         audit: async (event) => {

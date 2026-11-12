@@ -56,6 +56,23 @@ describe('exceptional local access verifier', () => {
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'Denied', cause: 'THROTTLED' }))
   })
 
+  it('fails closed at ENABLED_CHECK before any downstream operation', async () => {
+    const cause = new Error('private enabled-check failure')
+    const { verify, throttle, derive, sessionStore, audit } = setup({ isEnabled: async () => { throw cause } })
+    await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'ENABLED_CHECK', cause })
+    expect(throttle.blocked).not.toHaveBeenCalled()
+    expect(derive).not.toHaveBeenCalled()
+    expect(sessionStore.create).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+  })
+
+  it('treats an undefined enabled-check option as enabled', async () => {
+    const { verify } = setup({ isEnabled: undefined })
+    await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'Emergency recovery attempt' }))
+      .resolves.toMatchObject({ cookie: 'session' })
+  })
+
   it('requires a bounded operational reason before verification', async () => {
     const { verify, derive } = setup()
     await expect(verify({ username: 'recovery-admin', password: 'secret', reason: 'short' })).rejects.toBeInstanceOf(LocalAccessError)

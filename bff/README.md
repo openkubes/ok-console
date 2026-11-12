@@ -513,7 +513,7 @@ Projection and response-writing exceptions therefore remain visible.
 
 Local-access dependency failures emit LOCAL_ACCESS_FAILED once for the unavailable
 operation, at the reached lifecycle stage (normally REQUEST_RECEIVED). The closed
-cause steps are THROTTLE_CHECK, THROTTLE_FAILURE, THROTTLE_RESET, KDF,
+cause steps are ENABLED_CHECK, THROTTLE_CHECK, THROTTLE_FAILURE, THROTTLE_RESET, KDF,
 SESSION_STORE and AUDIT, with OTHER for an unknown step. These identify the exact
 verifier operation without adding lifecycle stages. errorCode uses the preserved
 cause and the shared classifier. A failed compensating revoke adds a

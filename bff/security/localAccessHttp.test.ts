@@ -2,7 +2,7 @@
 
 import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-import { LocalAccessError } from './localAccess.mjs'
+import { createLocalAccessVerifier, LocalAccessError } from './localAccess.mjs'
 import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
 
 const request = (body: string, headers: Record<string, string> = {}) => Object.assign(Readable.from([body]), {
@@ -53,6 +53,23 @@ describe('exceptional local-access HTTP boundary', () => {
     expect(denied.status).toBe(401)
     expect(denied.body).not.toContain('unknown')
     expect(denied.body).not.toContain('guess')
+  })
+
+  it('reports an enabled-check outage as 503 with a bounded ENABLED_CHECK line', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: {}, sessionStore: { create: vi.fn() },
+        isEnabled: async () => { throw new Error('private enabled-check failure') } })
+      const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.example' })
+      const target = response()
+      await handler({ request: request(JSON.stringify({ username: 'admin', password: 'secret', reason: 'Emergency provider recovery' })), response: target, pathname: '/api/console/v0/auth/local', correlationId: 'corr-00000000-0000-4000-8000-000000000001' })
+      expect(target.status).toBe(503)
+      expect(target.body).toContain('LOCAL_ACCESS_UNAVAILABLE')
+      expect(log).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ event: 'LOCAL_ACCESS_FAILED', cause: 'ENABLED_CHECK', correlationId: 'corr-00000000-0000-4000-8000-000000000001' })
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private enabled-check failure')
+      expect(target.body).not.toContain('private enabled-check failure')
+    } finally { log.mockRestore() }
   })
 
   it('distinguishes a fail-closed dependency outage without exposing its cause', async () => {

@@ -31,16 +31,19 @@ export class LocalIdentity {
   }
   async transaction(fn) {
     const db = await this.pool.connect()
+    let failure
     try {
       await db.query('BEGIN')
       const result = await fn(db)
       await db.query('COMMIT')
       return result
     } catch (error) {
-      await db.query('ROLLBACK').catch(() => {})
+      // Match session-store transactions: evict on failure without queuing a rollback
+      // behind a query that may still be running after a client-side timeout.
+      failure = error
       if (error instanceof IdentityError) throw error
       throw new IdentityError()
-    } finally { db.release() }
+    } finally { db.release(failure) }
   }
   async current(context, db = this.pool) {
     if (context.subject.method !== 'Local') return true

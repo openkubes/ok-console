@@ -36,8 +36,9 @@ describe('OK-158/OK-159 read-only vertical slice', () => {
     expect(snapshot).toMatchObject({
       source: 'bff',
       presentationVersion: 'console.openkubes.io/v0alpha1',
-      freshness: 'Current',
-      clusterListFreshness: 'Current',
+      // edge-07 is older than the freshness window.
+      freshness: 'Stale',
+      clusterListFreshness: 'Stale',
     })
     expect(snapshot.clusters.map((cluster) => cluster.name)).toEqual([
       'ok-mgmt',

@@ -5,7 +5,9 @@ for (const failure of ['stale', 'degraded'] as const) {
   test(`${failure} observations remain usable and visibly qualified`, async ({ page }) => {
     await injectBffFailure(page, failure)
     await signInPrototype(page)
-    await expect(page.getByRole('status')).toContainText(failure === 'stale' ? 'Some observations are stale' : 'Platform data is partially degraded')
+    const status = page.getByRole('status')
+    await expect(status).toBeVisible()
+    await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')
     await expect(page.getByRole('heading', { name: 'Cluster posture' })).toBeVisible()
     if (failure === 'stale') {
       const clusters = page.locator('.cluster-card')

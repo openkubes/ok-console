@@ -10,6 +10,7 @@ import overview from '../contracts/presentation/v0alpha1/examples/platform-overv
 import clusters from '../contracts/presentation/v0alpha1/examples/cluster-list.json'
 import detail from '../contracts/presentation/v0alpha1/examples/cluster-detail.json'
 import evidence from '../contracts/presentation/v0alpha1/examples/evidence-reference.json'
+import sourceUnavailable from '../contracts/presentation/v0alpha1/examples/error-source-unavailable.json'
 
 vi.mock('./data/consoleData', async importOriginal => ({ ...await importOriginal<typeof import('./data/consoleData')>(), consoleDataMode: 'bff' }))
 const auth: ConsoleAuthClient = {
@@ -40,7 +41,7 @@ function widget() {
 
 async function mount(view = 'overview', verdict: Freshness = 'Current', options: {
   overview?: Freshness; clusters?: Freshness; detail?: Freshness; evidence?: Freshness;
-  readiness?: 'Unknown'; outcome?: 'Unknown'; missing?: boolean; foreign?: boolean; immutable?: boolean; fixture?: boolean; empty?: boolean; mixed?: boolean; failedEvidence?: boolean
+  readiness?: 'Unknown'; outcome?: 'Unknown'; missing?: boolean; foreign?: boolean; immutable?: boolean; fixture?: boolean; empty?: boolean; mixed?: boolean; failedEvidence?: boolean; missingEvidence?: boolean; sourceStale?: boolean
 } = {}) {
   window.history.replaceState(null, '', `#/${view === 'detail' ? 'clusters' : view === 'drawer' ? 'evidence' : view}`)
   const e = structuredClone(evidence)
@@ -56,12 +57,14 @@ async function mount(view = 'overview', verdict: Freshness = 'Current', options:
   e.data.clusterId = options.foreign ? 'cluster-foreign' : c.data.items[0].id
   const o = structuredClone(overview)
   o.meta.freshness = options.overview ?? verdict
+  if (options.sourceStale) Object.assign(o.meta, { warnings: [{ code: 'PARTIAL_DATA', message: 'Some optional source data is unavailable.' }, { code: 'SOURCE_STALE', message: 'A producer item is older than the freshness window.' }] })
   o.data.recentPlacements = []
   const d = structuredClone(detail)
   d.meta.freshness = options.detail ?? verdict
   Object.assign(d.data, c.data.items[0])
   const adapter = new BffConsoleAdapter('/api/console/v0', vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url)
+    if (options.missingEvidence && path.includes('/evidence/')) return new Response(JSON.stringify({ ...sourceUnavailable, error: { code: 'NOT_FOUND', message: 'Evidence reference is unavailable.', retryable: false } }), { status: 404 })
     if (options.failedEvidence && path.includes('/evidence/')) throw new TypeError('test Evidence connection failed')
     const body = path.endsWith('/overview') ? o : path.endsWith('/clusters') ? c : path.includes('/evidence/') ? e : d
     return new Response(JSON.stringify(body), { status: 200 })
@@ -106,7 +109,7 @@ describe('whole-document framing, including DiagnosticWidget', { timeout: 30_000
     }
   }
   for (const view of ['overview', 'clusters', 'detail']) {
-    for (const option of ['missing', 'foreign', 'readiness', 'outcome', 'failedEvidence'] as const) {
+    for (const option of ['missing', 'foreign', 'readiness', 'outcome', 'failedEvidence', 'missingEvidence'] as const) {
       it(`${view}: independent ${option} input suppresses affected item`, async () => {
         await mount(view, 'Current', { [option]: option === 'readiness' || option === 'outcome' ? 'Unknown' : true })
         widget()
@@ -524,3 +527,25 @@ it('R4 a new widget answer on unavailable data is timestamped without calling it
   expect(answer).not.toHaveTextContent('Earlier answer')
   expect(answer).not.toHaveTextContent('last observed observation')
 }, 30_000)
+
+it('U5 item-only SOURCE_STALE response explains stale observations in the banner', async () => {
+  await mount('overview', 'Current', { overview: 'Stale', clusters: 'Stale', sourceStale: true })
+  const warning = document.querySelector('.data-warning')!
+  expect(warning).toHaveTextContent('Some observations are stale')
+  expect(warning).toHaveTextContent('Some optional source data is unavailable.')
+  expect(warning).toHaveTextContent('A producer item is older than the freshness window.')
+  noCurrency(document.querySelector('.snapshot')!)
+})
+
+it('integration non-observation chips never reuse the live observation dot', async () => {
+  await mount('overview', 'Current', { fixture: true })
+  expect(document.querySelector('.environment .live-dot')).toBeNull()
+  act(() => { window.location.hash = '#/register'; window.dispatchEvent(new HashChangeEvent('hashchange')) })
+  await act(async () => {})
+  fireEvent.change(screen.getByRole('combobox', { name: 'External management engine' }), { target: { value: 'NVIDIA Kubernetes Engine (NVKE)' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Run safe discovery' }))
+  expect(screen.getByText('Simulated fixture')).toBeVisible()
+  expect(document.querySelector('.fixture-label .live-dot')).toBeNull()
+  expect(screen.getByText('NVKE-managed Kubernetes cluster · simulated')).toBeVisible()
+  expect(screen.getByText('Unverified demo metadata')).toBeVisible()
+})

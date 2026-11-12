@@ -194,3 +194,19 @@ it('R4 overview failure followed by clusters 401 preserves authentication failur
   await assertion
   expect(controller.signal.aborted).toBe(true)
 })
+
+it.each(['Current', 'Stale', 'Unknown'] as const)('U3 %s overview never fabricates Kagent runtime evidence', async freshness => {
+  const overview = structuredClone(platformOverview)
+  overview.meta.freshness = freshness
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse(overview)
+    if (url.endsWith('/clusters')) return jsonResponse(clusterList)
+    return jsonResponse(evidenceReference)
+  }) as typeof fetch
+  const snapshot = await new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+  expect(snapshot.agentDeployments).toEqual([])
+  expect(snapshot.agents.every(agent => agent.deployments === 0)).toBe(true)
+  expect(snapshot.evidence.every(item => item.id === evidenceReference.data.id)).toBe(true)
+  expect(snapshot.evidence.some(item => /kagent|cluster.inspector/i.test(item.title))).toBe(false)
+})

@@ -73,7 +73,7 @@ export interface SessionContextData {
     id: string
     displayName: string
     identitySource: 'Local' | 'OIDC'
-    assurance: 'Prototype' | 'Federated' | 'Break glass'
+    assurance: 'Prototype' | 'Federated' | 'Break glass' | 'Local development'
   }
   environment: {
     id: string
@@ -293,7 +293,7 @@ const validateData = (kind: PresentationKind, value: unknown, errors: string[]) 
         if (!['Local', 'OIDC'].includes(String(value.subject.identitySource))) {
           errors.push('data.subject.identitySource is not supported')
         }
-        if (!['Prototype', 'Federated', 'Break glass'].includes(String(value.subject.assurance))) {
+        if (!['Prototype', 'Federated', 'Break glass', 'Local development'].includes(String(value.subject.assurance))) {
           errors.push('data.subject.assurance is not supported')
         }
       }

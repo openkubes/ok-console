@@ -1,0 +1,62 @@
+[
+  {
+    "mode": "local",
+    "viewport": "desktop",
+    "checks": "keyboard order, visible input focus, Enter submit, pending protection, generic error, password clearing, zero Axe violations in error state",
+    "result": "passed"
+  },
+  {
+    "mode": "prototype",
+    "viewport": "desktop",
+    "checks": "explicit prototype review/entry preserved",
+    "result": "passed"
+  },
+  {
+    "mode": "oidc",
+    "viewport": "desktop",
+    "checks": "existing OIDC callback invoked",
+    "result": "passed"
+  },
+  {
+    "mode": "bootstrap",
+    "viewport": "desktop",
+    "checks": "reason and acknowledgement remain required; generic error and password clearing preserved",
+    "result": "passed"
+  },
+  {
+    "mode": "breakglass",
+    "viewport": "desktop",
+    "checks": "reason and acknowledgement remain required; generic error and password clearing preserved",
+    "result": "passed"
+  },
+  {
+    "mode": "local",
+    "viewport": "mobile",
+    "checks": "keyboard order, visible input focus, Enter submit, pending protection, generic error, password clearing, zero Axe violations in error state",
+    "result": "passed"
+  },
+  {
+    "mode": "prototype",
+    "viewport": "mobile",
+    "checks": "explicit prototype review/entry preserved",
+    "result": "passed"
+  },
+  {
+    "mode": "oidc",
+    "viewport": "mobile",
+    "checks": "existing OIDC callback invoked",
+    "result": "passed"
+  },
+  {
+    "mode": "bootstrap",
+    "viewport": "mobile",
+    "checks": "reason and acknowledgement remain required; generic error and password clearing preserved",
+    "result": "passed"
+  },
+  {
+    "mode": "breakglass",
+    "viewport": "mobile",
+    "checks": "reason and acknowledgement remain required; generic error and password clearing preserved",
+    "result": "passed"
+  }
+]

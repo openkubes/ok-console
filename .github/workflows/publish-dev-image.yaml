@@ -67,8 +67,22 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm lint
-          pnpm test
-          pnpm build
+          pnpm test:non-postgres
+
+      - name: Verify PostgreSQL suites serially
+        # A non-database failure must not prevent the database suites from running.
+        if: ${{ !cancelled() }}
+        run: |
+          # Match verify.yaml's browser provisioning; all 26 cases include Chromium.
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname '*google*' -o -iname '*chrome*' \) -delete
+          sudo apt-get update
+          pnpm exec playwright install --with-deps chromium
+          VITE_CONSOLE_DATA_MODE=bff VITE_CONSOLE_AUTH_MODE=local pnpm build
+          OK_CONSOLE_TEST_LOCAL_BROWSER=true pnpm test:postgres
+
+      - name: Build the tagged source
+        run: pnpm build
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3

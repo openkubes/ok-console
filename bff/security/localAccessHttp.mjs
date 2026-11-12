@@ -3,7 +3,7 @@ import { LocalAccessError } from './localAccess.mjs'
 
 const PATH = '/api/console/v0/auth/local'
 const MAX_BODY_BYTES = 16 * 1_024
-const STEPS = new Set(['THROTTLE_CHECK', 'THROTTLE_FAILURE', 'THROTTLE_RESET', 'KDF', 'SESSION_STORE', 'AUDIT'])
+const STEPS = new Set(['ENABLED_CHECK', 'THROTTLE_RESERVE', 'THROTTLE_RESET', 'KDF', 'SESSION_STORE', 'AUDIT'])
 
 const headers = (correlationId, extra = {}) => ({
   'Cache-Control': 'no-store',

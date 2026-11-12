@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { boundedCorrelation, boundedMs, currentLifecycle, startErrorCode } from '../diagnostics.mjs'
-import { pgQuery, pgConnect } from './pgFailure.mjs'
+import { classifyPgError, pgQuery, pgConnect } from './pgFailure.mjs'
 import { SECURITY_CONTRACT_VERSION, authorizeSecurityContext } from './authorization.mjs'
 import { SessionEnvelopeError } from './envelope.mjs'
 import {
@@ -112,6 +112,7 @@ export class PostgresSessionStore {
     codec,
     deploymentEpoch,
     authorizationRevisionValidator = null,
+    contextValidator = null,
     random = randomBytes,
     lifetimesFor = sessionLifetimesFor,
     now = () => new Date(),
@@ -123,20 +124,21 @@ export class PostgresSessionStore {
     this.codec = codec
     this.deploymentEpoch = deploymentEpoch
     this.authorizationRevisionValidator = authorizationRevisionValidator
+    this.contextValidator = contextValidator
     this.random = random
     this.lifetimesFor = lifetimesFor
     this.now = now
   }
 
-  async create({ subject, scope, permissions, authorizationRevision }) {
+  async create({ subject, scope, permissions, authorizationRevision }, database = this.pool) {
     validateSessionCreationInput({ subject, scope, permissions })
     assertStoreInput({ authorizationRevision, deploymentEpoch: this.deploymentEpoch })
     try {
-      const clock = await pgQuery(this.pool, 'SELECT clock_timestamp() AS database_now')
+      const clock = await pgQuery(database, 'SELECT clock_timestamp() AS database_now')
       const lifetime = this.lifetimesFor(subject.method)
       const values = issueValues({ random: this.random, lifetime, databaseNow: clock.rows[0].database_now })
       const envelope = this.codec.encrypt({ subject, scope, permissions })
-      const result = await pgQuery(this.pool, `
+      const result = await pgQuery(database, `
         INSERT INTO ok_console.sessions (
           session_digest, session_family_digest, context_envelope, key_id, csrf_digest,
           authentication_method, authorization_revision, deployment_epoch,
@@ -179,18 +181,46 @@ export class PostgresSessionStore {
         : await pgQuery(this.pool, `
           SELECT * FROM ok_console.sessions
           WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch])
-      return result.rows[0] ? rowContext(result.rows[0], this.codec) : null
+      const context = result.rows[0] ? rowContext(result.rows[0], this.codec) : null
+      if (context && this.contextValidator && !await this.contextValidator(context)) return null
+      return context
     } catch (error) {
       throw normalizeStoreFailure(error)
     }
   }
 
+  async transaction(operation) {
+    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
+    let failure, result
+    const recordFailure = error => { failure ??= classifyPgError(error) }
+    client.on('error', recordFailure)
+    const checked = { query: async (...args) => {
+      try {
+        if (failure) throw failure
+        const value = await pgQuery(client, ...args)
+        if (failure) throw failure
+        return value
+      } catch (error) {
+        recordFailure(error)
+        throw failure
+      }
+    } }
+    try {
+      result = await operation(checked)
+    } catch (error) {
+      recordFailure(error)
+    } finally {
+      try { client.release(failure) } catch (error) { recordFailure(error) }
+      finally { client.removeListener('error', recordFailure) }
+    }
+    if (failure) throw normalizeStoreFailure(failure)
+    return result
+  }
+
   async rotate(cookieHeader) {
     const oldSessionId = readSessionCookie(cookieHeader)
     if (!oldSessionId) return null
-    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
-    let failure
-    try {
+    return this.transaction(async client => {
       await pgQuery(client, 'BEGIN')
       const selected = await pgQuery(client, `
         SELECT *, clock_timestamp() AS database_now
@@ -203,6 +233,10 @@ export class PostgresSessionStore {
         return null
       }
       const oldContext = rowContext(row, this.codec)
+      if (this.contextValidator && !await this.contextValidator(oldContext, client)) {
+        await client.query('ROLLBACK')
+        return null
+      }
       const payload = {
         subject: oldContext.subject,
         scope: oldContext.scope,
@@ -242,23 +276,20 @@ export class PostgresSessionStore {
       })
       const values = { sessionId: newSessionId, csrfToken }
       const context = rowContext(inserted.rows[0], this.codec)
+      if (this.contextValidator && !await this.contextValidator(context, client)) {
+        await pgQuery(client, "UPDATE ok_console.sessions SET revoked_at=clock_timestamp(),revoke_reason='LOCAL_ACCOUNT_CHANGED' WHERE session_digest=$1", [newDigest])
+        return null
+      }
       const remainingSeconds = Math.max(0, Math.floor((asDate(row.absolute_expires_at).getTime() - asDate(row.database_now).getTime()) / 1_000))
       return publicIssue({ values, context, maxAgeSeconds: remainingSeconds })
-    } catch (error) {
-      failure = error
-      throw normalizeStoreFailure(error)
-    } finally {
-      client.release(failure)
-    }
+    })
   }
 
   async revoke(cookieHeader, reason = 'LOGOUT') {
     const sessionId = readSessionCookie(cookieHeader)
     if (!sessionId) return false
     if (!validSessionString(reason)) throw new SessionStoreError('INVALID_INPUT')
-    const client = await pgConnect(this.pool).catch((error) => { throw normalizeStoreFailure(error) })
-    let failure
-    try {
+    return this.transaction(async client => {
       await pgQuery(client, 'BEGIN')
       const selected = await pgQuery(client, `
         SELECT session_family_digest
@@ -279,12 +310,7 @@ export class PostgresSessionStore {
         throw error
       })
       return true
-    } catch (error) {
-      failure = error
-      throw normalizeStoreFailure(error)
-    } finally {
-      client.release(failure)
-    }
+    })
   }
 
   async authorize(cookieHeader, request) {

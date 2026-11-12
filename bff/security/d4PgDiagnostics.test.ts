@@ -75,10 +75,10 @@ it.each([false, true])('names real pg connect timeout, termination and pool acqu
 })
 it.each([false, true])('bounds exact pg message matching at audit=%s', async auditMode => {
   for (const message of ['Connection terminated due to connection timeout', 'Connection terminated unexpectedly', 'timeout exceeded when trying to connect', 'Query read timeout']) {
-    for (const error of [new Error(message + '.'), Object.assign(new Error(message), { code: '57P01' }), Object.create({ message }), { message: 42 }]) {
+    for (const error of [new Error(message + '.'), Object.assign(new Error(message), { code: '53300' }), Object.create({ message }), { message: 42 }]) {
       await expect(pgQuery({ query: async () => { throw error } })).rejects.toBe(error)
       const result = await run({ query: async () => { throw error } } as unknown as Pool, auditMode)
-      expect(result.lines[0].errorCode).toBe(Object.hasOwn(error, 'code') ? '57P01' : null)
+      expect(result.lines[0].errorCode).toBe(Object.hasOwn(error, 'code') ? '53300' : null)
     }
     const result = await run({ query: async () => { throw new Error(message) } } as unknown as Pool, false)
     expect(result.lines[0].errorCode).toMatch(/^PG_/)

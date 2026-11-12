@@ -42,9 +42,11 @@ for (const kind of ['item', 'envelope', 'injection', 'fresh', 'deployment'] as c
       if (kind === 'injection') await injectBffFailure(page, 'stale')
       await signInPrototype(page)
       await page.locator('.cluster-card').filter({ hasText: fixture?.cluster.name ?? 'ok-mgmt' }).locator('button.card-main').click()
-      const stale = kind === 'item' || kind === 'envelope' || kind === 'injection'
-      await expect(page.locator('.detail-grid .eyebrow').first()).toHaveText(stale ? 'Observation unavailable - readiness Unknown' : 'Current observation')
-      await expect(page.locator('.live-label')).toHaveText(stale ? 'Observation unavailable - readiness Unknown' : 'Observed')
+      // #140 includes stale hosting placements in the tenant's response verdict.
+      const stale = kind !== 'fresh'
+      const unavailable = kind === 'item' || kind === 'envelope' || kind === 'injection'
+      await expect(page.locator('.detail-grid .eyebrow').first()).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed posture' : 'Current observation')
+      await expect(page.locator('.live-label')).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed' : 'Observed')
       await expect(page.locator('.live-label .live-dot')).toHaveCount(stale ? 0 : 1)
       const details = await page.locator('.lifecycle-step p').allTextContents()
       expect(details.length).toBeGreaterThan(0)
@@ -97,3 +99,26 @@ for (const kind of ['fresh', 'envelope'] as const) {
     } finally { await fixture.close() }
   })
 }
+
+
+test('U1 future producer Evidence leaves detail Unknown when its reference is unavailable', async ({ page }) => {
+  const fixture = await serve(page, 'future')
+  try {
+    await signInPrototype(page)
+    await page.locator('.cluster-card').filter({ hasText: fixture.cluster.name }).locator('button.card-main').click()
+    await expect(page.locator('.title-actions .status')).toHaveText('Unknown')
+    await expect(page.locator('.live-label')).toHaveText('Observation unavailable - readiness Unknown')
+    await expect(page.locator('main .live-dot')).toHaveCount(0)
+    await expect(page.locator('main')).not.toContainText('Current observation')
+  } finally { await fixture.close() }
+})
+
+test('U5 item-only stale producer observation is explained by the SOURCE_STALE banner', async ({ page }) => {
+  const fixture = await serve(page, 'item')
+  try {
+    await signInPrototype(page)
+    await expect(page.locator('.data-warning')).toContainText('Some observations are stale')
+    await expect(page.locator('.data-warning')).toContainText('An authorized observation is outside its configured freshness window.')
+    await expect(page.locator('.snapshot .live-dot')).toHaveCount(0)
+  } finally { await fixture.close() }
+})

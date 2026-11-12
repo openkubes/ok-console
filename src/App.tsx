@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import DiagnosticWidget from './DiagnosticWidget'
+import DeveloperWorkspaces from './workspaces/DeveloperWorkspaces'
 import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
 import { consoleData, consoleDataMode } from './data/consoleData'
 import { platformFixture } from './data/fixtures'
@@ -11,15 +12,19 @@ import { wjaxLocalPreviewEnabled } from './wjax/localPreview'
 
 // Excluded from production builds; fetched only when this local demo route opens.
 const WjaxClusterView = import.meta.env.DEV ? lazy(() => import('./wjax/WjaxClusterView')) : null
+const UserProjectManagement = import.meta.env.DEV ? lazy(() => import('./identity/UserProjectManagement')) : null
 
-type Page = 'wjax' | 'overview' | 'clusters' | 'workloads' | 'agents' | 'capabilities' | 'evidence' | 'create' | 'register'
+type Page = 'wjax' | 'users' | 'overview' | 'clusters' | 'workloads' | 'agents' | 'workspaces' | 'capabilities' | 'evidence' | 'create' | 'register'
 type IconName = Exclude<Page, 'wjax'> | 'search' | 'bell' | 'chevron' | 'shield' | 'cube' | 'arrow' | 'menu' | 'x' | 'check' | 'clock' | 'external' | 'code' | 'terminal' | 'spark'
+
+const publicDemoBuild = () => import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true'
 
 const NAV: Array<{ id: Exclude<Page, 'wjax'>; label: string; caption: string }> = [
   { id: 'overview', label: 'Platform Overview', caption: 'Fleet & posture' },
   { id: 'clusters', label: 'Clusters', caption: 'Lifecycle contracts' },
   { id: 'workloads', label: 'Workloads', caption: 'Claims & placement' },
   { id: 'agents', label: 'AI Agents', caption: 'Catalog & deployments' },
+  { id: 'workspaces', label: 'Developer Workspaces', caption: 'Preview · code & evidence' },
   { id: 'capabilities', label: 'Capabilities', caption: 'Contract catalog' },
   { id: 'evidence', label: 'Evidence & Audit', caption: 'Receipts & provenance' },
 ]
@@ -27,15 +32,19 @@ const NAV: Array<{ id: Exclude<Page, 'wjax'>; label: string; caption: string }> 
 const pageFromHash = (): Page => {
   const value = window.location.hash.replace('#/', '').split('/')[0] as Page
   if (value === 'wjax' && wjaxLocalPreviewEnabled) return 'wjax'
+  if (value === 'users' && wjaxLocalPreviewEnabled) return 'users'
   return [...NAV.map((item) => item.id), 'create', 'register'].includes(value) ? value : 'overview'
 }
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
+    users: <><path d="M12 3 20 6v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-5"/></>,
+
     overview: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
     clusters: <><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 12 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/></>,
     workloads: <><path d="M4 5h16v14H4z"/><path d="M4 9h16M8 3v4M16 3v4"/></>,
     agents: <><circle cx="12" cy="8" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2M8 8H5m14 0h-3M12 4V2"/><circle cx="10.5" cy="8" r=".5" fill="currentColor"/><circle cx="13.5" cy="8" r=".5" fill="currentColor"/></>,
+    workspaces: <><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m8 8-3 3 3 3m8-6 3 3-3 3M9 21h6m-3-3v3"/></>,
     capabilities: <><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3m13 5h3a2 2 0 0 0 2-2v-3"/><circle cx="12" cy="12" r="4"/></>,
     evidence: <><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13l2 2 4-5"/></>,
     create: <><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></>,
@@ -105,12 +114,12 @@ function clusterPlaneLabel(cluster: Cluster): string {
   return 'Worker power'
 }
 
-function Overview({ data, identity, openCluster, openEvidence }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
+function Overview({ data, identity, openCluster, openEvidence, publicDemo = false }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void; publicDemo?: boolean }) {
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   const overview = data.overview
   const observedMetric = (value: number | null) => value ?? 'Unavailable'
   return <>
-    <PageTitle eyebrow="Platform posture" title={`Hello ${identity.trim().split(/\s+/)[0]}`} description="One evidence-backed view across your sovereign OpenKubes platforms." action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    <PageTitle eyebrow="Platform posture" title={publicDemo ? "Welcome to OpenKubes" : `Hello ${identity.trim().split(/\s+/)[0]}`} description={publicDemo ? "Explore a simulated sovereign OpenKubes platform through contracts, clusters, and evidence." : "One evidence-backed view across your sovereign OpenKubes platforms."} action={<span className="snapshot"><span className="live-dot"/>{data.source === 'bff' ? 'BFF observation' : 'Fixture snapshot'} · {new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
     {(data.freshness === 'Stale' || (data.warnings?.length ?? 0) > 0) && <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{data.freshness === 'Stale' ? 'Some observations are stale' : 'Platform data is partially degraded'}</strong><span>{data.warnings?.[0] ?? 'Readiness is shown as observed and is not inferred.'}</span></div></div>}
     <section className="metrics-grid" aria-label="Platform metrics">
       <Metric label="Clusters" value={overview?.clusters.total ?? data.clusters.length} note={`${overview?.clusters.ready ?? ready} ready · ${overview ? Number(overview.managementPlane !== null) : 1} management plane`} tone="blue"/>
@@ -320,17 +329,22 @@ const createClusterProviderGroups = [
     providers: ['Bare Metal Infra', 'KubeVirt Workers', 'OpenStack', 'VMware vSphere', 'Proxmox', 'STACKIT', 'Hetzner', 'OVHcloud', 'YORIZON'],
   },
   {
+    label: 'AI factory · experimental demo catalog',
+    providers: ['NVIDIA Kubernetes Engine (NVKE)'],
+  },
+  {
     label: 'Public cloud · demo catalog',
     providers: ['AWS', 'GCP', 'Azure'],
   },
 ] as const
 
-const providerIdentifier = (provider: string) => provider.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+const providerIdentifier = (provider: string) => provider === 'NVIDIA Kubernetes Engine (NVKE)' ? 'nvidia-nvke' : provider.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 function CreateCluster() {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('ok-edge-berlin')
   const [provider, setProvider] = useState('Bare Metal Infra')
+  const isNvke = provider === 'NVIDIA Kubernetes Engine (NVKE)'
   const [profile, setProfile] = useState('Constrained edge')
   const [confirmed, setConfirmed] = useState(false)
   const [dryRunState, setDryRunState] = useState<'idle' | 'running' | 'ready' | 'error'>('idle')
@@ -353,7 +367,7 @@ function CreateCluster() {
     <ol className="stepper">{createSteps.map((item, index) => <li className={index === step ? 'active' : index < step ? 'done' : ''} key={item}><span>{index < step ? '✓' : index + 1}</span><strong>{item}</strong></li>)}</ol>
     <div className="create-layout">
       <section className="panel create-main">
-        {step === 0 && <><div className="panel-title"><div><span className="eyebrow">Step 1</span><h2>Declare cluster intent</h2></div></div><div className="form-grid"><label><span>Cluster name</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Lowercase DNS-compatible identity</small></label><label><span>Infrastructure provider</span><select aria-label="Infrastructure provider" value={provider} onChange={(event) => setProvider(event.target.value)}>{createClusterProviderGroups.map((group) => <optgroup label={group.label} key={group.label}>{group.providers.map((item) => <option key={item}>{item}</option>)}</optgroup>)}</select><small>Illustrative CAPI provider catalog · selection does not provision infrastructure</small></label><label><span>Implementation profile</span><select value={profile} onChange={(event) => setProfile(event.target.value)}><option>Constrained edge</option><option>General purpose</option><option>AI accelerated</option><option>Shared services</option></select></label><label><span>Region / placement</span><input defaultValue="ber-edge-1"/></label></div><fieldset><legend>Required capabilities</legend><div className="check-grid"><label><input type="checkbox" defaultChecked/>Observability</label><label><input type="checkbox" defaultChecked/>Persistent Storage</label><label><input type="checkbox"/>Ingress</label><label><input type="checkbox"/>Artifact Registry</label></div></fieldset></>}
+        {step === 0 && <><div className="panel-title"><div><span className="eyebrow">Step 1</span><h2>Declare cluster intent</h2></div></div><div className="form-grid"><label><span>Cluster name</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Lowercase DNS-compatible identity</small></label><label><span>Infrastructure provider</span><select aria-label="Infrastructure provider" value={provider} onChange={(event) => setProvider(event.target.value)}>{createClusterProviderGroups.map((group) => <optgroup label={group.label} key={group.label}>{group.providers.map((item) => <option key={item}>{item}</option>)}</optgroup>)}</select><small>Illustrative CAPI provider catalog · selection does not provision infrastructure</small></label><label><span>Implementation profile</span><select value={profile} onChange={(event) => setProfile(event.target.value)}><option>Constrained edge</option><option>General purpose</option><option>AI accelerated</option><option>Shared services</option></select></label><label><span>Region / placement</span><input defaultValue="ber-edge-1"/></label></div><fieldset><legend>Required capabilities</legend><div className="check-grid"><label><input type="checkbox" defaultChecked/>Observability</label><label><input type="checkbox" defaultChecked/>Persistent Storage</label><label><input type="checkbox"/>Ingress</label><label><input type="checkbox"/>Artifact Registry</label></div></fieldset>{isNvke && <div className="prototype-warning"><strong>NVIDIA Kubernetes Engine (NVKE) · experimental demo.</strong> NVKE is an external lifecycle management engine, not a generic CAPI infrastructure provider. A registered NVKE management plane, site and supported node releases would be required for real provisioning. No NVKE connection or GPU infrastructure is configured here.</div>}</>}
         {step === 1 && <><div className="panel-title"><div><span className="eyebrow">Step 2</span><h2>Review generated contract</h2></div><span className="digest">sha256:preview…7a21</span></div><div className="review-summary"><div><span>Requested identity</span><strong>{name}</strong></div><div><span>Profile</span><strong>{profile}</strong></div><div><span>Provider</span><strong>{provider}</strong></div></div><pre className="contract-preview"><code>{contract}</code></pre><div className="no-go"><Icon name="shield"/><div><strong>NO-GO checks</strong><p>Execution remains unavailable if identity, placement, capability prerequisites, policy, or evidence freshness cannot be proven.</p></div></div></>}
         {step === 2 && <><div className="authority-card"><div className="authority-icon"><Icon name="shield" size={32}/></div><span className="eyebrow">Step 3 · Authority boundary</span><h2>Authorize this exact review artifact</h2><p>This prototype illustrates a single-use grant bound to the reviewed payload digest. The browser is never the security boundary.</p><dl><div><dt>Operation</dt><dd>CreateCluster</dd></div><div><dt>Payload digest</dt><dd>sha256:preview…7a21</dd></div><div><dt>Grant</dt><dd>Single use · 10 minutes</dd></div></dl><label className="confirm-box"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/><span>I confirm that I reviewed the exact contract above.</span></label></div></>}
         {step === 3 && <><div className="execution-preview"><span className="pulse-ring"><Icon name="code" size={28}/></span><span className="eyebrow">Step 4</span><h2>Dry-run plan</h2><p>The Console sent a bounded, non-mutating CreateCluster dry-run to the OK-147 runner.</p><div className="boundary-stack"><div className="done"><Icon name="check"/><span><strong>Runner reached</strong><small>{dryRunResult?.contractIdentity ?? 'CreateCluster'}</small></span></div><div className="done"><Icon name="check"/><span><strong>Mutation disabled</strong><small>mutationAllowed: {String(dryRunResult?.mutationAllowed ?? false)}</small></span></div><div><Icon name="evidence"/><span><strong>Contract revision</strong><small>{dryRunResult?.contractRevision ?? 'not returned'}</small></span></div></div></div></>}
@@ -370,6 +384,8 @@ const registrationSteps = ['Connect', 'Discover', 'Scope', 'Review', 'Authorize'
 function RegisterCluster() {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('external-production-eu')
+  const [externalEngine, setExternalEngine] = useState('Generic Kubernetes')
+  const isNvkeRegistration = externalEngine === 'NVIDIA Kubernetes Engine (NVKE)'
   const [environment, setEnvironment] = useState<ExternalClusterRegistrationDraft['environment']>('Production')
   const [connection, setConnection] = useState<ExternalClusterConnection>('Agent')
   const [managementMode, setManagementMode] = useState<ExternalClusterManagementMode>('ObserveOnly')
@@ -384,7 +400,7 @@ function RegisterCluster() {
     managementMode,
   }
   const managementModeLabel = managementMode === 'ObserveOnly' ? 'Observe only' : managementMode === 'ManagedOperations' ? 'Managed operations' : 'Full adoption'
-  const contract = `apiVersion: ${draft.apiVersion}\nkind: ${draft.kind}\nmetadata:\n  name: ${draft.clusterName}\nspec:\n  ownership: ${draft.ownership}\n  environment: ${draft.environment}\n  connection:\n    type: ${draft.connection}\n    direction: ${draft.connection === 'Agent' ? 'Outbound' : 'Federated'}\n  managementMode: ${draft.managementMode}\n  identity:\n    joinKey: ${draft.clusterName}`
+  const contract = `apiVersion: ${draft.apiVersion}\nkind: ${draft.kind}\nmetadata:\n  name: ${draft.clusterName}\nspec:\n  ownership: ${draft.ownership}\n  environment: ${draft.environment}\n  connection:\n    type: ${draft.connection}\n    direction: ${draft.connection === 'Agent' ? 'Outbound' : 'Federated'}\n  managementMode: ${draft.managementMode}\n  identity:\n    joinKey: ${draft.clusterName}${isNvkeRegistration ? '\n  externalManagementEngine: nvidia-nvke # demo-only extension, not a normative API field' : ''}`
   const next = () => setStep((current) => Math.min(current + 1, registrationSteps.length - 1))
   const reset = () => { setStep(0); setConfirmed(false); setManagementMode('ObserveOnly') }
   return <>
@@ -394,7 +410,8 @@ function RegisterCluster() {
       <section className="panel create-main registration-main">
         {step === 0 && <>
           <div className="panel-title"><div><span className="eyebrow">Step 1 · Connection intent</span><h2>Identify the existing cluster</h2></div><span className="ownership-badge">External ownership</span></div>
-          <div className="form-grid"><label><span>Cluster identity</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Stable DNS-compatible join key from ADR-013</small></label><label><span>Environment</span><select value={environment} onChange={(event) => setEnvironment(event.target.value as ExternalClusterRegistrationDraft['environment'])}><option>Development</option><option>Staging</option><option>Production</option></select><small>Used for Policy and Evidence context</small></label></div>
+          <div className="form-grid"><label><span>Cluster identity</span><input value={name} onChange={(event) => setName(event.target.value)}/><small>Stable DNS-compatible join key from ADR-013</small></label><label><span>Environment</span><select value={environment} onChange={(event) => setEnvironment(event.target.value as ExternalClusterRegistrationDraft['environment'])}><option>Development</option><option>Staging</option><option>Production</option></select><small>Used for Policy and Evidence context</small></label><label><span>External management engine</span><select aria-label="External management engine" value={externalEngine} onChange={(event) => setExternalEngine(event.target.value)}><option>Generic Kubernetes</option><option>NVIDIA Kubernetes Engine (NVKE)</option></select><small>Demo metadata only · does not connect to the engine</small></label></div>
+          {isNvkeRegistration && <div className="prototype-warning"><strong>NVKE-managed cluster · simulated registration.</strong> NVIDIA retains lifecycle ownership. OpenKubes defaults to observe-only; this preview does not contact NVKE or verify GPU capabilities.</div>}
           <fieldset className="connection-fieldset"><legend>Connection method</legend><div className="connection-options">
             <label className={connection === 'Agent' ? 'selected' : ''}><input type="radio" name="connection" checked={connection === 'Agent'} onChange={() => setConnection('Agent')}/><span className="connection-icon"><Icon name="register"/></span><span><strong>Outbound Connector</strong><small>Recommended · mTLS · no inbound firewall rule</small></span><em>Recommended</em></label>
             <label className={connection === 'OIDC' ? 'selected' : ''}><input type="radio" name="connection" checked={connection === 'OIDC'} onChange={() => setConnection('OIDC')}/><span className="connection-icon"><Icon name="shield"/></span><span><strong>OIDC Federation</strong><small>Short-lived identity through an existing trust provider</small></span><em>Advanced</em></label>
@@ -403,8 +420,8 @@ function RegisterCluster() {
         </>}
         {step === 1 && <>
           <div className="panel-title"><div><span className="eyebrow">Step 2 · Read-only discovery</span><h2>Review discovered cluster facts</h2></div><span className="fixture-label"><span className="live-dot"/>Simulated fixture</span></div>
-          <div className="discovery-hero"><span className="cluster-symbol"><Icon name="cube" size={21}/></span><div><strong>{name}</strong><small>Existing upstream Kubernetes cluster</small></div><StatusBadge status="Ready"/></div>
-          <div className="discovery-grid"><div><span>Kubernetes</span><strong>v1.31.8</strong><small>Supported presentation</small></div><div><span>Nodes</span><strong>5</strong><small>3 control plane · 2 worker</small></div><div><span>Distribution</span><strong>Upstream</strong><small>Provider neutral</small></div><div><span>Endpoint</span><strong>Reachable</strong><small>Read-only probe</small></div></div>
+          <div className="discovery-hero"><span className="cluster-symbol"><Icon name="cube" size={21}/></span><div><strong>{name}</strong><small>{isNvkeRegistration ? 'NVKE-managed Kubernetes cluster · simulated' : 'Existing upstream Kubernetes cluster'}</small></div><StatusBadge status="Ready"/></div>
+          <div className="discovery-grid"><div><span>Kubernetes</span><strong>v1.31.8</strong><small>Supported presentation</small></div><div><span>Nodes</span><strong>5</strong><small>3 control plane · 2 worker</small></div><div><span>Distribution</span><strong>{isNvkeRegistration ? 'NVKE-managed' : 'Upstream'}</strong><small>{isNvkeRegistration ? 'Unverified demo metadata' : 'Provider neutral'}</small></div><div><span>Endpoint</span><strong>Reachable</strong><small>Read-only probe</small></div></div>
           <div className="capability-assessment"><div className="panel-title"><div><span className="eyebrow">Capability assessment</span><h3>Observed, not installed</h3></div></div><div><span><Icon name="check"/>StorageClass API</span><strong>Observed</strong></div><div><span><Icon name="check"/>Ingress API</span><strong>Observed</strong></div><div><span><Icon name="clock"/>OpenKubes Evidence</span><strong>Not enrolled</strong></div></div>
           <div className="prototype-warning"><strong>No cluster was contacted.</strong> Discovery values are deterministic prototype fixtures and do not establish readiness.</div>
         </>}
@@ -639,29 +656,44 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'wjax' ? 'W-JAX Local Kubernetes' : page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
+  const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'users' ? 'User & Project Management' : page === 'wjax' ? 'W-JAX Local Kubernetes' : page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
   useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
 
   if (authStatus === 'checking') return <AuthLoading/>
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (loadError) return <LoadFailure error={loadError} retry={() => { setData(undefined); setLoadAttempt((attempt) => attempt + 1) }}/>
   if (!data) return <EmptyLoading/>
-  const view = selectedCluster ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/> : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense> : page === 'overview' ? <Overview data={data} identity={session.identity} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/> : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/> : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/> : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/> : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/> : page === 'register' ? <RegisterCluster/> : <CreateCluster/>
+  const publicDemo = publicDemoBuild() && auth.mode === 'prototype' && consoleDataMode === 'fixture'
+  const view = selectedCluster
+    ? <ClusterDetail cluster={selectedCluster} data={data} detailError={clusterDetailError} close={() => { setSelectedCluster(undefined); setClusterDetailError(undefined) }} openEvidence={setSelectedEvidence} openShell={(cluster) => { setSelectedEvidence(undefined); setShellCluster(cluster) }}/>
+    : page === 'wjax' && wjaxLocalPreviewEnabled && WjaxClusterView
+      ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense>
+    : page === 'users' && wjaxLocalPreviewEnabled && UserProjectManagement
+      ? <Suspense fallback={<p role="status">Loading identity & access preview…</p>}><UserProjectManagement/></Suspense>
+    : page === 'overview' ? <Overview data={data} identity={session.identity} publicDemo={publicDemo} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
+    : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
+    : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/>
+    : page === 'workspaces' ? <DeveloperWorkspaces/>
+    : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/>
+    : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/>
+    : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/>
+    : page === 'register' ? <RegisterCluster/>
+    : <CreateCluster/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
     <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
       <div className="brand"><img src="./openkubes-icon.png" alt="OpenKubes"/><div><strong>OpenKubes</strong><span>Platform Console</span></div><button className="menu-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><Icon name="x"/></button></div>
       <div className="context-switcher"><span className="context-mark">OK</span><span><small>Distribution</small><strong>OpenKubes Platform</strong></span><Icon name="chevron" size={15}/></div>
-      <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}{wjaxLocalPreviewEnabled && <a href="#/wjax" className={page === 'wjax' ? 'active' : ''}><Icon name="clusters"/><span><strong>W-JAX Local Kubernetes</strong><small>Local demo · read-only</small></span></a>}</nav>
+      <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}{wjaxLocalPreviewEnabled && <a href="#/users" className={page === 'users' ? 'active' : ''}><Icon name="shield"/><span><strong>User & Project Management</strong><small>Preview · identity & access</small></span></a>}</nav>
       <div className="sidebar-spacer"/>
       <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div>
-      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{signOutError ?? (session.method === 'oidc' ? 'Federated identity' : 'Break-glass session')}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" disabled={signingOut} onClick={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div>
+      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{signOutError ?? (publicDemo ? 'Simulated Session' : session.method === 'oidc' ? 'Federated identity' : auth.mode === 'local' ? 'Local development session' : 'Break-glass session')}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" disabled={signingOut} onClick={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div>
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span className="live-dot"/><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
-      <main id="main-content" className="content" tabIndex={-1}>{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
+      <main id="main-content" className="content" tabIndex={-1}>{publicDemo && <div role="note" aria-label="Simulated demo" style={{ padding: "12px 16px", marginBottom: 18, border: "1px solid #65a5d255", borderRadius: 10, background: "#e8f5ff", color: "#15375b", fontSize: 14 }}><strong>SIMULATED DEMO</strong> · Sample cluster data only. No live infrastructure or AI service is connected.</div>}{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
     </div>
     {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget data={data} openEvidence={setSelectedEvidence}/>}
     {selectedEvidence && <EvidenceDrawer item={selectedEvidence} close={() => setSelectedEvidence(undefined)}/>}

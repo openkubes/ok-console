@@ -192,6 +192,7 @@ export const createConsoleBffHandler = ({
   expectedOrigin,
   oidcHandler = null,
   localAccessHandler = null,
+  localIdentityHandler = null,
   authenticationAudit = null,
   dryRunExecutor = null,
 }) => {
@@ -208,6 +209,7 @@ export const createConsoleBffHandler = ({
     try {
       const url = new URL(request.url ?? '/', 'http://console.local')
       requestObserver({ stage: 'REQUEST_RECEIVED', method: request.method ?? 'UNKNOWN', pathname: url.pathname, correlationId: requestCorrelationId })
+      if (localIdentityHandler && await localIdentityHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
       if (oidcHandler && await oidcHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
       if (localAccessHandler && await localAccessHandler({ request, response, pathname: url.pathname, correlationId: requestCorrelationId })) return
       if (await handleSessionHttp({

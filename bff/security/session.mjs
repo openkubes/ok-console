@@ -21,7 +21,7 @@ export const validateSessionCreationInput = ({ subject, scope, permissions }) =>
     || !validSessionString(subject.providerId)
     || !validSessionString(subject.subjectId)
     || !validSessionString(subject.displayName)
-    || !['OIDC', 'BreakGlass', 'Bootstrap'].includes(subject.method)
+    || !['OIDC', 'BreakGlass', 'Bootstrap', 'Local'].includes(subject.method)
     || !validStringArray(subject.assurance)
     || !scope
     || !validSessionString(scope.environmentId)

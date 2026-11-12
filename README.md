@@ -299,3 +299,9 @@ resources or a generic backend proxy.
 The supported presentation mapping is inspectable as
 `console.openkubes.io/v0alpha1`. Unknown compatibility remains read-only and no UI
 control is presented as a security boundary.
+
+### CLI-first ordinary local identity (non-production only)
+
+The opt-in host-process `ok-local` profile supports named local users and attended CLI
+administration without OIDC. See [setup, restrictions and recovery](docs/security/ok214-local-identity.md).
+The User & Project Management UI remains a simulation.

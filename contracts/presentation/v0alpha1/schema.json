@@ -133,7 +133,7 @@
             "id": { "$ref": "#/$defs/nonEmptyString" },
             "displayName": { "$ref": "#/$defs/nonEmptyString" },
             "identitySource": { "enum": ["Local", "OIDC"] },
-            "assurance": { "enum": ["Prototype", "Federated", "Break glass"] }
+            "assurance": { "enum": ["Prototype", "Federated", "Break glass", "Local development"] }
           }
         },
         "environment": {

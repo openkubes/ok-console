@@ -1,0 +1,131 @@
+{
+  "base": "0608659d1c99cf20da2c17cef261c8c87a8b48bc",
+  "node": "22.23.4",
+  "pnpm": "10.17.1",
+  "baselineNonPostgres": {
+    "passed": 768,
+    "failed": 23,
+    "skipped": 0
+  },
+  "afterNonPostgres": {
+    "passed": 784,
+    "failed": 23,
+    "skipped": 0
+  },
+  "newFailures": [],
+  "unchangedBaselineFailures": [
+    {
+      "file": "deploy/kubernetes/ok170.test.ts",
+      "test": "OK-173 deployable overlay authorization invariants renders every overlay except local-kind and keeps the Console out of prototype mode"
+    },
+    {
+      "file": "deploy/kubernetes/ok170.test.ts",
+      "test": "OK-173 deployable overlay authorization invariants uses the ownership-aware observed-state contract in the live Console"
+    },
+    {
+      "file": "deploy/kubernetes/ok172.test.ts",
+      "test": "OK-172 ok-shared live slice invariants mounts the reviewed tenant ownership allocation into the producer"
+    },
+    {
+      "file": "deploy/kubernetes/ok172.test.ts",
+      "test": "OK-172 ok-shared live slice invariants runs the pinned idempotent migrations before the console starts"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture continues after a diagnostic command times out and keeps total capture runtime bounded"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture keeps a missing verification-start counter unavailable instead of fabricating a failure-time baseline"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture keeps the real kubectl 1.27.4 client version and separate terminated lines"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture keeps the real kubectl 1.37.1 client version and separate terminated lines"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture preserves valid start and end counters when a decreasing counter makes the delta unavailable"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture returns only the local TCP listen-overflow counter pair"
+    },
+    {
+      "file": "deploy/kubernetes/ok200-capture.test.ts",
+      "test": "OK-200 failure diagnostic capture writes only allowlisted sanitized files, stays within the aggregate byte cap, and invokes bounded diagnostic commands"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow fails before any HTTP probe when port-forward readiness fails"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow fails fast with the forwarder log and stops curl attempts when forwarding dies during retries"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow preserves a non-1 verification status when capture times out and cluster cleanup fails"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow preserves a non-1 verification status when the outer capture command fails"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow preserves verification failure and records a skipped capture when timeout is unavailable"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow reports a distinct failure when the output filter dies during a probe returning 0"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow reports a distinct failure when the output filter dies during a probe returning 7"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow reports verification success but preserves a later Kind cleanup failure"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow stops after 30 bounded live failures without probing ready or root"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 main verification flow takes the netstat baseline before cluster creation and passes that snapshot to capture"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 verification preflight does not run kubectl or docker when a required tool is missing"
+    },
+    {
+      "file": "deploy/kubernetes/ok200.test.ts",
+      "test": "OK-200 verification preflight passes the verification-start netstat snapshot as the final capture argument"
+    }
+  ],
+  "focusedRegressions": {
+    "passed": 84,
+    "failed": 0
+  },
+  "postgresWithBrowserSequentialRuns": [
+    {
+      "passed": 26,
+      "failed": 0
+    },
+    {
+      "passed": 26,
+      "failed": 0
+    }
+  ],
+  "prototypePlaywrightDesktopAndCompact": {
+    "passed": 14,
+    "failed": 0
+  },
+  "lint": "passed",
+  "localBuild": "passed",
+  "prototypeBuild": "passed"
+}

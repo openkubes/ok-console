@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto'
 
 const METHODS = new Set(['OIDC', 'Bootstrap', 'BreakGlass', 'Local'])
 const OUTCOMES = new Set(['Started', 'Granted', 'Denied', 'Restored', 'Rotated', 'Revoked'])
-const CAUSES = new Set(['REQUESTED', 'VERIFIED', 'INVALID_CREDENTIAL', 'THROTTLED', 'UNMAPPED_SUBJECT', 'TRANSACTION_INVALID', 'CALLBACK_REJECTED', 'SESSION_INVALID', 'CSRF_REJECTED', 'AUDIT_FAILED'])
+const CAUSES = new Set(['REQUESTED', 'VERIFIED', 'INVALID_CREDENTIAL', 'THROTTLED', 'UNMAPPED_SUBJECT', 'TRANSACTION_INVALID', 'CALLBACK_REJECTED', 'SESSION_INVALID', 'CSRF_REJECTED', 'AUDIT_FAILED', 'ORIGIN_REJECTED', 'CONTENT_TYPE_REJECTED', 'REQUEST_INVALID'])
 
 const bounded = (value, max = 256) => typeof value === 'string' && value.length > 0 && value.length <= max
   && value === value.trim() && ![...value].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)

@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { Readable } from 'node:stream'
+import { PostgresAuthenticationAudit } from './authenticationAudit.mjs'
+import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
 import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -92,6 +95,25 @@ suite('OK-214 real PostgreSQL local identity', () => {
     if (runtime) { await new Promise((resolve)=>runtime.server.close(resolve)); await runtime.sessionRuntime.close() }
     await pool?.end()
     if (directory) await rm(directory,{recursive:true,force:true})
+  })
+
+  it('durably audits each pre-verifier rejection once without a principal', async () => {
+    const audit = new PostgresAuthenticationAudit({ pool, pepper: Buffer.alloc(32, 2) })
+    const verifier = vi.fn()
+    const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: origin, audit: event => audit.record(event) })
+    const inputs = [
+      { cause: 'ORIGIN_REJECTED', headers: { origin: 'https://other.invalid', 'content-type': 'application/json' }, body: '{}' },
+      { cause: 'CONTENT_TYPE_REJECTED', headers: { origin, 'content-type': 'text/plain' }, body: '{}' },
+      { cause: 'REQUEST_INVALID', headers: { origin, 'content-type': 'application/json' }, body: '{' },
+    ]
+    for (const { cause, headers, body } of inputs) {
+      const correlationId = `test-pre-verifier-${cause}`
+      const request = Object.assign(Readable.from([body]), { method: 'POST', headers })
+      await handler({ request, response: { writeHead() {}, end() {} }, pathname: '/api/console/v0/auth/local', correlationId })
+    }
+    const { rows } = await pool.query('SELECT authentication_method, outcome, cause, correlation_id, principal_digest FROM ok_console.authentication_audit ORDER BY cause')
+    expect(rows).toEqual(inputs.map(({ cause }) => ({ authentication_method: 'Local', outcome: 'Denied', cause, correlation_id: `test-pre-verifier-${cause}`, principal_digest: null })).sort((a,b) => a.cause.localeCompare(b.cause)))
+    expect(verifier).not.toHaveBeenCalled()
   })
 
   const postLogin = (username, value = password) => new Promise((resolve,reject) => {

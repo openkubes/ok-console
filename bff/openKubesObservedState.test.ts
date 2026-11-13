@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { validateConsoleResponse } from '../src/domain/presentationContract'
 import {
   normalizeOpenKubesObservedState,
+  observedStateDiagnostics,
   OpenKubesObservedStateAdapter,
   OPENKUBES_QUERY_VERSION,
 } from './adapters/openKubesObservedState.mjs'
@@ -18,6 +19,7 @@ import { createObservedStateSource } from './source.mjs'
 type JsonRecord = Record<string, unknown>
 type MutableEnvelope = {
   apiVersion: string
+  metadata: JsonRecord
   kind: string
   data: {
     environment: { id: string }
@@ -74,6 +76,8 @@ const observedEnvelope = async (metadata: JsonRecord = {}) => {
 const ownershipTargets: Array<[string, (envelope: MutableEnvelope) => JsonRecord]> = [
   ['cluster', (envelope) => envelope.data.clusters[0]],
   ['capability', (envelope) => envelope.data.clusters[0].capabilities[0]],
+  ['tenant cluster', (envelope) => envelope.data.clusters[1]],
+  ['tenant capability', (envelope) => envelope.data.clusters[1].capabilities[0]],
   ['placement', (envelope) => envelope.data.placements[0]],
   ['evidence', (envelope) => envelope.data.evidence[0]],
   ['metric bucket', (envelope) => envelope.data.metrics[0]],
@@ -91,6 +95,66 @@ const assignClusterTenant = (envelope: MutableEnvelope, clusterId: string, tenan
   envelope.data.placements
     .filter((item) => item.targetClusterId === clusterId)
     .forEach((item) => { item.ownership = ownership })
+}
+
+const sweepCredentialScalars = (original: Awaited<ReturnType<typeof observedEnvelope>>) => {
+  const platformTenant = original.data.clusters.find((cluster: JsonRecord) => cluster.role === 'Management plane').ownership.tenantId
+  const counts = { withheld: 0, accepted: 0, rejected: 0 }
+  const paths: string[][] = []
+  const visit = (value: unknown, path: string[] = []) => {
+    if (typeof value === 'string') paths.push(path)
+    else if (value && typeof value === 'object') {
+      Object.entries(value).forEach(([key, child]) => visit(child, [...path, key]))
+    }
+  }
+  visit(original)
+  for (const path of paths) {
+    const envelope = structuredClone(original)
+    let parent = envelope as unknown as JsonRecord
+    for (const key of path.slice(0, -1)) parent = parent[key] as JsonRecord
+    parent[path[path.length - 1]] = 'Authorization: Bearer redaction-negative-proof'
+    let serialized: string
+    try {
+      serialized = JSON.stringify(normalizeOpenKubesObservedState(envelope))
+    } catch (error) {
+      const leaf = path[path.length - 1]
+      const reason = path[1] === 'clusters' && path.length === 4 && leaf === 'id'
+        && original.data.clusters[Number(path[2])].role === 'Workload cluster'
+        && original.data.clusters[Number(path[2])].ownership.tenantId !== platformTenant
+        ? 'unresolved Evidence cluster reference.'
+        : path.includes('ownership')
+        ? 'must be a valid non-empty bounded string.'
+        : ['id', 'evidenceId', 'clusterId', 'targetClusterId'].includes(leaf)
+          ? 'must match the ID grammar.'
+          : ['apiVersion', 'kind'].includes(leaf)
+            ? 'Observed-state query contract is incompatible.'
+            : path.join('.') === 'metadata.observedAt'
+              ? 'must be an ISO timestamp.'
+              : leaf === 'name' && path[1] === 'clusters' ? 'must be a DNS subdomain.' : 'is not supported.'
+      expect((error as Error).message, path.join('.')).toContain(reason)
+      expect((error as Error).message, path.join('.')).not.toContain('redaction-negative-proof')
+      counts.rejected += 1
+      continue
+    }
+    expect(path.includes('ownership'), path.join('.')).toBe(false)
+    expect(serialized, path.join('.')).not.toContain('redaction-negative-proof')
+    if (path[1] === 'clusters' && !path.includes('ownership') && !JSON.parse(serialized).clusters.some((item: JsonRecord) => item.id === original.data.clusters[Number(path[2])].id)) {
+      expect(JSON.parse(serialized).evidence.some((item: JsonRecord) => item.clusterId === original.data.clusters[Number(path[2])].id)).toBe(false)
+      expect(JSON.parse(serialized).placements.some((item: JsonRecord) => item.targetClusterId === original.data.clusters[Number(path[2])].id)).toBe(false)
+      counts.withheld += 1
+      continue
+    }
+    counts.accepted += 1
+    if (path[1] === 'evidence' && path.at(-1) === 'observedAt') {
+      const item = envelope.data.evidence[Number(path[2])]
+      expect(JSON.parse(serialized).evidence.some((evidence: JsonRecord) => evidence.id === item.id)).toBe(false)
+      continue
+    }
+    expect(serialized, path.join('.')).toContain(path[path.length - 1] === 'summary'
+      ? 'Evidence summary withheld by the Console redaction boundary.'
+      : 'Value withheld by the Console redaction boundary.')
+  }
+  return counts
 }
 
 const startQuery = async (payload: unknown, { status = 200, contentType = 'application/json; profile="observed.openkubes.io/v0alpha2"' } = {}) => listen(createServer((_request, response) => {
@@ -340,7 +404,8 @@ describe('OpenKubes observed-state query adapter', () => {
   })
 
   it.each([
-    ['missing ownership', (envelope: MutableEnvelope) => { delete envelope.data.clusters[1].capabilities[0].ownership }],
+    ['missing cluster ownership', (envelope: MutableEnvelope) => { delete envelope.data.clusters[1].ownership }],
+    ['missing capability ownership', (envelope: MutableEnvelope) => { delete envelope.data.clusters[1].capabilities[0].ownership }],
     ['dangling Evidence cluster', (envelope: MutableEnvelope) => { envelope.data.evidence[1].clusterId = 'hidden-missing-cluster' }],
   ])('rejects hidden tenant corruption before authorization filtering: %s', async (_label, mutate) => {
     const envelope = await observedEnvelope() as unknown as MutableEnvelope
@@ -654,48 +719,21 @@ describe('OpenKubes observed-state query adapter', () => {
   })
 
   it('withholds or rejects credential values in every input string scalar', async () => {
-    const original = await observedEnvelope()
-    const paths: string[][] = []
-    const visit = (value: unknown, path: string[] = []) => {
-      if (typeof value === 'string') paths.push(path)
-      else if (value && typeof value === 'object') {
-        Object.entries(value).forEach(([key, child]) => visit(child, [...path, key]))
-      }
+    const counts = sweepCredentialScalars(await observedEnvelope())
+    console.info('credential scalar sweep (platform-owned):', counts)
+    expect(counts.withheld).toBe(0)
+  })
+
+  it('withholds credential values in every input string scalar for non-platform Workload clusters', async () => {
+    const envelope = await observedEnvelope()
+    for (const cluster of envelope.data.clusters) {
+      assignClusterTenant(envelope, cluster.id, cluster.role === 'Workload cluster' ? 'B' : 'A')
     }
-    visit(original)
-    for (const path of paths) {
-      const envelope = structuredClone(original)
-      let parent = envelope as unknown as JsonRecord
-      for (const key of path.slice(0, -1)) parent = parent[key] as JsonRecord
-      parent[path[path.length - 1]] = 'Authorization: Bearer redaction-negative-proof'
-      let serialized: string
-      try {
-        serialized = JSON.stringify(normalizeOpenKubesObservedState(envelope))
-      } catch (error) {
-        const leaf = path[path.length - 1]
-        const reason = path.includes('ownership')
-          ? 'must be a valid non-empty bounded string.'
-          : ['id', 'evidenceId', 'clusterId', 'targetClusterId'].includes(leaf)
-            ? 'must match the ID grammar.'
-            : ['apiVersion', 'kind'].includes(leaf)
-              ? 'Observed-state query contract is incompatible.'
-              : path.join('.') === 'metadata.observedAt'
-                ? 'must be an ISO timestamp.'
-                : leaf === 'name' && path[1] === 'clusters' ? 'must be a DNS subdomain.' : 'is not supported.'
-        expect((error as Error).message, path.join('.')).toContain(reason)
-        expect((error as Error).message, path.join('.')).not.toContain('redaction-negative-proof')
-        continue
-      }
-      expect(serialized, path.join('.')).not.toContain('redaction-negative-proof')
-      if (path[1] === 'evidence' && path.at(-1) === 'observedAt') {
-        const item = envelope.data.evidence[Number(path[2])]
-        expect(JSON.parse(serialized).evidence.some((evidence: JsonRecord) => evidence.id === item.id)).toBe(false)
-        continue
-      }
-      expect(serialized, path.join('.')).toContain(path[path.length - 1] === 'summary'
-        ? 'Evidence summary withheld by the Console redaction boundary.'
-        : 'Value withheld by the Console redaction boundary.')
-    }
+    envelope.data.metrics[0].ownership.tenantId = 'A'
+    expect(() => normalizeOpenKubesObservedState(envelope)).not.toThrow()
+    const counts = sweepCredentialScalars(envelope)
+    console.info('credential scalar sweep (non-platform Workload):', counts)
+    expect(counts.withheld).toBeGreaterThan(0)
   })
 
   it('rejects malformed partial semantics instead of silently treating them as complete', async () => {
@@ -1218,5 +1256,389 @@ it.each(['token-lab', 'secret-lab', 'cookie-shop'])('isolates keyword-only Claim
     if (path === 'clusters') expect(body.data.items.map((item: JsonRecord) => item.name)).toEqual(['worker-east'])
   }
   foreign.name = 'putty-user-key-file-3'
-  expect(() => normalizeOpenKubesObservedState(envelope)).toThrow('must not contain a credential value')
+  expect(normalizeOpenKubesObservedState(envelope).clusters.some((item: JsonRecord) => item.id === foreign.id)).toBe(false)
+})
+
+
+// OK-215: isolate only cluster-local failures, before validating dependants.
+describe('tenant cluster isolation', () => {
+  const now = () => new Date('2026-08-21T18:01:00Z')
+  const setup = async () => {
+    const envelope = await observedEnvelope()
+    for (const cluster of envelope.data.clusters) assignClusterTenant(envelope, cluster.id, 'A')
+    assignClusterTenant(envelope, 'cluster-ok-ai', 'B')
+    assignClusterTenant(envelope, 'cluster-edge-07', 'B')
+    envelope.data.metrics[0].ownership.tenantId = 'A'
+    const invalid = envelope.data.clusters[1]
+    invalid.capabilities.forEach((capability: JsonRecord, index: number) => { capability.id = `cap-ai-only-${index}` })
+    return { envelope, invalid }
+  }
+  it('withholds a malformed non-platform Workload cluster before the Management plane', async () => {
+    const { envelope, invalid } = await setup()
+    const baseline = normalizeOpenKubesObservedState(envelope, { now })
+    envelope.data.clusters = [invalid, ...envelope.data.clusters.filter((cluster: JsonRecord) => cluster.id !== invalid.id)]
+    expect(envelope.data.clusters[0].role).toBe('Workload cluster')
+    expect(envelope.data.clusters.findIndex((cluster: JsonRecord) => cluster.role === 'Management plane')).toBeGreaterThan(0)
+    invalid.readiness = 'Broken'
+
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot).toEqual({
+      ...baseline,
+      clusters: baseline.clusters.filter((cluster: JsonRecord) => cluster.id !== invalid.id),
+      evidence: baseline.evidence.filter((item: JsonRecord) => item.clusterId !== invalid.id),
+      placements: baseline.placements.filter((item: JsonRecord) => item.targetClusterId !== invalid.id),
+    })
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+  })
+  const cases: Array<[string, (cluster: JsonRecord & { capabilities: JsonRecord[] }) => void]> = [
+    ['bad readiness', (cluster) => { cluster.readiness = 'Broken' }],
+    ['credential name', (cluster) => { cluster.name = 'putty-user-key-file-3' }],
+  ]
+  it.each(cases)('serves both tenants and count-only diagnostics after %s', async (_label, mutate) => {
+    const { envelope, invalid } = await setup()
+    const baseline = normalizeOpenKubesObservedState(envelope, { now })
+    mutate(invalid)
+    // Ownership-valid dependants may be dropped for other malformed fields.
+    envelope.data.evidence[1].type = null
+    envelope.data.placements[0].name = null
+    expect(() => normalizeOpenKubesObservedState(envelope, { now })).not.toThrow()
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot).toEqual({
+      ...baseline,
+      clusters: baseline.clusters.filter((item: JsonRecord) => item.id !== invalid.id),
+      evidence: baseline.evidence.filter((item: JsonRecord) => item.clusterId !== invalid.id),
+      placements: baseline.placements.filter((item: JsonRecord) => item.targetClusterId !== invalid.id),
+    })
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+    expect(JSON.stringify(snapshot)).not.toContain('withheldClusterCount')
+    const source = new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now })
+    const logs: string[] = []
+    for (const tenant of ['A', 'B']) {
+      const authorizer = async (request: Parameters<typeof prototypeAuthorizer>[0]) => ({
+        ...await prototypeAuthorizer(request),
+        scope: { environmentId: envelope.data.environment.id, tenantIds: [tenant] },
+      })
+      const bff = await listen(createServer(createConsoleBffHandler({ source, authorizer, now, correlationId: () => 'corr-test', sourceFailureObserver: (line: string) => logs.push(line) })))
+      const cleanSource = { readSnapshot: async () => baseline }
+      const cleanBff = await listen(createServer(createConsoleBffHandler({ source: cleanSource, authorizer, now })))
+      for (const path of ['session', 'overview', 'clusters', 'clusters/cluster-edge-07', 'evidence/ev-edge-unknown']) {
+        if (tenant === 'A' && path.includes('edge')) continue
+        const response = await fetch(`${bff}/api/console/v0/${path}`)
+        expect(response.status, `${tenant}/${path}`).toBe(200)
+        const body = await response.json()
+        expect(validateConsoleResponse(body)).toEqual({ valid: true, errors: [] })
+        const serialized = JSON.stringify(body)
+        for (const marker of [invalid.id, invalid.name, ...invalid.capabilities.map((item: JsonRecord) => item.id), 'ev-ai-ready', 'claim-private-ai', 'withheldClusterCount']) {
+          expect(serialized).not.toContain(marker)
+          expect(JSON.stringify([...response.headers])).not.toContain(marker)
+        }
+        if (tenant === 'A') {
+          const clean = await (await fetch(`${cleanBff}/api/console/v0/${path}`)).json()
+          // Correlation IDs are generated per request; compare all data and warnings.
+          expect({ ...body, meta: { ...body.meta, correlationId: 'same' } }).toEqual({ ...clean, meta: { ...clean.meta, correlationId: 'same' } })
+        }
+        if (tenant === 'B' && path === 'clusters') expect(body.data.items.map((item: JsonRecord) => item.id)).toEqual(['cluster-edge-07'])
+      }
+      for (const path of ['clusters/cluster-ok-ai', 'evidence/ev-ai-ready']) {
+        const response = await fetch(`${bff}/api/console/v0/${path}`)
+        expect(response.status).toBe(404)
+        const serialized = await response.text()
+        for (const marker of [invalid.id, invalid.name, 'ev-ai-ready', 'withheldClusterCount']) expect(serialized).not.toContain(marker)
+      }
+    }
+    expect(logs.length).toBeGreaterThan(0)
+    expect(logs.map((line) => JSON.parse(line))).toEqual(logs.map(() => ({ event: 'observed_state_clusters_withheld', time: now().toISOString(), correlationId: 'OTHER', withheldClusterCount: 1 })))
+  })
+
+  const platformMalformations: Array<[string, (cluster: JsonRecord & { capabilities: JsonRecord[] }) => void, string]> = [
+    ['cluster readiness', (cluster) => { cluster.readiness = 'Broken' }, '$.data.clusters[1].readiness'],
+    ['capability readiness', (cluster) => { cluster.capabilities[0].readiness = 'Broken' }, '$.data.clusters[1].capabilities[0].readiness'],
+  ]
+  const expectSnapshotRejected = async (envelope: Awaited<ReturnType<typeof observedEnvelope>>, path: string) => {
+    expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow(`${path} is not supported.`)
+    const logs: string[] = []
+    const bff = await listen(createServer(createConsoleBffHandler({
+      source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+      authorizer: prototypeAuthorizer, now, sourceFailureObserver: (line: string) => logs.push(line),
+    })))
+    const response = await fetch(`${bff}/api/console/v0/overview`)
+    expect(response.status).toBe(502)
+    const body = await response.json()
+    expect(body).toMatchObject({ kind: 'Error', error: { code: 'CONTRACT_INCOMPATIBLE', retryable: false } })
+    expect(body).not.toHaveProperty('data')
+    expect(JSON.stringify(body)).not.toContain('withheldClusterCount')
+    expect(JSON.stringify([...response.headers])).not.toContain('withheldClusterCount')
+    expect(logs.map((line) => JSON.parse(line)).filter((event) => event.event === 'observed_state_clusters_withheld')).toEqual([])
+    expect(logs.join('')).not.toContain('withheldClusterCount')
+  }
+  describe.each(['Management plane', 'Infrastructure plane'])('%s failure rejection', (role) => {
+    it.each(platformMalformations)('rejects malformed %s without withholding diagnostics', async (_label, mutate, path) => {
+      const { envelope, invalid } = await setup()
+      invalid.role = role
+      mutate(invalid)
+      await expectSnapshotRejected(envelope, path)
+    })
+  })
+
+  describe.each(['platform', 'renamed-owner'])('platform-owned Workload cluster (%s)', (tenantId) => {
+    it.each(platformMalformations)('rejects malformed %s without withholding diagnostics', async (_label, mutate, path) => {
+      const { envelope, invalid } = await setup()
+      assignClusterTenant(envelope, envelope.data.clusters[0].id, tenantId)
+      assignClusterTenant(envelope, invalid.id, tenantId)
+      expect(invalid.role).toBe('Workload cluster')
+      mutate(invalid)
+      await expectSnapshotRejected(envelope, path)
+    })
+  })
+
+  describe.each([0, 2])('unresolved platform tenant with %i raw management clusters', (managementCount) => {
+    it.each(platformMalformations)('rejects malformed %s before withholding', async (_label, mutate, path) => {
+      const { envelope, invalid } = await setup()
+      // Keep the invalid worker before management clusters to exercise raw pre-resolution.
+      envelope.data.clusters[0].role = 'Workload cluster'
+      if (managementCount === 2) {
+        envelope.data.clusters[2].role = 'Management plane'
+        envelope.data.clusters[3].role = 'Management plane'
+      }
+      mutate(invalid)
+      await expectSnapshotRejected(envelope, path)
+    })
+  })
+
+  it.each(platformMalformations)('still withholds Workload cluster with malformed %s', async (_label, mutate) => {
+    const { envelope, invalid } = await setup()
+    expect(invalid.role).toBe('Workload cluster')
+    mutate(invalid)
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot.clusters.some((cluster: JsonRecord) => cluster.id === invalid.id)).toBe(false)
+    expect(snapshot.evidence.some((item: JsonRecord) => item.clusterId === invalid.id)).toBe(false)
+    expect(snapshot.placements.some((item: JsonRecord) => item.targetClusterId === invalid.id)).toBe(false)
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+  })
+
+  it('reports the actual number when two clusters are withheld', async () => {
+    const { envelope, invalid } = await setup()
+    invalid.readiness = 'Broken'
+    envelope.data.clusters[3].name = 'putty-user-key-file-3'
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot.clusters).toHaveLength(2)
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 2 })
+    const logs: string[] = []
+    const bff = await listen(createServer(createConsoleBffHandler({
+      source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+      authorizer: prototypeAuthorizer, correlationId: () => 'corr-test', sourceFailureObserver: (line: string) => logs.push(line), now,
+    })))
+    const response = await fetch(`${bff}/api/console/v0/clusters`)
+    expect(response.status).toBe(200)
+    expect(await response.text()).not.toContain('withheldClusterCount')
+    expect(JSON.stringify([...response.headers])).not.toContain('withheldClusterCount')
+    expect(logs.map((line) => JSON.parse(line))).toEqual([{ event: 'observed_state_clusters_withheld', time: now().toISOString(), correlationId: 'OTHER', withheldClusterCount: 2 }])
+  })
+
+  it.each(['id', 'name', 'provider', 'profile', 'kubernetesVersion', 'region', 'readiness', 'compatibility', 'contractVersion', 'revision', 'evidenceId', 'capabilities', 'lifecycle'])(
+    'isolates invalid cluster field %s', async (field) => {
+      for (const value of [undefined, null, 7, {}, [], '']) {
+        const { envelope, invalid } = await setup()
+        if (field === 'id') {
+          envelope.data.evidence = envelope.data.evidence.filter((item: JsonRecord) => item.clusterId !== invalid.id)
+          envelope.data.placements = envelope.data.placements.filter((item: JsonRecord) => item.targetClusterId !== invalid.id)
+        }
+        if (value === undefined) delete invalid[field]
+        else invalid[field] = value
+        // Empty lists are valid for capabilities/lifecycle.
+        const valid = Array.isArray(value) && ['capabilities', 'lifecycle'].includes(field)
+        const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+        expect(snapshot.clusters).toHaveLength(valid ? 4 : 3)
+        expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: valid ? 0 : 1 })
+      }
+    },
+  )
+
+  it.each(['capabilities.0.id', 'capabilities.0.name', 'capabilities.0.readiness', 'capabilities.0.evidenceId', 'lifecycle.0.label', 'lifecycle.0.state', 'lifecycle.0.detail'])(
+    'isolates malformed nested cluster field %s', async (path) => {
+      for (const value of [undefined, null, 7, {}, [], '']) {
+        const { envelope, invalid } = await setup()
+        const { parent, key } = parentAt(invalid, path)
+        if (value === undefined) delete parent[key]
+        else parent[key] = value
+        const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+        expect(snapshot.clusters.some((item: JsonRecord) => item.id === invalid.id)).toBe(false)
+        expect(snapshot.evidence.some((item: JsonRecord) => item.clusterId === invalid.id)).toBe(false)
+        expect(snapshot.placements.some((item: JsonRecord) => item.targetClusterId === invalid.id)).toBe(false)
+        expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+      }
+    },
+  )
+
+  it.each([undefined, null, 7])('does not associate invalid raw ID %s with orphan dependants', async (id) => {
+    const { envelope, invalid } = await setup()
+    envelope.data.evidence = envelope.data.evidence.filter((item: JsonRecord) => item.clusterId !== invalid.id)
+    envelope.data.placements = envelope.data.placements.filter((item: JsonRecord) => item.targetClusterId !== invalid.id)
+    invalid.id = id
+    envelope.data.evidence.push({ id: 'orphan-invalid', clusterId: id, ownership: { environmentId: envelope.data.environment.id, tenantId: 'B' } })
+    await expectContractFailure(envelope)
+  })
+
+  it('withholds two id-less tenant clusters without treating absent IDs as duplicates', async () => {
+    const { envelope } = await setup()
+    const removedIds = [envelope.data.clusters[1].id, envelope.data.clusters[3].id]
+    envelope.data.evidence = envelope.data.evidence.filter((item: JsonRecord) => !removedIds.includes(item.clusterId))
+    envelope.data.placements = envelope.data.placements.filter((item: JsonRecord) => !removedIds.includes(item.targetClusterId))
+    delete envelope.data.clusters[1].id
+    delete envelope.data.clusters[3].id
+    expect(() => normalizeOpenKubesObservedState(envelope, { now })).not.toThrow()
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot.clusters).toHaveLength(2)
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 2 })
+  })
+
+  it('withholds two id-less capabilities without treating absent IDs as duplicates', async () => {
+    const { envelope, invalid } = await setup()
+    invalid.capabilities = [structuredClone(invalid.capabilities[0]), structuredClone(invalid.capabilities[0])]
+    for (const capability of invalid.capabilities) delete capability.id
+    expect(() => normalizeOpenKubesObservedState(envelope, { now })).not.toThrow()
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot.clusters.some((item: JsonRecord) => item.id === invalid.id)).toBe(false)
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+  })
+
+  it('nulls tenant B metric breakdown leaves while preserving tenant A', async () => {
+    const { envelope, invalid } = await setup()
+    for (const item of envelope.data.evidence) { item.observedAt = now().toISOString(); item.classification = 'Current' }
+    envelope.data.metrics[0].capabilities = { total: 10, ready: 7, pending: 1, failed: 1, unknown: 1 }
+    envelope.data.metrics[0].workloadClaims = { total: 11, ready: 8, pending: 1, failed: 1, unknown: 1 }
+    envelope.data.metrics[0].openFindings = { total: 4, critical: 1 }
+    const bucket = structuredClone(envelope.data.metrics[0])
+    bucket.ownership.tenantId = 'B'
+    bucket.capabilities = { total: 9, ready: 6, pending: 1, failed: 1, unknown: 1 }
+    bucket.workloadClaims = { total: 8, ready: 5, pending: 1, failed: 1, unknown: 1 }
+    bucket.openFindings = { total: 3, critical: 2 }
+    envelope.data.metrics.push(bucket)
+    const baseline = normalizeOpenKubesObservedState(envelope, { now })
+    expect(baseline.metrics[0].capabilities.ready).toBe(7)
+    expect(baseline.metrics[1].capabilities.ready).toBe(6)
+    invalid.readiness = 'Broken'
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot.metrics[0]).toEqual(baseline.metrics[0])
+    expect(snapshot.metrics[1]).toEqual({
+      ...baseline.metrics[1],
+      capabilities: { total: 9, ready: null, pending: null, failed: null, unknown: null },
+      workloadClaims: { total: 8, ready: null, pending: null, failed: null, unknown: null },
+      openFindings: { total: null, critical: null },
+    })
+  })
+
+  // A raw role must identify a supported role before tenant isolation is allowed.
+  it.each([undefined, null, 7, {}, [], '', 'Management Plane', 'management plane', 'Worker'])(
+    'rejects unsupported raw role %j', async (role) => {
+      const { envelope, invalid } = await setup()
+      invalid.role = role
+      expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow(/\.role /)
+      await expectContractFailure(envelope)
+    },
+  )
+
+  const ownershipFailures: Array<[string, unknown]> = [
+    ['absent', undefined], ['null', null], ['wrong type', []], ['missing key', { environmentId: 'community-preview' }],
+    ['extra key', { environmentId: 'community-preview', tenantId: 'B', extra: true }],
+    ['foreign environment', { environmentId: 'other', tenantId: 'B' }],
+    ['invalid tenant', { environmentId: 'community-preview', tenantId: '' }],
+    ['cross owner', { environmentId: 'community-preview', tenantId: 'A' }],
+  ]
+  it.each(['capability', 'evidence', 'placement'].flatMap((kind) =>
+    ownershipFailures.map(([label, ownership]) => [kind, label, ownership] as const)))(
+    'rejects withheld %s ownership: %s', async (kind, _label, ownership) => {
+      const { envelope, invalid } = await setup()
+      invalid.readiness = 'Broken'
+      const target = kind === 'capability' ? invalid.capabilities[0]
+        : kind === 'evidence' ? envelope.data.evidence[1] : envelope.data.placements[0]
+      target.ownership = ownership
+      expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow(/ownership/)
+      await expectContractFailure(envelope)
+    },
+  )
+
+  it.each([false, true])('rejects duplicate tenant capability IDs before withholding: invalid cluster %s', async (invalidCluster) => {
+    const { envelope, invalid } = await setup()
+    invalid.capabilities.push(structuredClone(invalid.capabilities[0]))
+    if (invalidCluster) invalid.readiness = 'Broken'
+    expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow('duplicate capability')
+    await expectContractFailure(envelope)
+  })
+
+  it.each(['corr-00000000-0000-4000-8000-000000000215', 'producer-secret'.repeat(100)])(
+    'emits a bounded withholding event with injected request ID %s', async (requestId) => {
+      const { envelope, invalid } = await setup()
+      invalid.readiness = 'Broken'
+      const logs: string[] = []
+      const bff = await listen(createServer(createConsoleBffHandler({
+        source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+        authorizer: prototypeAuthorizer, now, correlationId: () => requestId,
+        sourceFailureObserver: (line: string) => logs.push(line),
+      })))
+      expect((await fetch(`${bff}/api/console/v0/overview`)).status).toBe(200)
+      expect(logs.map((line) => JSON.parse(line))).toEqual([{
+        event: 'observed_state_clusters_withheld', time: '2026-08-21T18:01:00.000Z',
+        correlationId: requestId.startsWith('corr-') ? requestId : 'OTHER', withheldClusterCount: 1,
+      }])
+    },
+  )
+
+  it('emits no withholding diagnostic for an intact snapshot', async () => {
+    const { envelope } = await setup()
+    const logs: string[] = []
+    const bff = await listen(createServer(createConsoleBffHandler({
+      source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+      authorizer: prototypeAuthorizer, correlationId: () => 'corr-test', sourceFailureObserver: (line: string) => logs.push(line), now,
+    })))
+    expect((await fetch(`${bff}/api/console/v0/overview`)).status).toBe(200)
+    expect(logs).toEqual([])
+  })
+
+  it.each(['sync', 'async'])('keeps serving when the diagnostic observer fails %s', async (mode) => {
+    const { envelope, invalid } = await setup()
+    invalid.readiness = 'Broken'
+    const bff = await listen(createServer(createConsoleBffHandler({
+      source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+      authorizer: prototypeAuthorizer, now,
+      sourceFailureObserver: () => { if (mode === 'sync') throw new Error('observer'); return Promise.reject(new Error('observer')) },
+    })))
+    expect((await fetch(`${bff}/api/console/v0/overview`)).status).toBe(200)
+  })
+
+  const rejects: Array<[string, (envelope: MutableEnvelope) => void]> = [
+    ['incompatible contract', (e) => { e.apiVersion = 'observed.openkubes.io/v9' }],
+    ['invalid envelope timestamp', (e) => { e.metadata.observedAt = 'bad' }],
+    ['invalid envelope partial', (e) => { e.metadata.partial = 'true' }],
+    ['invalid envelope revision', (e) => { e.metadata.sourceRevision = null }],
+    ['invalid environment', (e) => { (e.data.environment as JsonRecord).displayName = null }],
+    ['management invalid', (e) => { e.data.clusters[0].readiness = 'Broken' }],
+    ['invalid management with valid replacement', (e) => { e.data.clusters[0].readiness = 'Broken'; e.data.clusters[2].role = 'Management plane' }],
+    ['management capability invalid', (e) => { delete e.data.clusters[0].capabilities[0].ownership }],
+    ['missing management', (e) => { e.data.clusters[0].role = 'Workload cluster' }],
+    ['extra management', (e) => { e.data.clusters[2].role = 'Management plane' }],
+    ['withheld duplicate cluster', (e) => { e.data.clusters[1].id = e.data.clusters[0].id }],
+    ['withheld duplicate Evidence', (e) => { e.data.evidence[1].id = e.data.evidence[0].id }],
+    ['withheld duplicate placement', (e) => { e.data.placements[0].id = e.data.placements[1].id }],
+    ['missing ownership', (e) => { delete e.data.clusters[1].ownership }],
+    ['null ownership', (e) => { e.data.clusters[1].ownership = null }],
+    ['wrong-type ownership', (e) => { e.data.clusters[1].ownership = [] }],
+    ['missing tenant key', (e) => { delete (e.data.clusters[1].ownership as JsonRecord).tenantId }],
+    ['extra ownership', (e) => { (e.data.clusters[1].ownership as JsonRecord).extra = true }],
+    ['wrong environment', (e) => { (e.data.clusters[1].ownership as JsonRecord).environmentId = 'other' }],
+    ['invalid tenant', (e) => { (e.data.clusters[1].ownership as JsonRecord).tenantId = null }],
+    ['orphan invalid Evidence', (e) => { e.data.evidence.push({ id: 'orphan', clusterId: 'absent', type: null }) }],
+    ['remaining cluster references withheld Evidence', (e) => { e.data.clusters[3].evidenceId = 'ev-ai-ready' }],
+    ['remaining capability references withheld Evidence', (e) => { e.data.clusters[3].capabilities[0].evidenceId = 'ev-ai-ready' }],
+    ['remaining placement references withheld Evidence', (e) => { e.data.placements[1].evidenceId = 'ev-ai-ready' }],
+    ['invalid remaining placement', (e) => { e.data.placements[1].readiness = 'Broken' }],
+    ['cross-owner remaining Evidence', (e) => { e.data.evidence[3].ownership = { ...(e.data.evidence[3].ownership as JsonRecord), tenantId: 'A' } }],
+  ]
+  it.each(rejects)('still rejects %s', async (_label, mutate) => {
+    const { envelope, invalid } = await setup()
+    invalid.readiness = 'Broken'
+    mutate(envelope)
+    if (_label.startsWith('withheld duplicate')) expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow('duplicate')
+    await expectContractFailure(envelope)
+  })
 })

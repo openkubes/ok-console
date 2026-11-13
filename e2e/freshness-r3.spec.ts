@@ -47,7 +47,8 @@ for (const kind of ['item', 'envelope', 'injection'] as const) {
       await expect(row.locator('.status-ready')).toHaveCount(0)
       await page.goto('/#/overview')
       const findings = page.locator('.metric').filter({ hasText: 'Open findings' })
-      await expect(findings).toContainText('Unavailable critical policy violations')
+      await expect(findings.locator('strong')).toHaveText('Unavailable')
+      await expect(findings.locator('small')).toHaveText('Unavailable')
       await expect(findings).not.toContainText('0 critical')
     } finally { await fixture?.close() }
   })

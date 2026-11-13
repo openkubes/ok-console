@@ -42,9 +42,11 @@ for (const kind of ['item', 'envelope', 'injection', 'fresh', 'deployment'] as c
       if (kind === 'injection') await injectBffFailure(page, 'stale')
       await signInPrototype(page)
       await page.locator('.cluster-card').filter({ hasText: fixture?.cluster.name ?? 'ok-mgmt' }).locator('button.card-main').click()
-      const stale = kind === 'item' || kind === 'envelope' || kind === 'injection'
-      await expect(page.locator('.detail-grid .eyebrow').first()).toHaveText(stale ? 'Last observed posture' : 'Current observation')
-      await expect(page.locator('.live-label')).toHaveText(stale ? 'Last observed' : 'Observed')
+      // #140 includes stale hosting placements in the tenant's response verdict.
+      const stale = kind !== 'fresh'
+      const unavailable = kind === 'item' || kind === 'envelope' || kind === 'injection'
+      await expect(page.locator('.detail-grid .eyebrow').first()).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed posture' : 'Current observation')
+      await expect(page.locator('.live-label')).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed' : 'Observed')
       await expect(page.locator('.live-label .live-dot')).toHaveCount(stale ? 0 : 1)
       const details = await page.locator('.lifecycle-step p').allTextContents()
       expect(details.length).toBeGreaterThan(0)
@@ -72,7 +74,51 @@ for (const kind of ['future', 'immutable', 'immutable-future', 'immutable-curren
         : kind === 'immutable-current' ? 'Immutable receipt'
         : kind === 'immutable' ? 'Immutable receipt · Stale observation: older than the freshness window'
         : `${kind === 'immutable-future' ? 'Immutable receipt · ' : ''}Stale observation: dated in the future (clock fault)`
-      await expect(durability).toHaveText(expected)
+      if (kind === 'immutable-current') await expect(durability).toHaveText(/Immutable receipt · .*2026/)
+      else await expect(durability).toHaveText(expected)
     } finally { await fixture.close() }
   })
 }
+
+for (const kind of ['fresh', 'envelope'] as const) {
+  test(`J3 ${kind}: BFF Agents contains catalog data without invented runtime observations`, async ({ page }) => {
+    const fixture = await serve(page, kind)
+    try {
+      await signInPrototype(page)
+      await page.goto('/#/agents')
+      await expect(page.getByRole('heading', { name: 'Kagent Platform Operator' })).toBeVisible()
+      await expect(page.locator('.agent-deployments article')).toHaveCount(0)
+      await expect(page.locator('main')).not.toContainText('cluster-inspector')
+      await expect(page.locator('main')).not.toContainText('Current')
+      await expect(page.locator('main .live-dot')).toHaveCount(0)
+      await page.goto('/#/evidence')
+      await expect(page.locator('.evidence-row').filter({ hasText: 'Kagent cluster inspector readiness' })).toHaveCount(0)
+      const row = page.locator('.evidence-row').filter({ hasText: fixture.evidence.title })
+      await expect(row).toContainText(kind === 'fresh' ? 'Current observation' : 'Last observed')
+      await expect(row.locator('.live-dot')).toHaveCount(kind === 'fresh' ? 1 : 0)
+    } finally { await fixture.close() }
+  })
+}
+
+
+test('U1 future producer Evidence leaves detail Unknown when its reference is unavailable', async ({ page }) => {
+  const fixture = await serve(page, 'future')
+  try {
+    await signInPrototype(page)
+    await page.locator('.cluster-card').filter({ hasText: fixture.cluster.name }).locator('button.card-main').click()
+    await expect(page.locator('.title-actions .status')).toHaveText('Unknown')
+    await expect(page.locator('.live-label')).toHaveText('Observation unavailable - readiness Unknown')
+    await expect(page.locator('main .live-dot')).toHaveCount(0)
+    await expect(page.locator('main')).not.toContainText('Current observation')
+  } finally { await fixture.close() }
+})
+
+test('U5 item-only stale producer observation is explained by the SOURCE_STALE banner', async ({ page }) => {
+  const fixture = await serve(page, 'item')
+  try {
+    await signInPrototype(page)
+    await expect(page.locator('.data-warning')).toContainText('Some observations are stale')
+    await expect(page.locator('.data-warning')).toContainText('An authorized observation is outside its configured freshness window.')
+    await expect(page.locator('.snapshot .live-dot')).toHaveCount(0)
+  } finally { await fixture.close() }
+})

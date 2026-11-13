@@ -36,8 +36,9 @@ describe('OK-158/OK-159 read-only vertical slice', () => {
     expect(snapshot).toMatchObject({
       source: 'bff',
       presentationVersion: 'console.openkubes.io/v0alpha1',
-      // edge-07 has Current-class Evidence older than the freshness window.
+      // edge-07 is older than the freshness window.
       freshness: 'Stale',
+      clusterListFreshness: 'Stale',
     })
     expect(snapshot.clusters.map((cluster) => cluster.name)).toEqual([
       'ok-mgmt',
@@ -65,8 +66,9 @@ describe('OK-158/OK-159 read-only vertical slice', () => {
       Object.fromEntries(requiredSnapshotFields.map((field) => [field, expect.anything()])),
     ))
     expect(snapshot.overview).toBeDefined()
-    expect(Object.keys(snapshot.clusters[0]).sort()).toEqual(Object.keys(fixtureSnapshot.clusters[0]).sort())
+    expect(Object.keys(snapshot.clusters[0]).sort()).toEqual([...Object.keys(fixtureSnapshot.clusters[0]), 'freshness'].sort())
     expect(managementPlane).toMatchObject({
+      freshness: 'Current',
       name: 'ok-mgmt',
       role: 'Management plane',
       readiness: 'Ready',

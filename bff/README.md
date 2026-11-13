@@ -336,27 +336,31 @@ The real-source path consumes the versioned read-only query envelope
 `observed.openkubes.io/v0alpha2` / `ConsoleObservedState`. Every cluster,
 capability, placement and evidence object carries `ownership`
 (`environmentId`, `tenantId`), and metrics arrive as one bucket per owner.
-Ownership must contain exactly `environmentId` and `tenantId`; unknown ownership keys are rejected.
-A cluster is withheld only when its role is `Workload cluster`, for non-ownership
-cluster or capability field failures only after cluster and every capability's
-ownership have been validated independently. Capability ownership must match its
-parent cluster. Evidence and placements referencing a withheld cluster are dropped
-only after their ownership is validated and matches that cluster; their other
-malformed fields may be dropped. Any ownership invalidity rejects the whole
-snapshot, including extra keys, foreign environments and cross-owner dependants.
-Unsupported roles (including casing variants), duplicate IDs of any kind (including
-capabilities within a cluster and withheld objects), incompatible contracts,
-invalid envelope fields, Management-plane or Infrastructure-plane failures, or a management-plane count
-other than one reject the snapshot. Invalid Evidence, placements or metric buckets
-unrelated to a withheld cluster and unresolved or cross-owner references among
-remaining objects still reject. Withheld owners have metric breakdown leaves set
-to null, as for unknown Evidence coverage; other tenants' buckets are unchanged.
-Only an operator log count reports withholding; tenant responses carry no
-placeholder or withholding metadata. The BFF then filters every object to the tenants the session
-may see (its tenants intersected with `OK_CONSOLE_TENANT_ID`) before projection. An object of another tenant
-returns the same 404 as an unknown id. Ownership-free `v0alpha1` envelopes are
-rejected. Configure the BFF
-process—not the browser—with:
+Ownership must contain exactly `environmentId` and `tenantId`; unknown
+ownership keys are rejected. A cluster with non-ownership cluster or capability
+field failures is withheld only when its role is `Workload cluster` and its
+tenant differs from the single raw Management-plane cluster's validated owner.
+If that owner cannot be determined, no cluster is withheld. Cluster and every
+capability's ownership must first be validated independently. Capability
+ownership must match its parent cluster. Evidence and placements referencing a
+withheld cluster are dropped only after their ownership is validated and
+matches that cluster; their other malformed fields may be dropped. Any
+ownership invalidity rejects the whole snapshot, including extra keys, foreign
+environments and cross-owner dependants. Unsupported roles (including casing
+variants), duplicate IDs of any kind (including capabilities within a cluster
+and withheld objects), incompatible contracts, invalid envelope fields,
+Management-plane or Infrastructure-plane failures, Workload-cluster failures
+for the management plane's tenant, or a management-plane count other than one
+reject the snapshot. Invalid Evidence, placements or metric buckets unrelated
+to a withheld cluster and unresolved or cross-owner references among remaining
+objects still reject. Withheld owners have metric breakdown leaves set to null,
+as for unknown Evidence coverage; other tenants' buckets are unchanged. Only an
+operator log count reports withholding; tenant responses carry no placeholder
+or withholding metadata. The BFF then filters every object to the tenants the
+session may see (its tenants intersected with `OK_CONSOLE_TENANT_ID`) before
+projection. An object of another tenant returns the same 404 as an unknown id.
+Ownership-free `v0alpha1` envelopes are rejected. Configure the BFF process—not
+the browser—with:
 
 ```bash
 OK_CONSOLE_OBSERVED_STATE_MODE=openkubes \

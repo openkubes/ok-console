@@ -660,6 +660,7 @@ describe('OpenKubes observed-state query adapter', () => {
 
   it('withholds or rejects credential values in every input string scalar', async () => {
     const original = await observedEnvelope()
+    const platformTenant = original.data.clusters.find((cluster: JsonRecord) => cluster.role === 'Management plane').ownership.tenantId
     const paths: string[][] = []
     const visit = (value: unknown, path: string[] = []) => {
       if (typeof value === 'string') paths.push(path)
@@ -678,7 +679,9 @@ describe('OpenKubes observed-state query adapter', () => {
         serialized = JSON.stringify(normalizeOpenKubesObservedState(envelope))
       } catch (error) {
         const leaf = path[path.length - 1]
-        const reason = path[1] === 'clusters' && path[2] !== '0' && path.length === 4 && leaf === 'id'
+        const reason = path[1] === 'clusters' && path.length === 4 && leaf === 'id'
+          && original.data.clusters[Number(path[2])].role === 'Workload cluster'
+          && original.data.clusters[Number(path[2])].ownership.tenantId !== platformTenant
           ? 'unresolved Evidence cluster reference.'
           : path.includes('ownership')
           ? 'must be a valid non-empty bounded string.'
@@ -1312,26 +1315,54 @@ describe('tenant cluster isolation', () => {
     ['cluster readiness', (cluster) => { cluster.readiness = 'Broken' }, '$.data.clusters[1].readiness'],
     ['capability readiness', (cluster) => { cluster.capabilities[0].readiness = 'Broken' }, '$.data.clusters[1].capabilities[0].readiness'],
   ]
+  const expectSnapshotRejected = async (envelope: Awaited<ReturnType<typeof observedEnvelope>>, path: string) => {
+    expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow(`${path} is not supported.`)
+    const logs: string[] = []
+    const bff = await listen(createServer(createConsoleBffHandler({
+      source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+      authorizer: prototypeAuthorizer, now, sourceFailureObserver: (line: string) => logs.push(line),
+    })))
+    const response = await fetch(`${bff}/api/console/v0/overview`)
+    expect(response.status).toBe(502)
+    const body = await response.json()
+    expect(body).toMatchObject({ kind: 'Error', error: { code: 'CONTRACT_INCOMPATIBLE', retryable: false } })
+    expect(body).not.toHaveProperty('data')
+    expect(JSON.stringify(body)).not.toContain('withheldClusterCount')
+    expect(JSON.stringify([...response.headers])).not.toContain('withheldClusterCount')
+    expect(logs.map((line) => JSON.parse(line)).filter((event) => event.event === 'observed_state_clusters_withheld')).toEqual([])
+    expect(logs.join('')).not.toContain('withheldClusterCount')
+  }
   describe.each(['Management plane', 'Infrastructure plane'])('%s failure rejection', (role) => {
     it.each(platformMalformations)('rejects malformed %s without withholding diagnostics', async (_label, mutate, path) => {
       const { envelope, invalid } = await setup()
       invalid.role = role
       mutate(invalid)
-      expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow(`${path} is not supported.`)
-      const logs: string[] = []
-      const bff = await listen(createServer(createConsoleBffHandler({
-        source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
-        authorizer: prototypeAuthorizer, now, sourceFailureObserver: (line: string) => logs.push(line),
-      })))
-      const response = await fetch(`${bff}/api/console/v0/overview`)
-      expect(response.status).toBe(502)
-      const body = await response.json()
-      expect(body).toMatchObject({ kind: 'Error', error: { code: 'CONTRACT_INCOMPATIBLE', retryable: false } })
-      expect(body).not.toHaveProperty('data')
-      expect(JSON.stringify(body)).not.toContain('withheldClusterCount')
-      expect(JSON.stringify([...response.headers])).not.toContain('withheldClusterCount')
-      expect(logs.map((line) => JSON.parse(line)).filter((event) => event.event === 'observed_state_clusters_withheld')).toEqual([])
-      expect(logs.join('')).not.toContain('withheldClusterCount')
+      await expectSnapshotRejected(envelope, path)
+    })
+  })
+
+  describe.each(['platform', 'renamed-owner'])('platform-owned Workload cluster (%s)', (tenantId) => {
+    it.each(platformMalformations)('rejects malformed %s without withholding diagnostics', async (_label, mutate, path) => {
+      const { envelope, invalid } = await setup()
+      assignClusterTenant(envelope, envelope.data.clusters[0].id, tenantId)
+      assignClusterTenant(envelope, invalid.id, tenantId)
+      expect(invalid.role).toBe('Workload cluster')
+      mutate(invalid)
+      await expectSnapshotRejected(envelope, path)
+    })
+  })
+
+  describe.each([0, 2])('unresolved platform tenant with %i raw management clusters', (managementCount) => {
+    it.each(platformMalformations)('rejects malformed %s before withholding', async (_label, mutate, path) => {
+      const { envelope, invalid } = await setup()
+      // Keep the invalid worker before management clusters to exercise raw pre-resolution.
+      envelope.data.clusters[0].role = 'Workload cluster'
+      if (managementCount === 2) {
+        envelope.data.clusters[2].role = 'Management plane'
+        envelope.data.clusters[3].role = 'Management plane'
+      }
+      mutate(invalid)
+      await expectSnapshotRejected(envelope, path)
     })
   })
 

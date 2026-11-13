@@ -401,6 +401,13 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   for (const [items, label] of [[rawClusters, 'cluster'], [rawEvidence, 'Evidence'], [rawPlacements, 'placement']]) {
     assertUniqueIds(items.filter((item) => typeof item?.id === 'string'), label)
   }
+  // Resolve platform ownership from raw clusters before any cluster can be withheld.
+  const managementClusters = rawClusters.map((item, index) => ({ item, index }))
+    .filter(({ item }) => item?.role === 'Management plane')
+  const platformTenant = managementClusters.length === 1
+    ? validateClusterOwnershipBeforeIsolation(managementClusters[0].item.ownership,
+      `$.data.clusters[${managementClusters[0].index}].ownership`, environmentId).tenantId
+    : undefined
   const clusters = []
   const withheldIds = new Map()
   const withheldTenants = new Set()
@@ -424,7 +431,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
       const cluster = normalizeCluster(item, path, environmentId, rawEvidence)
       clusters.push(cluster)
     } catch (error) {
-      if (item.role !== 'Workload cluster') throw error
+      if (item.role !== 'Workload cluster' || platformTenant === undefined || ownership.tenantId === platformTenant) throw error
       withheldClusterCount += 1
       // Only a raw string ID can identify dependants; never coerce producer data.
       if (typeof item.id === 'string') withheldIds.set(item.id, ownership)

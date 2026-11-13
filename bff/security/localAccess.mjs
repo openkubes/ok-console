@@ -13,7 +13,8 @@ const DUMMY_VERIFIER = Buffer.alloc(32, 173)
 const normalize = (value) => typeof value === 'string' ? value.normalize('NFKC').trim().toLowerCase() : ''
 const validInput = ({ username, password, reason }) => username.length >= 1 && username.length <= 128
   && typeof password === 'string' && password.length >= 1 && password.length <= 1024
-  && typeof reason === 'string' && reason.trim().length >= 12 && reason.length <= 512
+  && typeof reason === 'string' && [...reason.trim()].length >= 12 && reason.length <= 512
+  // normalize() already trims and the 128 limit is enforced above; bounded adds the control-character rule.
   && bounded(username, 256) && safeReason(reason.trim())
 
 export class LocalAccessError extends Error {

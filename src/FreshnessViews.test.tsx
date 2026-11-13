@@ -61,8 +61,11 @@ async function mount(view = 'overview', verdict: Freshness = 'Current', options:
   if (options.sourceStale) Object.assign(o.meta, { warnings: [{ code: 'PARTIAL_DATA', message: 'Some optional source data is unavailable.' }, { code: 'SOURCE_STALE', message: 'A producer item is older than the freshness window.' }] })
   o.data.recentPlacements = []
   const d = structuredClone(detail)
-  d.meta.freshness = options.detail ?? verdict
+  d.meta.freshness = options.detail ?? options.clusters ?? verdict
   Object.assign(d.data, c.data.items[0])
+  d.data.capabilities = []
+  c.data.items[0].capabilityCount = 0
+  d.data.capabilityCount = 0
   const adapter = new BffConsoleAdapter('/api/console/v0', vi.fn(async (url: RequestInfo | URL) => {
     const path = String(url)
     if (options.missingEvidence && path.includes('/evidence/')) return new Response(JSON.stringify({ ...sourceUnavailable, error: { code: 'NOT_FOUND', message: 'Evidence reference is unavailable.', retryable: false } }), { status: 404 })
@@ -143,23 +146,26 @@ for (const verdict of ['Stale', 'Unknown'] as const) {
       expect(document.querySelector('main .status-ready')).toBeNull()
     }
   })
-  it(`clusters: own ${verdict} response overrides Current Evidence`, async () => {
+  it(`clusters: ${verdict} single-cluster list and detail suppress row currency`, async () => {
     await mount('clusters', 'Current', { clusters: verdict })
-    widget(); noCurrency()
+    noCurrency(document.querySelector('.table-row')!)
+    expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Unknown$/)
+    expect(document.querySelector('.data-warning strong')).toHaveTextContent(verdict === 'Stale' ? 'Some observations are stale' : 'Observation unavailable - readiness Unknown')
+    widget(); noCurrency(document.querySelector('.diagnostic-widget')!)
   })
   it(`clusters: ${verdict} Evidence overrides Current response`, async () => {
     await mount('clusters', 'Current', { evidence: verdict })
     widget(); noCurrency()
   })
 }
-it('Overview: all clusters Ready, placement Unknown; fresh sibling stays Current', async () => {
+it('Overview: Unknown placement suppresses its hosting cluster', async () => {
   await mount('overview', 'Current', { mixed: true })
   widget()
-  expect(document.querySelector('.snapshot')).toHaveTextContent('1 unavailable')
+  expect(document.querySelector('.snapshot')).toHaveTextContent('2 unavailable')
   noCurrency(document.querySelector('.snapshot')!)
   noCurrency(document.querySelector('.activity-row')!)
   noCurrency(document.querySelector('.diagnostic-widget')!)
-  fresh(document.querySelector('.cluster-card')!)
+  noCurrency(document.querySelector('.cluster-card')!)
 })
 it('Overview: valid Current empty fleet', async () => {
   await mount('overview', 'Current', { empty: true })
@@ -287,7 +293,7 @@ it('Overview deduplicates affected clusters and placements by id', async () => {
   const duplicated = { ...snapshot, clusters: [...snapshot.clusters, ...snapshot.clusters], claims: [...snapshot.claims, ...snapshot.claims] }
   getSnapshot.mockResolvedValueOnce(duplicated)
   await navigate(); await act(async () => {})
-  expect(document.querySelector('.snapshot')).toHaveTextContent('1 item stale, 1 unavailable')
+  expect(document.querySelector('.snapshot')).toHaveTextContent('2 unavailable')
 })
 
 for (const verdict of ['Stale', 'Unknown'] as const) {
@@ -444,9 +450,9 @@ it.each(['focus', 'online', 'visibilitychange'])('R3 %s demotes on a wall-clock 
   fireEvent(window, new Event('focus'))
   noCurrency(document.querySelector('.snapshot')!)
 })
-it('R3 mutable Overview remains Current with immutable receipts present', async () => {
+it('R3 mutable Overview remains Current with unrelated immutable receipts present', async () => {
   const { snapshot, getSnapshot } = await mount()
-  getSnapshot.mockResolvedValueOnce({ ...snapshot, evidence: [...snapshot.evidence, { ...snapshot.evidence[0], id: 'receipt', immutable: true, freshness: 'Stale' }] })
+  getSnapshot.mockResolvedValueOnce({ ...snapshot, evidence: [...snapshot.evidence, { ...snapshot.evidence[0], id: 'receipt', cluster: 'unrelated-cluster', immutable: true, freshness: 'Stale' }] })
   await navigate(); await act(async () => {})
   fresh(document.querySelector('.snapshot')!)
   expect(screen.getByText(/Immutable Evidence receipts are retained separately/)).toBeVisible()
@@ -491,7 +497,7 @@ it.each([
   noCurrency(document.querySelector('.snapshot')!)
   noCurrency(document.querySelector('.diagnostic-widget')!)
   expect(document.querySelector('.metrics-grid')).not.toHaveTextContent(/\d/)
-  expect(document.querySelector('.snapshot')).toHaveTextContent(options.readiness ? '1 unavailable' : options.clusters ? '1 item stale' : '1 item historical')
+  expect(document.querySelector('.snapshot')).toHaveTextContent(options.readiness ? '1 unavailable' : options.clusters === 'Stale' ? '1 item stale' : '1 item historical')
 }, 30_000)
 it('R4 dry-run 401 ends the session and stops polling', async () => {
   await timers()
@@ -559,9 +565,11 @@ it('integration non-observation chips never reuse the live observation dot', asy
   expect(screen.getByText('Unverified demo metadata')).toBeVisible()
 })
 
-it.each(['Stale', 'Unknown'] as const)('R2 B1 %s list shows Unknown rows and zero Ready in filter chips', async freshness => {
+it.each(['Stale', 'Unknown'] as const)('R2 B1 %s single-cluster list suppresses Ready row and filter chips', async freshness => {
   await mount('clusters', 'Current', { clusters: freshness })
+  noCurrency(document.querySelector('.table-row')!)
   expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Unknown$/)
+  expect(document.querySelector('.data-warning strong')).toHaveTextContent(freshness === 'Stale' ? 'Some observations are stale' : 'Observation unavailable - readiness Unknown')
   expect(screen.getByRole('button', { name: 'Ready · 0' })).toBeVisible()
   expect(screen.getByRole('button', { name: 'Attention · 1' })).toBeVisible()
 })

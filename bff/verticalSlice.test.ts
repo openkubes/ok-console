@@ -66,7 +66,9 @@ describe('OK-158/OK-159 read-only vertical slice', () => {
       Object.fromEntries(requiredSnapshotFields.map((field) => [field, expect.anything()])),
     ))
     expect(snapshot.overview).toBeDefined()
-    expect(Object.keys(snapshot.clusters[0]).sort()).toEqual([...Object.keys(fixtureSnapshot.clusters[0]), 'freshness'].sort())
+    expect(Object.keys(snapshot.clusters[0]).sort()).toEqual([...Object.keys(fixtureSnapshot.clusters[0]), 'freshness', 'capabilityDetails'].sort())
+    expect(snapshot.clusters[0].freshness).toBe('Current')
+    expect(snapshot.clusters[0].capabilityDetails).toEqual(managementPlane?.capabilityDetails)
     expect(managementPlane).toMatchObject({
       freshness: 'Current',
       name: 'ok-mgmt',

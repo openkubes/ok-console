@@ -377,6 +377,12 @@ const readBoundedBody = async (response) => {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString('utf8')
 }
 
+// Defaults agreed for tenant isolation: authorization failures reject the envelope;
+// operator diagnostics live outside the snapshot so tenant projection cannot copy them.
+const validateClusterOwnershipBeforeIsolation = normalizeOwnership
+const snapshotDiagnostics = new WeakMap()
+export const observedStateDiagnostics = (snapshot) => snapshotDiagnostics.get(snapshot)
+
 export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(), staleAfterMs = DEFAULT_STALE_AFTER_MS } = {}) => {
   const envelope = record(payload, '$')
   if (envelope.apiVersion !== QUERY_VERSION || envelope.kind !== QUERY_KIND) throw new ObservedStateContractError('Observed-state query contract is incompatible.')
@@ -388,20 +394,58 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
   const environment = record(data.environment, '$.data.environment')
   const environmentId = identifierString(environment.id, '$.data.environment.id')
   const metrics = list(data.metrics, '$.data.metrics').map((bucket, index) => normalizeMetricBucket(bucket, `$.data.metrics[${index}]`, environmentId))
-  const clusters = list(data.clusters, '$.data.clusters').map((cluster, index) => normalizeCluster(cluster, `$.data.clusters[${index}]`, environmentId, list(data.evidence, '$.data.evidence')))
-  const placements = list(data.placements, '$.data.placements').map((placement, index) => normalizePlacement(placement, `$.data.placements[${index}]`, environmentId))
-  const evidence = list(data.evidence, '$.data.evidence').map((item, index) => normalizeEvidence(item, `$.data.evidence[${index}]`, environmentId, data.clusters, data.placements))
-
-  if (clusters.filter((cluster) => cluster.role === 'Management plane').length !== 1) throw new Error('Observed state must contain exactly one management plane.')
-  assertUniqueIds(clusters, 'cluster')
-  assertUniqueIds(evidence, 'Evidence')
-  assertUniqueIds(placements, 'placement')
-  for (const cluster of clusters) {
-    assertUniqueIds(cluster.capabilities, `capability within cluster ${cluster.id}`)
-    if (cluster.capabilities.some((capability) => !sameOwnership(capability.ownership, cluster.ownership))) {
-      throw new Error('A capability ownership must match its parent cluster ownership.')
+  const rawClusters = list(data.clusters, '$.data.clusters')
+  const rawEvidence = list(data.evidence, '$.data.evidence')
+  const rawPlacements = list(data.placements, '$.data.placements')
+  // Check raw string IDs before dropping anything, including malformed dependants.
+  for (const [items, label] of [[rawClusters, 'cluster'], [rawEvidence, 'Evidence'], [rawPlacements, 'placement']]) {
+    assertUniqueIds(items.filter((item) => typeof item?.id === 'string'), label)
+  }
+  const clusters = []
+  const withheldIds = new Map()
+  const withheldTenants = new Set()
+  let withheldClusterCount = 0
+  for (const [index, value] of rawClusters.entries()) {
+    const path = `$.data.clusters[${index}]`
+    const item = record(value, path)
+    const ownership = validateClusterOwnershipBeforeIsolation(item.ownership, `${path}.ownership`, environmentId)
+    enumeration(item.role, ROLES, `${path}.role`)
+    if (Array.isArray(item.capabilities)) {
+      assertUniqueIds(item.capabilities.filter((capability) => typeof capability?.id === 'string'), `capability within cluster ${item.id}`)
+      for (const [capabilityIndex, capability] of item.capabilities.entries()) {
+        const capabilityPath = `${path}.capabilities[${capabilityIndex}]`
+        const capabilityOwnership = normalizeOwnership(capability?.ownership, `${capabilityPath}.ownership`, environmentId)
+        if (!sameOwnership(capabilityOwnership, ownership)) {
+          throw new Error('A capability ownership must match its parent cluster ownership.')
+        }
+      }
+    }
+    try {
+      const cluster = normalizeCluster(item, path, environmentId, rawEvidence)
+      clusters.push(cluster)
+    } catch (error) {
+      if (item.role === 'Management plane') throw error
+      withheldClusterCount += 1
+      // Only a raw string ID can identify dependants; never coerce producer data.
+      if (typeof item.id === 'string') withheldIds.set(item.id, ownership)
+      withheldTenants.add(ownership.tenantId)
     }
   }
+  const retainDependant = (item, index, kind, reference) => {
+    const ownership = withheldIds.get(item?.[reference])
+    if (!ownership) return true
+    const dependantOwnership = normalizeOwnership(item.ownership, `$.data.${kind}[${index}].ownership`, environmentId)
+    if (!sameOwnership(dependantOwnership, ownership)) {
+      throw new Error(`${kind} ownership must match its withheld cluster ownership.`)
+    }
+    return false
+  }
+  const retainedEvidence = rawEvidence.filter((item, index) => retainDependant(item, index, 'evidence', 'clusterId'))
+  const retainedPlacements = rawPlacements.filter((item, index) => retainDependant(item, index, 'placements', 'targetClusterId'))
+  const placements = retainedPlacements.map((placement, index) => normalizePlacement(placement, `$.data.placements[${index}]`, environmentId))
+  const evidence = retainedEvidence.map((item, index) => normalizeEvidence(item, `$.data.evidence[${index}]`, environmentId, rawClusters, retainedPlacements))
+
+  if (clusters.filter((cluster) => cluster.role === 'Management plane').length !== 1) throw new Error('Observed state must contain exactly one management plane.')
 
   const clustersById = new Map(clusters.map((cluster) => [cluster.id, cluster]))
   const evidenceById = new Map(evidence.map((item) => [item.id, item]))
@@ -436,7 +480,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
     item.freshness = stale || itemAgeMs < -MAX_FUTURE_SKEW_MS
       || (item.classification === 'Current' && itemAgeMs > staleAfterMs) ? 'Stale' : 'Current'
   }
-  const affectedTenants = new Set(evidence.filter((item) => !timestamp(item.observedAt) || item.freshness === 'Stale').map((item) => item.ownership.tenantId))
+  const affectedTenants = new Set([...withheldTenants, ...evidence.filter((item) => !timestamp(item.observedAt) || item.freshness === 'Stale').map((item) => item.ownership.tenantId)])
   for (const bucket of metrics) {
     if (stale || affectedTenants.has(bucket.ownership.tenantId)) {
       for (const category of ['capabilities', 'workloadClaims']) {
@@ -462,7 +506,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
     throw new ObservedStateContractError('$.metadata.partial must be a boolean when present.')
   }
   const partial = metadata.partial === true
-  return {
+  const snapshot = {
     observedAt,
     sourceRevision: displayString(metadata.sourceRevision, '$.metadata.sourceRevision', sourceRevision),
     environment: {
@@ -484,6 +528,8 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
       ],
     },
   }
+  snapshotDiagnostics.set(snapshot, Object.freeze({ withheldClusterCount }))
+  return snapshot
 }
 
 export class OpenKubesObservedStateAdapter {

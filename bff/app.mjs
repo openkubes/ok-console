@@ -17,7 +17,7 @@ import {
   sessionProjection,
 } from './presentation.mjs'
 import { handleSessionHttp } from './security/httpSession.mjs'
-import { ObservedStateContractError } from './adapters/openKubesObservedState.mjs'
+import { ObservedStateContractError, observedStateDiagnostics } from './adapters/openKubesObservedState.mjs'
 
 import { authorizedSnapshot } from './authorizedSnapshot.mjs'
 
@@ -306,6 +306,10 @@ export const createConsoleBffHandler = ({
         throw new ConsoleBffError(503, 'SOURCE_UNAVAILABLE', 'The observed platform source is unavailable.', true, {
           retryAfterSeconds: 15, reason: diagnostic.reason,
         })
+      }
+      const diagnostic = observedStateDiagnostics(sourceSnapshot)
+      if (diagnostic?.withheldClusterCount > 0) {
+        try { Promise.resolve(sourceFailureObserver(JSON.stringify({ event: 'observed_state_clusters_withheld', time: now().toISOString(), correlationId: boundedCorrelation(requestCorrelationId), withheldClusterCount: diagnostic.withheldClusterCount }))).catch(() => {}) } catch { /* Telemetry cannot change the response. */ }
       }
       const snapshot = authorizedSnapshot(sourceSnapshot, authorization.scope)
       const payload = routeResponse({

@@ -163,11 +163,15 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       if (result.status === 'rejected') throw result.reason
       return result.value
     }) as [PlatformOverviewResponse, ClusterListResponse]
+    // Summaries omit capability references. Load only the existing detail projection
+    // needed to evaluate them; its route verdict remains reserved for the detail view.
+    const detailsPending = Promise.allSettled(clusters.data.items.map(cluster => cluster.capabilityCount === 0
+      ? Promise.resolve(undefined) : this.getCluster(cluster.id, controller)))
     const evidenceIds = new Set([
       ...clusters.data.items.map((cluster) => cluster.evidenceId),
       ...overview.data.recentPlacements.map((placement) => placement.evidenceId),
     ])
-    const evidenceResults = await Promise.allSettled(
+    let evidenceResults = await Promise.allSettled(
       [...evidenceIds].map(async (id) => {
         try { return await this.getEvidence(id, controller) }
         catch (error) {
@@ -176,7 +180,16 @@ export class BffConsoleAdapter implements ConsoleDataPort {
         }
       }),
     )
-    for (const result of evidenceResults) {
+    const detailResults = await detailsPending
+    const details = detailResults.map((result, index) => {
+      const summary = clusters.data.items[index]
+      const detail = result.status === 'fulfilled' ? result.value : undefined
+      return detail?.id === summary.id && detail.name === summary.name && detail.evidenceId === summary.evidenceId && detail.revision === summary.revision ? detail : undefined
+    })
+    const capabilityEvidenceIds = new Set(details.flatMap(detail => detail?.capabilityDetails?.map(item => item.evidenceId) ?? []))
+    const capabilityResults = await Promise.allSettled([...capabilityEvidenceIds].filter(id => !evidenceIds.has(id)).map(id => this.getEvidence(id, controller)))
+    evidenceResults = [...evidenceResults, ...capabilityResults]
+    for (const result of [...detailResults, ...evidenceResults]) {
       if (result.status === 'rejected' && result.reason instanceof ConsoleDataError &&
           (result.reason.code === 'UNAUTHENTICATED' || controller.signal.aborted)) throw result.reason
     }
@@ -199,7 +212,13 @@ export class BffConsoleAdapter implements ConsoleDataPort {
         ...(unavailableEvidence > 0 ? [`${unavailableEvidence} evidence reference${unavailableEvidence === 1 ? '' : 's'} could not be loaded (${[...new Set(evidenceFailures)].join(', ')}).`] : []),
       ],
       overview: overview.data,
-      clusters: clusters.data.items.map(cluster => ({ ...clusterFromSummary(cluster), freshness: clusters.meta.freshness })),
+      clusters: clusters.data.items.map((cluster, index) => ({
+        ...clusterFromSummary(cluster),
+        capabilityDetails: details[index]?.capabilityDetails,
+        // The list verdict covers siblings. Evidence already carries envelope freshness.
+        freshness: cluster.capabilityCount > 0 && !details[index] ? 'Unknown'
+          : evidence.find(item => item?.id === cluster.evidenceId && (item.cluster === cluster.id || item.cluster === cluster.name))?.freshness ?? 'Unknown',
+      })),
       capabilities: [],
       claims: overview.data.recentPlacements.map((placement) => ({
         id: placement.id,

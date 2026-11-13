@@ -143,9 +143,12 @@ for (const verdict of ['Stale', 'Unknown'] as const) {
       expect(document.querySelector('main .status-ready')).toBeNull()
     }
   })
-  it(`clusters: own ${verdict} response overrides Current Evidence`, async () => {
+  it(`clusters: ${verdict} list aggregate retains Current own Evidence and banner`, async () => {
     await mount('clusters', 'Current', { clusters: verdict })
-    widget(); noCurrency()
+    fresh(document.querySelector('.table-row')!)
+    expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Ready$/)
+    expect(document.querySelector('.data-warning strong')).toHaveTextContent(verdict === 'Stale' ? 'Some observations are stale' : 'Observation unavailable - readiness Unknown')
+    widget(); noCurrency(document.querySelector('.diagnostic-widget')!)
   })
   it(`clusters: ${verdict} Evidence overrides Current response`, async () => {
     await mount('clusters', 'Current', { evidence: verdict })
@@ -491,7 +494,7 @@ it.each([
   noCurrency(document.querySelector('.snapshot')!)
   noCurrency(document.querySelector('.diagnostic-widget')!)
   expect(document.querySelector('.metrics-grid')).not.toHaveTextContent(/\d/)
-  expect(document.querySelector('.snapshot')).toHaveTextContent(options.readiness ? '1 unavailable' : options.clusters ? '1 item stale' : '1 item historical')
+  expect(document.querySelector('.snapshot')).toHaveTextContent(options.readiness ? '1 unavailable' : '1 item historical')
 }, 30_000)
 it('R4 dry-run 401 ends the session and stops polling', async () => {
   await timers()
@@ -559,11 +562,13 @@ it('integration non-observation chips never reuse the live observation dot', asy
   expect(screen.getByText('Unverified demo metadata')).toBeVisible()
 })
 
-it.each(['Stale', 'Unknown'] as const)('R2 B1 %s list shows Unknown rows and zero Ready in filter chips', async freshness => {
+it.each(['Stale', 'Unknown'] as const)('R2 B1 %s list banner retains Current Ready row and filter chips', async freshness => {
   await mount('clusters', 'Current', { clusters: freshness })
-  expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Unknown$/)
-  expect(screen.getByRole('button', { name: 'Ready · 0' })).toBeVisible()
-  expect(screen.getByRole('button', { name: 'Attention · 1' })).toBeVisible()
+  fresh(document.querySelector('.table-row')!)
+  expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Ready$/)
+  expect(document.querySelector('.data-warning strong')).toHaveTextContent(freshness === 'Stale' ? 'Some observations are stale' : 'Observation unavailable - readiness Unknown')
+  expect(screen.getByRole('button', { name: 'Ready · 1' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Attention · 0' })).toBeVisible()
 })
 it('R2 B1 current Ready row is counted by the chip', async () => {
   await mount('clusters')

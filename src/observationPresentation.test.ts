@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { capabilityPresentation, observedText, conservativeVerdict, observationPresentation, overviewPresentation, placementPresentation } from './observationPresentation'
+import { clusterPresentation, capabilityPresentation, observedText, conservativeVerdict, observationPresentation, overviewPresentation, placementPresentation } from './observationPresentation'
 import { platformFixture } from './data/fixtures'
 
 describe('observationPresentation', () => {
@@ -86,4 +86,27 @@ it.each([true, false])('R4 receipt-backed cluster and claim retain Unknown and S
 
 it('R4 historical wording avoids last observed observation', () => {
   expect(observedText('Current observation; currently Ready', false)).toBe('last observation; previously Ready')
+})
+
+it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'outcome'] as const)('per-cluster capability Evidence %s caps its parent independently of the list', verdict => {
+  const data = structuredClone(platformFixture)
+  Object.assign(data, { source: 'bff', freshness: 'Stale', clusterListFreshness: 'Stale' })
+  const cluster = { ...data.clusters[0], freshness: 'Current' as const, readiness: 'Ready' as const,
+    capabilityDetails: [{ id: 'cap-own', name: 'Own capability', readiness: 'Ready' as const, evidenceId: 'ev-cap-own' }] }
+  const primary = { ...data.evidence[0], id: cluster.evidenceId, cluster: cluster.id, freshness: 'Current' as const, outcome: 'Ready' as const, immutable: false }
+  const cap = { ...primary, id: 'ev-cap-own', freshness: verdict === 'Stale' || verdict === 'Unknown' ? verdict : 'Current' as const,
+    cluster: verdict === 'foreign' ? 'another-cluster' : cluster.name, outcome: verdict === 'outcome' ? 'Unknown' as const : 'Ready' as const }
+  data.evidence = verdict === 'missing' ? [primary] : [primary, cap]
+  expect(clusterPresentation(cluster, data)).toMatchObject({ current: verdict === 'Current', verdict: verdict === 'Current' || verdict === 'Stale' ? verdict : 'Unknown' })
+  if (verdict === 'Current') {
+    expect(clusterPresentation({ ...cluster, freshness: 'Stale' }, data).verdict).toBe('Stale')
+    expect(clusterPresentation({ ...cluster, freshness: 'Unknown' }, data).verdict).toBe('Unknown')
+  }
+})
+it('per-cluster absent primary Evidence and no reference remain Unknown', () => {
+  const data = structuredClone(platformFixture)
+  data.source = 'bff'; data.evidence = []
+  const cluster = { ...data.clusters[0], freshness: 'Current' as const }
+  expect(clusterPresentation(cluster, data).verdict).toBe('Unknown')
+  expect(clusterPresentation({ ...cluster, evidenceId: '' }, data).verdict).toBe('Unknown')
 })

@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
+import { clusterPresentation } from './observationPresentation'
 import { useObservationSnapshot } from './useObservationSnapshot'
 import { consoleData } from './data/consoleData'
 import { ConsoleDataError } from './data/bffAdapter'
@@ -294,4 +295,23 @@ it.each(['Current', 'Stale', 'Unknown'] as const)('R2 RT1 newer snapshot supplie
   expect(result.current.detail?.freshness).toBe(detailFreshness)
   await act(async () => { resolve({ ...next, revision: 'new-detail-revision' }) })
   expect(result.current.detail?.revision).toBe('new-detail-revision')
+})
+
+it('per-cluster fresh sibling ages at the browser ceiling and recovers on refresh', async () => {
+  vi.useFakeTimers()
+  const data: PlatformSnapshot = snapshot()
+  data.clusterListFreshness = 'Stale'
+  data.clusters = ['fresh', 'stale'].map(name => ({ ...data.clusters[0], id: name, name, evidenceId: `ev-${name}`, readiness: 'Ready', freshness: name === 'fresh' ? 'Current' : 'Stale' }))
+  data.evidence = data.clusters.map(cluster => ({ ...data.evidence[0], id: cluster.evidenceId, cluster: cluster.id, freshness: cluster.freshness, outcome: 'Ready', immutable: false }))
+  let release!: (value: PlatformSnapshot) => void
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(data).mockImplementationOnce(() => new Promise(done => { release = done })).mockResolvedValue(data)
+  const { result } = renderHook(() => useObservationSnapshot(true))
+  await act(async () => {})
+  const current = () => result.current.data!.clusters.map(item => clusterPresentation(item, result.current.data!).verdict)
+  expect(current()).toEqual(['Current', 'Stale'])
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+  expect(current()).toEqual(['Stale', 'Stale'])
+  // Release the observation started at 30s; it is still below the browser ceiling.
+  await act(async () => { release(data) })
+  expect(current()).toEqual(['Current', 'Stale'])
 })

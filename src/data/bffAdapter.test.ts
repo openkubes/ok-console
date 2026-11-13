@@ -4,6 +4,7 @@ import clusterList from '../../contracts/presentation/v0alpha1/examples/cluster-
 import clusterDetail from '../../contracts/presentation/v0alpha1/examples/cluster-detail.json'
 import evidenceReference from '../../contracts/presentation/v0alpha1/examples/evidence-reference.json'
 import sourceUnavailable from '../../contracts/presentation/v0alpha1/examples/error-source-unavailable.json'
+import { clusterPresentation } from '../observationPresentation'
 import { BffConsoleAdapter } from './bffAdapter'
 
 const jsonResponse = (body: unknown, status = 200) =>
@@ -44,6 +45,10 @@ describe('BffConsoleAdapter', () => {
       if (url.endsWith('/overview')) return jsonResponse(platformOverview)
       if (url.endsWith('/clusters')) return jsonResponse(clusterList)
       if (url.includes('/evidence/')) return jsonResponse(evidenceReference)
+      if (url.includes('/clusters/')) {
+        const summary = clusterList.data.items.find(item => url.endsWith(`/${item.id}`))!
+        return jsonResponse({ ...clusterDetail, data: { ...clusterDetail.data, ...summary, capabilities: [] } })
+      }
       throw new Error(`Unexpected request: ${url}`)
     }) as typeof fetch
     const adapter = new BffConsoleAdapter('/api/console/v0', fetcher)
@@ -55,7 +60,8 @@ describe('BffConsoleAdapter', () => {
     expect(snapshot.evidence.map(item => item.id)).toEqual([evidenceReference.data.id, evidenceReference.data.id, evidenceReference.data.id])
     expect(snapshot.agents.every(agent => agent.deployments === 0)).toBe(true)
     expect(snapshot.clusterListFreshness).toBe(clusterList.meta.freshness)
-    expect(snapshot.clusters[0].freshness).toBe(clusterList.meta.freshness)
+    // This example Evidence belongs to ok-ai, not the listed ok-mgmt.
+    expect(snapshot.clusters[0].freshness).toBe('Unknown')
     expect(snapshot.overview?.clusters.total).toBe(4)
     expect(snapshot.clusters.map((cluster) => cluster.name)).toEqual(['ok-mgmt', 'edge-07'])
     expect(snapshot.clusters[0]).toMatchObject({ role: 'Management plane', version: 'v1.32.6', capabilityCount: 4 })
@@ -120,6 +126,7 @@ describe('BffConsoleAdapter', () => {
       const url = String(input)
       if (url.endsWith('/overview')) return jsonResponse(platformOverview)
       if (url.endsWith('/clusters')) return jsonResponse(clusterList)
+      if (url.includes('/clusters/')) throw new Error('detail unavailable')
       evidenceCalls += 1
       if (evidenceCalls === 1) throw new Error('evidence source unavailable')
       return jsonResponse(evidenceReference)
@@ -209,4 +216,58 @@ it.each(['Current', 'Stale', 'Unknown'] as const)('U3 %s overview never fabricat
   expect(snapshot.agents.every(agent => agent.deployments === 0)).toBe(true)
   expect(snapshot.evidence.every(item => item.id === evidenceReference.data.id)).toBe(true)
   expect(snapshot.evidence.some(item => /kagent|cluster.inspector/i.test(item.title))).toBe(false)
+})
+
+// List freshness is an aggregate; only cluster-scoped Evidence grants row currency.
+it.each(['mixed', 'envelope', 'missing', 'foreign'] as const)('per-cluster adapter: %s', async scenario => {
+  const list = structuredClone(clusterList)
+  list.meta.freshness = 'Stale'
+  list.data.items = ['fresh', 'stale'].map(name => ({ ...list.data.items[0], id: `cluster-${name}`, name, evidenceId: `ev-${name}`, readiness: 'Ready', capabilityCount: 0 }))
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse(platformOverview)
+    if (url.endsWith('/clusters')) return jsonResponse(list)
+    if (scenario === 'missing' && url.endsWith('/ev-fresh')) throw new Error('unavailable')
+    const name = url.endsWith('/ev-fresh') ? 'fresh' : 'stale'
+    const response = structuredClone(evidenceReference)
+    Object.assign(response.data, { id: `ev-${name}`, clusterId: scenario === 'foreign' ? 'foreign' : `cluster-${name}` })
+    response.meta.freshness = scenario === 'envelope' || name === 'stale' ? 'Stale' : 'Current'
+    return jsonResponse(response)
+  }) as typeof fetch
+  const data = await new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+  expect(data.clusterListFreshness).toBe('Stale')
+  expect(data.clusters.map(item => item.freshness)).toEqual(scenario === 'mixed' ? ['Current', 'Stale'] : scenario === 'envelope' ? ['Stale', 'Stale'] : scenario === 'missing' ? ['Unknown', 'Stale'] : ['Unknown', 'Unknown'])
+})
+
+it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'detail-unavailable', 'detail-foreign', 'detail-conflicting', 'detail-name', 'detail-reference', '401'] as const)('per-cluster adapter loads capability references: %s', async scenario => {
+  const list = structuredClone(clusterList)
+  list.meta.freshness = 'Stale'
+  list.data.items = [{ ...list.data.items[0], readiness: 'Ready', capabilityCount: 1 }]
+  const cluster = list.data.items[0]
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse(platformOverview)
+    if (url.endsWith('/clusters')) return jsonResponse(list)
+    if (url.includes('/clusters/')) {
+      if (scenario === 'detail-unavailable') throw new Error('unavailable')
+      return jsonResponse({ ...clusterDetail, meta: { ...clusterDetail.meta, freshness: 'Stale' }, data: {
+        ...clusterDetail.data, ...cluster, id: scenario === 'detail-foreign' ? 'foreign' : cluster.id, name: scenario === 'detail-name' ? 'foreign' : cluster.name, evidenceId: scenario === 'detail-reference' ? 'foreign' : cluster.evidenceId, revision: scenario === 'detail-conflicting' ? 'different-revision' : cluster.revision,
+        capabilities: [{ ...clusterDetail.data.capabilities[0], evidenceId: 'ev-capability' }],
+      } })
+    }
+    const cap = url.endsWith('/ev-capability')
+    if (cap && scenario === 'missing') throw new Error('unavailable')
+    if (cap && scenario === '401') return new Response('not json', { status: 401 })
+    return jsonResponse({ ...evidenceReference, meta: { ...evidenceReference.meta, freshness: cap && (scenario === 'Stale' || scenario === 'Unknown') ? scenario : 'Current' }, data: {
+      ...evidenceReference.data, id: cap ? 'ev-capability' : cluster.evidenceId,
+      clusterId: cap && scenario === 'foreign' ? 'foreign' : cluster.id,
+    } })
+  }) as typeof fetch
+  const pending = new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+  if (scenario === '401') { await expect(pending).rejects.toMatchObject({ code: 'UNAUTHENTICATED' }); return }
+  const data = await pending
+  expect(clusterPresentation(data.clusters[0], data)).toMatchObject({
+    current: scenario === 'Current', verdict: scenario === 'Current' || scenario === 'Stale' ? scenario : 'Unknown',
+  })
+  if (!scenario.startsWith('detail-')) expect(fetcher).toHaveBeenCalledWith('/api/console/v0/evidence/ev-capability', expect.anything())
 })

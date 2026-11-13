@@ -782,8 +782,9 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(JSON.stringify(body)).not.toContain('private upstream outage detail')
   })
 
-  it('requires an explicit source mode and supports deterministic fixture rollback', () => {
+  it('preserves the default fixture source and supports explicit fixture rollback', () => {
     expect(createObservedStateSource({})).toBeInstanceOf(FixtureObservedStateAdapter)
+    expect(createObservedStateSource({ OK_CONSOLE_OBSERVED_STATE_MODE: 'fixture' })).toBeInstanceOf(FixtureObservedStateAdapter)
     expect(() => createObservedStateSource({ OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes' })).toThrow('OK_CONSOLE_OBSERVED_STATE_URL')
     expect(() => createObservedStateSource({ OK_CONSOLE_OBSERVED_STATE_MODE: 'automatic' })).toThrow('fixture or openkubes')
   })

@@ -24,6 +24,7 @@ const files: Record<string, string> = {
 
 const baseEnv = {
   OK_CONSOLE_SESSION_STORE_MODE: 'postgres',
+  OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes',
   OK_CONSOLE_ORIGIN: 'https://console.openkubes.example',
   OK_CONSOLE_ENVIRONMENT_ID: 'community-preview',
   OK_CONSOLE_TENANT_ID: 'platform',
@@ -88,17 +89,40 @@ describe('session runtime configuration', () => {
 
   it('does not expose a non-fixture source through the prototype authorizer', async () => {
     await expect(createSessionRuntime({
-      env: { OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes' },
+      env: { OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes' },
     })).rejects.toThrow('requires the PostgreSQL session runtime')
   })
 
-  it('builds verified TLS and session authorization from secret files', async () => {
+  it.each([undefined, '', null, ' ', 'automatic', 42])('rejects postgres observed-state mode %j before creating resources', async (sourceMode) => {
+    const reader = vi.fn(fileReader)
+    const poolFactory = vi.fn(() => ({ end: vi.fn() }))
+    const storeFactory = vi.fn(() => ({ authorize: vi.fn() }))
+    const transactionStoreFactory = vi.fn()
+    const oidcProtocolFactory = vi.fn()
+    const throttleFactory = vi.fn()
+    const auditFactory = vi.fn()
+    const authenticationAuditFactory = vi.fn()
+    const startup = createSessionRuntime({
+      env: { ...baseEnv, OK_CONSOLE_OBSERVED_STATE_MODE: sourceMode },
+      fileReader: reader, poolFactory, storeFactory, transactionStoreFactory,
+      oidcProtocolFactory, throttleFactory, auditFactory, authenticationAuditFactory,
+    })
+
+    await expect(startup).rejects.toBeInstanceOf(SessionRuntimeConfigurationError)
+    await expect(startup).rejects.toThrow('OK_CONSOLE_OBSERVED_STATE_MODE must be explicitly set to fixture or openkubes')
+    for (const factory of [reader, poolFactory, storeFactory, transactionStoreFactory,
+      oidcProtocolFactory, throttleFactory, auditFactory, authenticationAuditFactory]) {
+      expect(factory).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(['fixture', 'openkubes'])('builds verified TLS and session authorization with explicit %s source mode', async (sourceMode) => {
     let poolConfiguration: Record<string, unknown> | undefined
     let storeConfiguration: Record<string, unknown> | undefined
     const end = vi.fn(async () => {})
     const authorize = vi.fn(async () => ({ allowed: true, identity: { id: 'user-1' } }))
     const runtime = await createSessionRuntime({
-      env: baseEnv,
+      env: { ...baseEnv, OK_CONSOLE_OBSERVED_STATE_MODE: sourceMode },
       fileReader,
       poolFactory: (configuration) => {
         poolConfiguration = configuration

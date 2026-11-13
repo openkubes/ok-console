@@ -123,6 +123,10 @@ authorizer.
 The `postgres` mode is atomic: process startup creates the PostgreSQL store,
 installs session-backed point-of-use authorization, and configures exact-Origin
 CSRF checks together. Missing or invalid inputs stop startup. Configure the
+observed-state source explicitly with `OK_CONSOLE_OBSERVED_STATE_MODE=fixture|openkubes`;
+there is no implicit source default for the PostgreSQL runtime, and an unset or
+empty value stops startup before resources are created. Disabled prototype
+sessions retain their fixture default. Configure the
 non-secret values and mount the database URL, CA certificate, and envelope keys
 as files as shown in `.env.example`. The key file is a bounded JSON object whose
 values are base64-encoded 32-byte AES keys; keep old keys present while their
@@ -389,9 +393,21 @@ selected, so browser reads are session-authorized as well as workload-authentica
 Certificate issuance, rotation overlap, revocation and recovery remain explicit
 deployment exercises rather than runtime fallbacks.
 
+### Known limitation: global sourceRevision
+
+Every response carries the producer's global `sourceRevision`, so a tenant can
+observe when another tenant's objects change (timing only; no object, ID or count
+is revealed). Reopen if (i) any response starts carrying per-object/per-tenant
+revision or count data derived from other tenants, (ii) `sourceRevision` becomes
+derivable into object identity/count, or (iii) a deployment requires tenant-level
+change-timing confidentiality.
+
 ### Explicit rollback to fixtures
 
-Stop the BFF, set `OK_CONSOLE_OBSERVED_STATE_MODE=fixture`, and restart it. A
+Stop the BFF, set `OK_CONSOLE_OBSERVED_STATE_MODE=fixture`, and restart it.
+Explicit fixture mode is allowed with PostgreSQL sessions as an operator choice,
+but serves static fixture data: it is never live producer evidence and must not
+be cited as such. A
 real-source outage produces a retryable, redaction-safe `SOURCE_UNAVAILABLE`
 response and does not silently show fixture data as if it were current reality.
 

@@ -251,6 +251,9 @@ export const createSessionRuntime = async ({
   if (mode !== 'postgres') {
     throw new SessionRuntimeConfigurationError('OK_CONSOLE_SESSION_STORE_MODE must be disabled or postgres.')
   }
+  if (!['fixture', 'openkubes'].includes(env.OK_CONSOLE_OBSERVED_STATE_MODE)) {
+    throw new SessionRuntimeConfigurationError('OK_CONSOLE_OBSERVED_STATE_MODE must be explicitly set to fixture or openkubes for the PostgreSQL session runtime.')
+  }
 
   const expectedOrigin = parseOrigin(required(env, 'OK_CONSOLE_ORIGIN'))
   const environmentId = required(env, 'OK_CONSOLE_ENVIRONMENT_ID')

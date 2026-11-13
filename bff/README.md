@@ -204,8 +204,9 @@ prototype mode remains the explicit default.
 Exceptional access is disabled by default. The explicit PostgreSQL runtime can
 enable `OK_CONSOLE_LOCAL_ACCESS_MODE=bootstrap|breakglass`; Bootstrap is
 accepted only while OIDC is disabled, and BreakGlass only while OIDC is enabled.
-Both modes require migrations `003_local_access_throttle.sql` and
-`004_local_access_audit.sql`, plus bounded mounted account and pepper files.
+Both modes require migrations `003_local_access_throttle.sql`,
+`004_local_access_audit.sql`, and `005_authentication_audit.sql` (authentication
+audit), plus bounded mounted account and pepper files.
 No environment variable or browser bundle contains the credential material.
 
 `POST /api/console/v0/auth/local` accepts only same-origin JSON after validating
@@ -560,8 +561,9 @@ Projection and response-writing exceptions therefore remain visible.
 Local-access dependency failures emit LOCAL_ACCESS_FAILED once for the unavailable
 operation, at the reached lifecycle stage (normally REQUEST_RECEIVED). The closed
 cause steps are ENABLED_CHECK, THROTTLE_RESERVE, THROTTLE_RESET, KDF,
-SESSION_STORE and AUDIT, with OTHER for an unknown step. These identify the exact
-verifier operation without adding lifecycle stages. errorCode uses the preserved
+SESSION_STORE, AUDIT and PRE_VERIFIER_AUDIT, with OTHER for an unknown step. These
+identify the exact verifier or pre-verifier audit operation without adding
+lifecycle stages. errorCode uses the preserved
 cause and the shared classifier. A failed compensating revoke adds a
 LOCAL_ACCESS_COMPENSATION line after the original AUDIT line. Credential rejection
 still returns LOCAL_ACCESS_REJECTED with no failure line; response bodies are unchanged.

@@ -97,6 +97,66 @@ const assignClusterTenant = (envelope: MutableEnvelope, clusterId: string, tenan
     .forEach((item) => { item.ownership = ownership })
 }
 
+const sweepCredentialScalars = (original: Awaited<ReturnType<typeof observedEnvelope>>) => {
+  const platformTenant = original.data.clusters.find((cluster: JsonRecord) => cluster.role === 'Management plane').ownership.tenantId
+  const counts = { withheld: 0, accepted: 0, rejected: 0 }
+  const paths: string[][] = []
+  const visit = (value: unknown, path: string[] = []) => {
+    if (typeof value === 'string') paths.push(path)
+    else if (value && typeof value === 'object') {
+      Object.entries(value).forEach(([key, child]) => visit(child, [...path, key]))
+    }
+  }
+  visit(original)
+  for (const path of paths) {
+    const envelope = structuredClone(original)
+    let parent = envelope as unknown as JsonRecord
+    for (const key of path.slice(0, -1)) parent = parent[key] as JsonRecord
+    parent[path[path.length - 1]] = 'Authorization: Bearer redaction-negative-proof'
+    let serialized: string
+    try {
+      serialized = JSON.stringify(normalizeOpenKubesObservedState(envelope))
+    } catch (error) {
+      const leaf = path[path.length - 1]
+      const reason = path[1] === 'clusters' && path.length === 4 && leaf === 'id'
+        && original.data.clusters[Number(path[2])].role === 'Workload cluster'
+        && original.data.clusters[Number(path[2])].ownership.tenantId !== platformTenant
+        ? 'unresolved Evidence cluster reference.'
+        : path.includes('ownership')
+        ? 'must be a valid non-empty bounded string.'
+        : ['id', 'evidenceId', 'clusterId', 'targetClusterId'].includes(leaf)
+          ? 'must match the ID grammar.'
+          : ['apiVersion', 'kind'].includes(leaf)
+            ? 'Observed-state query contract is incompatible.'
+            : path.join('.') === 'metadata.observedAt'
+              ? 'must be an ISO timestamp.'
+              : leaf === 'name' && path[1] === 'clusters' ? 'must be a DNS subdomain.' : 'is not supported.'
+      expect((error as Error).message, path.join('.')).toContain(reason)
+      expect((error as Error).message, path.join('.')).not.toContain('redaction-negative-proof')
+      counts.rejected += 1
+      continue
+    }
+    expect(path.includes('ownership'), path.join('.')).toBe(false)
+    expect(serialized, path.join('.')).not.toContain('redaction-negative-proof')
+    if (path[1] === 'clusters' && !path.includes('ownership') && !JSON.parse(serialized).clusters.some((item: JsonRecord) => item.id === original.data.clusters[Number(path[2])].id)) {
+      expect(JSON.parse(serialized).evidence.some((item: JsonRecord) => item.clusterId === original.data.clusters[Number(path[2])].id)).toBe(false)
+      expect(JSON.parse(serialized).placements.some((item: JsonRecord) => item.targetClusterId === original.data.clusters[Number(path[2])].id)).toBe(false)
+      counts.withheld += 1
+      continue
+    }
+    counts.accepted += 1
+    if (path[1] === 'evidence' && path.at(-1) === 'observedAt') {
+      const item = envelope.data.evidence[Number(path[2])]
+      expect(JSON.parse(serialized).evidence.some((evidence: JsonRecord) => evidence.id === item.id)).toBe(false)
+      continue
+    }
+    expect(serialized, path.join('.')).toContain(path[path.length - 1] === 'summary'
+      ? 'Evidence summary withheld by the Console redaction boundary.'
+      : 'Value withheld by the Console redaction boundary.')
+  }
+  return counts
+}
+
 const startQuery = async (payload: unknown, { status = 200, contentType = 'application/json; profile="observed.openkubes.io/v0alpha2"' } = {}) => listen(createServer((_request, response) => {
   response.writeHead(status, { 'Content-Type': contentType })
   response.end(JSON.stringify(payload))
@@ -659,59 +719,21 @@ describe('OpenKubes observed-state query adapter', () => {
   })
 
   it('withholds or rejects credential values in every input string scalar', async () => {
-    const original = await observedEnvelope()
-    const platformTenant = original.data.clusters.find((cluster: JsonRecord) => cluster.role === 'Management plane').ownership.tenantId
-    const paths: string[][] = []
-    const visit = (value: unknown, path: string[] = []) => {
-      if (typeof value === 'string') paths.push(path)
-      else if (value && typeof value === 'object') {
-        Object.entries(value).forEach(([key, child]) => visit(child, [...path, key]))
-      }
+    const counts = sweepCredentialScalars(await observedEnvelope())
+    console.info('credential scalar sweep (platform-owned):', counts)
+    expect(counts.withheld).toBe(0)
+  })
+
+  it('withholds credential values in every input string scalar for non-platform Workload clusters', async () => {
+    const envelope = await observedEnvelope()
+    for (const cluster of envelope.data.clusters) {
+      assignClusterTenant(envelope, cluster.id, cluster.role === 'Workload cluster' ? 'B' : 'A')
     }
-    visit(original)
-    for (const path of paths) {
-      const envelope = structuredClone(original)
-      let parent = envelope as unknown as JsonRecord
-      for (const key of path.slice(0, -1)) parent = parent[key] as JsonRecord
-      parent[path[path.length - 1]] = 'Authorization: Bearer redaction-negative-proof'
-      let serialized: string
-      try {
-        serialized = JSON.stringify(normalizeOpenKubesObservedState(envelope))
-      } catch (error) {
-        const leaf = path[path.length - 1]
-        const reason = path[1] === 'clusters' && path.length === 4 && leaf === 'id'
-          && original.data.clusters[Number(path[2])].role === 'Workload cluster'
-          && original.data.clusters[Number(path[2])].ownership.tenantId !== platformTenant
-          ? 'unresolved Evidence cluster reference.'
-          : path.includes('ownership')
-          ? 'must be a valid non-empty bounded string.'
-          : ['id', 'evidenceId', 'clusterId', 'targetClusterId'].includes(leaf)
-            ? 'must match the ID grammar.'
-            : ['apiVersion', 'kind'].includes(leaf)
-              ? 'Observed-state query contract is incompatible.'
-              : path.join('.') === 'metadata.observedAt'
-                ? 'must be an ISO timestamp.'
-                : leaf === 'name' && path[1] === 'clusters' ? 'must be a DNS subdomain.' : 'is not supported.'
-        expect((error as Error).message, path.join('.')).toContain(reason)
-        expect((error as Error).message, path.join('.')).not.toContain('redaction-negative-proof')
-        continue
-      }
-      expect(path.includes('ownership'), path.join('.')).toBe(false)
-      expect(serialized, path.join('.')).not.toContain('redaction-negative-proof')
-      if (path[1] === 'clusters' && !path.includes('ownership') && !JSON.parse(serialized).clusters.some((item: JsonRecord) => item.id === original.data.clusters[Number(path[2])].id)) {
-        expect(JSON.parse(serialized).evidence.some((item: JsonRecord) => item.clusterId === original.data.clusters[Number(path[2])].id)).toBe(false)
-        expect(JSON.parse(serialized).placements.some((item: JsonRecord) => item.targetClusterId === original.data.clusters[Number(path[2])].id)).toBe(false)
-        continue
-      }
-      if (path[1] === 'evidence' && path.at(-1) === 'observedAt') {
-        const item = envelope.data.evidence[Number(path[2])]
-        expect(JSON.parse(serialized).evidence.some((evidence: JsonRecord) => evidence.id === item.id)).toBe(false)
-        continue
-      }
-      expect(serialized, path.join('.')).toContain(path[path.length - 1] === 'summary'
-        ? 'Evidence summary withheld by the Console redaction boundary.'
-        : 'Value withheld by the Console redaction boundary.')
-    }
+    envelope.data.metrics[0].ownership.tenantId = 'A'
+    expect(() => normalizeOpenKubesObservedState(envelope)).not.toThrow()
+    const counts = sweepCredentialScalars(envelope)
+    console.info('credential scalar sweep (non-platform Workload):', counts)
+    expect(counts.withheld).toBeGreaterThan(0)
   })
 
   it('rejects malformed partial semantics instead of silently treating them as complete', async () => {
@@ -1251,6 +1273,23 @@ describe('tenant cluster isolation', () => {
     invalid.capabilities.forEach((capability: JsonRecord, index: number) => { capability.id = `cap-ai-only-${index}` })
     return { envelope, invalid }
   }
+  it('withholds a malformed non-platform Workload cluster before the Management plane', async () => {
+    const { envelope, invalid } = await setup()
+    const baseline = normalizeOpenKubesObservedState(envelope, { now })
+    envelope.data.clusters = [invalid, ...envelope.data.clusters.filter((cluster: JsonRecord) => cluster.id !== invalid.id)]
+    expect(envelope.data.clusters[0].role).toBe('Workload cluster')
+    expect(envelope.data.clusters.findIndex((cluster: JsonRecord) => cluster.role === 'Management plane')).toBeGreaterThan(0)
+    invalid.readiness = 'Broken'
+
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot).toEqual({
+      ...baseline,
+      clusters: baseline.clusters.filter((cluster: JsonRecord) => cluster.id !== invalid.id),
+      evidence: baseline.evidence.filter((item: JsonRecord) => item.clusterId !== invalid.id),
+      placements: baseline.placements.filter((item: JsonRecord) => item.targetClusterId !== invalid.id),
+    })
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+  })
   const cases: Array<[string, (cluster: JsonRecord & { capabilities: JsonRecord[] }) => void]> = [
     ['bad readiness', (cluster) => { cluster.readiness = 'Broken' }],
     ['credential name', (cluster) => { cluster.name = 'putty-user-key-file-3' }],

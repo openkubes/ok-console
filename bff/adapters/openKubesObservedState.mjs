@@ -424,7 +424,7 @@ export const normalizeOpenKubesObservedState = (payload, { now = () => new Date(
       const cluster = normalizeCluster(item, path, environmentId, rawEvidence)
       clusters.push(cluster)
     } catch (error) {
-      if (item.role === 'Management plane') throw error
+      if (item.role !== 'Workload cluster') throw error
       withheldClusterCount += 1
       // Only a raw string ID can identify dependants; never coerce producer data.
       if (typeof item.id === 'string') withheldIds.set(item.id, ownership)

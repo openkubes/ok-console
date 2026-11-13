@@ -1308,6 +1308,44 @@ describe('tenant cluster isolation', () => {
     expect(logs.map((line) => JSON.parse(line))).toEqual(logs.map(() => ({ event: 'observed_state_clusters_withheld', time: now().toISOString(), correlationId: 'OTHER', withheldClusterCount: 1 })))
   })
 
+  const platformMalformations: Array<[string, (cluster: JsonRecord & { capabilities: JsonRecord[] }) => void, string]> = [
+    ['cluster readiness', (cluster) => { cluster.readiness = 'Broken' }, '$.data.clusters[1].readiness'],
+    ['capability readiness', (cluster) => { cluster.capabilities[0].readiness = 'Broken' }, '$.data.clusters[1].capabilities[0].readiness'],
+  ]
+  describe.each(['Management plane', 'Infrastructure plane'])('%s failure rejection', (role) => {
+    it.each(platformMalformations)('rejects malformed %s without withholding diagnostics', async (_label, mutate, path) => {
+      const { envelope, invalid } = await setup()
+      invalid.role = role
+      mutate(invalid)
+      expect(() => normalizeOpenKubesObservedState(envelope, { now })).toThrow(`${path} is not supported.`)
+      const logs: string[] = []
+      const bff = await listen(createServer(createConsoleBffHandler({
+        source: new OpenKubesObservedStateAdapter({ url: await startQuery(envelope), now }),
+        authorizer: prototypeAuthorizer, now, sourceFailureObserver: (line: string) => logs.push(line),
+      })))
+      const response = await fetch(`${bff}/api/console/v0/overview`)
+      expect(response.status).toBe(502)
+      const body = await response.json()
+      expect(body).toMatchObject({ kind: 'Error', error: { code: 'CONTRACT_INCOMPATIBLE', retryable: false } })
+      expect(body).not.toHaveProperty('data')
+      expect(JSON.stringify(body)).not.toContain('withheldClusterCount')
+      expect(JSON.stringify([...response.headers])).not.toContain('withheldClusterCount')
+      expect(logs.map((line) => JSON.parse(line)).filter((event) => event.event === 'observed_state_clusters_withheld')).toEqual([])
+      expect(logs.join('')).not.toContain('withheldClusterCount')
+    })
+  })
+
+  it.each(platformMalformations)('still withholds Workload cluster with malformed %s', async (_label, mutate) => {
+    const { envelope, invalid } = await setup()
+    expect(invalid.role).toBe('Workload cluster')
+    mutate(invalid)
+    const snapshot = normalizeOpenKubesObservedState(envelope, { now })
+    expect(snapshot.clusters.some((cluster: JsonRecord) => cluster.id === invalid.id)).toBe(false)
+    expect(snapshot.evidence.some((item: JsonRecord) => item.clusterId === invalid.id)).toBe(false)
+    expect(snapshot.placements.some((item: JsonRecord) => item.targetClusterId === invalid.id)).toBe(false)
+    expect(observedStateDiagnostics(snapshot)).toEqual({ withheldClusterCount: 1 })
+  })
+
   it('reports the actual number when two clusters are withheld', async () => {
     const { envelope, invalid } = await setup()
     invalid.readiness = 'Broken'

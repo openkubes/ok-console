@@ -337,7 +337,7 @@ The real-source path consumes the versioned read-only query envelope
 capability, placement and evidence object carries `ownership`
 (`environmentId`, `tenantId`), and metrics arrive as one bucket per owner.
 Ownership must contain exactly `environmentId` and `tenantId`; unknown ownership keys are rejected.
-A cluster with a supported non-management role is withheld for non-ownership
+A cluster is withheld only when its role is `Workload cluster`, for non-ownership
 cluster or capability field failures only after cluster and every capability's
 ownership have been validated independently. Capability ownership must match its
 parent cluster. Evidence and placements referencing a withheld cluster are dropped
@@ -346,7 +346,7 @@ malformed fields may be dropped. Any ownership invalidity rejects the whole
 snapshot, including extra keys, foreign environments and cross-owner dependants.
 Unsupported roles (including casing variants), duplicate IDs of any kind (including
 capabilities within a cluster and withheld objects), incompatible contracts,
-invalid envelope fields, management-plane failures or a management-plane count
+invalid envelope fields, Management-plane or Infrastructure-plane failures, or a management-plane count
 other than one reject the snapshot. Invalid Evidence, placements or metric buckets
 unrelated to a withheld cluster and unresolved or cross-owner references among
 remaining objects still reject. Withheld owners have metric breakdown leaves set

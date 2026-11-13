@@ -134,6 +134,11 @@ describe('exceptional local-access HTTP boundary', () => {
     ...['admin\u0001name', 'admin\u007fname', 'x'.repeat(129), '   ', '\ufdfa'.repeat(20)].map(username => ({ ...valid, username })),
     { ...valid, password: 'x'.repeat(1025) }, { ...valid, reason: 'x'.repeat(513) },
     { ...valid, reason: ' '.repeat(12) },
+    { ...valid, reason: 'IdP down 🔥🔥' },
+    { ...valid, reason: '  IdP down 🔥🔥  ' },
+    { ...valid, reason: '🔥'.repeat(513) },
+    { ...valid, reason: '🔥'.repeat(300) },
+    { ...valid, reason: ` ${'🔥'.repeat(512)}` },
     {}, { ...valid, reason: 'short' }, { ...valid, username: ['MARKER'] },
     ...['username', 'password', 'reason'].flatMap(field => [
       Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field)),
@@ -157,7 +162,11 @@ describe('exceptional local-access HTTP boundary', () => {
     expect(JSON.stringify([audit.mock.calls, target])).not.toContain('MARKER')
   })
 
-  it('allows an ordinary trimmed reason through to KDF', async () => {
+  it.each([
+    { name: 'ordinary trimmed reason', reason: '  Emergency provider recovery  ', points: 27 },
+    { name: '12-code-point emoji reason', reason: '  IdP down 🔥🔥!  ', points: 12 },
+  ])('allows $name through to KDF', async ({ reason, points }) => {
+    expect([...reason.trim()]).toHaveLength(points)
     const derive = vi.fn(async () => Buffer.alloc(32))
     const reserve = vi.fn(async () => ({ blocked: false }))
     const isEnabled = vi.fn(async () => true)
@@ -166,13 +175,14 @@ describe('exceptional local-access HTTP boundary', () => {
       sessionStore: { create: vi.fn() }, audit: verifierAudit, derive, isEnabled })
     const handler = createLocalAccessHttpHandler({ method: 'BreakGlass', audit, verifier, expectedOrigin: 'https://console.example' })
     const target = response()
-    await handler({ request: request(JSON.stringify({ ...valid, username: ' Admin ', reason: '  Emergency provider recovery  ' })),
+    await handler({ request: request(JSON.stringify({ ...valid, username: ' Admin ', reason })),
       response: target, pathname: '/api/console/v0/auth/local', correlationId })
     expect(target.status).toBe(401)
     expect(reserve).toHaveBeenCalledExactlyOnceWith('admin')
     expect(derive).toHaveBeenCalledTimes(1)
     expect(isEnabled).toHaveBeenCalledTimes(1)
-    expect(verifierAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ principal: 'admin', reason: 'Emergency provider recovery' }))
+    expect(verifierAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ principal: 'admin', reason: reason.trim(), cause: 'INVALID_CREDENTIAL' }))
+    expect(validateAuthenticationAuditEvent(verifierAudit.mock.calls[0][0])).toMatchObject({ reason: reason.trim() })
     expect(audit).not.toHaveBeenCalled()
   })
 

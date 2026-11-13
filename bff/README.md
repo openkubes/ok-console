@@ -204,9 +204,11 @@ prototype mode remains the explicit default.
 Exceptional access is disabled by default. The explicit PostgreSQL runtime can
 enable `OK_CONSOLE_LOCAL_ACCESS_MODE=bootstrap|breakglass`; Bootstrap is
 accepted only while OIDC is disabled, and BreakGlass only while OIDC is enabled.
-Both modes require migrations `003_local_access_throttle.sql`,
-`004_local_access_audit.sql`, and `005_authentication_audit.sql` (authentication
-audit), plus bounded mounted account and pepper files.
+Both modes require migrations `003_local_access_throttle.sql` and
+`004_local_access_audit.sql`, plus the `ok_console.authentication_audit` table
+(created by `security/postgres/005_local_identity.sql`; the shared Kubernetes
+overlays ship it as `005_authentication_audit.sql`), and bounded mounted account
+and pepper files.
 No environment variable or browser bundle contains the credential material.
 
 `POST /api/console/v0/auth/local` accepts only same-origin JSON after validating
@@ -217,6 +219,9 @@ Pre-verification rejections (Origin, content type, malformed/oversize/field-inva
 body) each write one authentication-audit event under the configured method, with
 `ORIGIN_REJECTED`, `CONTENT_TYPE_REJECTED`, or `REQUEST_INVALID` and no
 request-derived fields; a failed write returns `503`. `405` is not audited.
+Audit-refused reason/username shapes (control characters, including line breaks,
+in either field; secret-like terms such as password, access_token, authorization,
+or bearer, URLs, or `code=` in reasons) receive the same `401`.
 Success returns only the public `ConsoleSession` projection and the same opaque
 session/CSRF cookies used by OIDC.
 
@@ -287,11 +292,17 @@ required; old buckets cease affecting active budgets within 15 minutes.
 Edge/IP rate limiting remains
 a deployment control because the BFF does not invent trust in proxy headers.
 
-Every attempt requires a 12–512 character operational reason and writes
-credential-free, correlation-ID-bearing Evidence through migration `004`.
-Granted access is revoked if its Evidence cannot be stored. Configure the BFF
-runtime database identity with only `INSERT` on `local_access_audit`; migration
-and retention identities own update/delete policy. Operators must not put
+Credential verification requires an operational reason of at least 12
+characters and at most 512 UTF-16 code units
+and writes credential-free, correlation-ID-bearing Evidence to both
+`ok_console.local_access_audit` (migration `004`) and
+`ok_console.authentication_audit`. Pre-verifier rejections write only to
+`ok_console.authentication_audit`. Granted access is revoked if its
+Evidence cannot be stored. For these audit writes, configure the BFF runtime
+database identity with `INSERT` on both tables and `USAGE` on
+`ok_console.local_access_audit_event_id_seq` and
+`ok_console.authentication_audit_event_id_seq`; migration and retention
+identities own update/delete policy. Operators must not put
 secrets into the reason, and deployments must define access and retention.
 Credential custody, recovery exercises, MFA feasibility, and production
 acceptance remain open. The browser handoff does not weaken this boundary: its

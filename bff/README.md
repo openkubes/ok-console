@@ -212,6 +212,10 @@ No environment variable or browser bundle contains the credential material.
 the exact configured Origin and content type before reading its 16 KiB-bounded
 body. Credential and input failures share one redaction-safe `401`; unavailable
 throttle, audit, KDF, or session dependencies fail closed with a bounded `503`.
+Pre-verification rejections (Origin, content type, malformed/oversize/field-invalid
+body) each write one authentication-audit event under the configured method, with
+`ORIGIN_REJECTED`, `CONTENT_TYPE_REJECTED`, or `REQUEST_INVALID` and no
+request-derived fields; a failed write returns `503`. `405` is not audited.
 Success returns only the public `ConsoleSession` projection and the same opaque
 session/CSRF cookies used by OIDC.
 

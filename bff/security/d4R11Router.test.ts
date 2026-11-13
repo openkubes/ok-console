@@ -53,7 +53,7 @@ it.each(['GET', 'POST', 'DELETE'].flatMap(method => [false, true].map(failure =>
 
 it.each([false, true])('K1 local router failure=%s hands its recorded id to the real local handler', async failure => {
   const counter = counted(), observed: string[] = []
-  const localAccessHandler = createLocalAccessHttpHandler({ audit: vi.fn(), expectedOrigin: origin, verifier: async (input: { correlationId: string }) => { observed.push(input.correlationId); if (failure) throw new Error('rejected'); return { cookie: 'cookie', csrfCookie: 'csrf', session: {} } } })
+  const localAccessHandler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), expectedOrigin: origin, verifier: async (input: { correlationId: string }) => { observed.push(input.correlationId); if (failure) throw new Error('rejected'); return { cookie: 'cookie', csrfCookie: 'csrf', session: {} } } })
   const url = await listen({ ...counter, localAccessHandler })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password: 'test', reason: 'recovery' }) })
   expect(response.status).toBe(failure ? 401 : 200)
@@ -186,7 +186,7 @@ it('K6 L3 local route through real verifier, HTTP handler and refused pg pool lo
   cleanup.push(() => pool.end())
   const counter = counted(), log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], sessionStore: { create() {} }, throttle: new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32) }) })
-  const url = await listen({ ...counter, localAccessHandler: createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: origin }) })
+  const url = await listen({ ...counter, localAccessHandler: createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: origin }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password: 'fixture', reason: 'local recovery test' }) })
   expect(response.status).toBe(503); sameId(counter, response)
   expect((await response.json()).error.code).toBe('LOCAL_ACCESS_UNAVAILABLE')

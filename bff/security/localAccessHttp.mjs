@@ -44,8 +44,8 @@ const readJson = async (request) => {
   }
 }
 
-export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit }) => {
-  if (typeof audit !== 'function') throw new LocalAccessError('INVALID_CONFIGURATION')
+export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit, method }) => {
+  if (typeof audit !== 'function' || !['Bootstrap', 'BreakGlass'].includes(method)) throw new LocalAccessError('INVALID_CONFIGURATION')
   return async ({ request, response, pathname, correlationId }) => {
     if (pathname !== PATH) return false
     if (request.method !== 'POST') {
@@ -56,9 +56,9 @@ export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit }
     const log = (cause, failure) => console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'LOCAL_ACCESS_FAILED', cause, errorCode: startErrorCode(failure), elapsedMs: boundedMs(performance.now() - started) }))
     const reject = async (status, code, cause) => {
       try {
-        await audit({ method: 'Local', outcome: 'Denied', cause, correlationId, reason: 'Rejected before credential verification' })
+        await audit({ method, outcome: 'Denied', cause, correlationId, reason: 'Rejected before credential verification' })
       } catch (error) {
-        log('AUDIT', error)
+        log('PRE_VERIFIER_AUDIT', error)
         send(response, 503, 'LOCAL_ACCESS_UNAVAILABLE', correlationId)
         return
       }
@@ -86,6 +86,10 @@ export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit }
       response.writeHead(200, headers(correlationId, { 'Set-Cookie': [issued.cookie, issued.csrfCookie] }))
       response.end(JSON.stringify(issued.session))
     } catch (error) {
+      if (error instanceof LocalAccessError && error.code === 'INVALID_REQUEST') {
+        await reject(401, 'LOCAL_ACCESS_REJECTED', 'REQUEST_INVALID')
+        return true
+      }
       const unavailable = error instanceof LocalAccessError && error.code === 'LOCAL_ACCESS_UNAVAILABLE'
       if (unavailable) {
         log(STEPS.has(error.step) ? error.step : 'OTHER', error.cause)

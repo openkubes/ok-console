@@ -11,6 +11,7 @@ import { createDiagnosticRuntime } from '../test-fixtures/d4R12Runtime.mjs'
 import { createLocalAccessVerifier, LocalAccessError, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
 import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
 import { InMemorySessionStore } from './session.mjs'
+import { PostgresAuthenticationAudit } from './authenticationAudit.mjs'
 import { PostgresSessionStore } from './postgresSessionStore.mjs'
 import { SessionEnvelopeCodec } from './envelope.mjs'
 
@@ -48,7 +49,7 @@ it.each([
   if (mode === 'success') throttle.success = () => pgThrottle.success('reader', { globalWindow: 'window' })
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle, sessionStore: mode === 'create' ? pgStore : store, authorizationRevision: 'revision', audit: ['blocked-audit', 'rejected-audit', 'granted-audit', 'compensation', 'compensation-ok', 'compensation-absent'].includes(mode) ? (event: object) => pgAudit.record(event) : async () => {}, ...(mode === 'kdf' ? { derive: () => promisify(scrypt)(password, salt, -1) } : {}) })
   const ids = counter(), log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const url = await listen({ ...ids, localAccessHandler: createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: origin }) })
+  const url = await listen({ ...ids, localAccessHandler: createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: origin }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password: ['failure', 'rejected-audit'].includes(mode) ? 'wrong' : password, reason: 'local recovery exercise' }) })
   expect(response.status).toBe(503)
   expect((await response.json()).error.code).toBe('LOCAL_ACCESS_UNAVAILABLE')
@@ -67,14 +68,14 @@ it.each([
 it('L3 rejected credentials keep the 401 path silent', async () => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: { reserve: async () => ({ blocked: false }) }, sessionStore: { create() {} } })
-  const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: origin }) })
+  const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: origin }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password, reason: 'local recovery exercise' }) })
   expect(response.status).toBe(401); expect((await response.json()).error.code).toBe('LOCAL_ACCESS_REJECTED'); expect(log).not.toHaveBeenCalled()
 })
 
 it('L3 unavailable unknown step stays bounded', async () => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ audit: vi.fn(), expectedOrigin: origin, verifier: async () => { throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE', { step: 'private foreign step' }) } }) })
+  const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), expectedOrigin: origin, verifier: async () => { throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE', { step: 'private foreign step' }) } }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: '{}' })
   expect(response.status).toBe(503); expect(log).toHaveBeenCalledTimes(1)
   expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ cause: 'OTHER', errorCode: null })
@@ -95,7 +96,7 @@ it('L3 unavailable line uses the lifecycle stage reached before local handling',
   const pool = new Pool({ host: '127.0.0.1', port: 1, connectionTimeoutMillis: 500 })
   cleanup.push(() => pool.end())
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32) }), sessionStore: { create() {} } })
-  const handler = createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: origin })
+  const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: origin })
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const url = await listen({ localAccessHandler: (input: object) => { currentLifecycle()?.mark('AUTHZ_CHECKED'); return handler(input) } })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password, reason: 'local recovery exercise' }) })
@@ -106,11 +107,27 @@ it('L3 unavailable line uses the lifecycle stage reached before local handling',
 it.each([undefined, null, false, 0, ''])('L3 compensation logs even an absent thrown code (%s)', async value => {
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle: { reserve: async () => ({ blocked: false }), success: async () => {} }, sessionStore: { create: async () => ({ cookie: 'cookie' }), revoke: async () => { throw value } }, derive: async () => Buffer.from(account.verifier, 'base64'), audit: async () => { throw new Error('audit unavailable') } })
-  const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: origin }) })
+  const url = await listen({ localAccessHandler: createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: origin }) })
   const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'reader', password, reason: 'local recovery exercise' }) })
   expect(response.status).toBe(503)
   expect(log.mock.calls.map(call => JSON.parse(call[0]))).toEqual([
     expect.objectContaining({ cause: 'AUDIT', errorCode: null }),
     expect.objectContaining({ cause: 'LOCAL_ACCESS_COMPENSATION', errorCode: null }),
   ])
+})
+
+
+it('pre-verifier authentication audit on a real refused pool fails closed with a classified log', async () => {
+  const pool = new Pool({ host: '127.0.0.1', port: 1, connectionTimeoutMillis: 500 })
+  cleanup.push(() => pool.end())
+  const audit = new PostgresAuthenticationAudit({ pool, pepper: Buffer.alloc(32) })
+  const verifier = vi.fn(), ids = counter(), log = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const url = await listen({ ...ids, localAccessHandler: createLocalAccessHttpHandler({ method: 'Bootstrap', verifier, expectedOrigin: origin, audit: (event: object) => audit.record(event) }) })
+  const response = await fetch(url + base + '/auth/local', { method: 'POST', headers: { origin: 'https://other.invalid', 'content-type': 'application/json' }, body: '{}' })
+  expect(response.status).toBe(503)
+  expect((await response.json()).error.code).toBe('LOCAL_ACCESS_UNAVAILABLE')
+  expect(verifier).not.toHaveBeenCalled()
+  expect(ids.generated).toHaveLength(1)
+  expect(log).toHaveBeenCalledTimes(1)
+  expect(JSON.parse(log.mock.calls[0][0])).toEqual({ stage: 'REQUEST_RECEIVED', correlationId: ids.generated[0], event: 'LOCAL_ACCESS_FAILED', cause: 'PRE_VERIFIER_AUDIT', errorCode: 'ECONNREFUSED', elapsedMs: expect.any(Number) })
 })

@@ -28,7 +28,7 @@ const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32
 const account = { username: 'reader', enabled: true, salt: Buffer.alloc(16).toString('base64'), verifier: Buffer.alloc(32, 2).toString('base64'), identityId: 'reader', displayName: 'Reader', environmentId: 'prod', tenantIds: ['platform'], permissions: ['platform.read'] }
 const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle,
   derive: async () => { kdf++; return Buffer.alloc(32, 2) }, sessionStore: { create: async () => { sessions++; return {} } } })
-let handler = createLocalAccessHttpHandler({ audit: async () => {}, verifier, expectedOrigin: 'https://console.invalid' })
+let handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: async () => {}, verifier, expectedOrigin: 'https://console.invalid' })
 let runtime
 if (scenario === 'pool') {
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(connectionString).hostname)

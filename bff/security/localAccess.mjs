@@ -190,7 +190,7 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
   const mapped = new Map(accounts.map((account) => [normalize(account.username), account]))
   return async (input) => {
     const username = normalize(input?.username)
-    if (!validInput({ username, password: input?.password, reason: input?.reason })) throw new LocalAccessError()
+    if (!validInput({ username, password: input?.password, reason: input?.reason })) throw new LocalAccessError('INVALID_REQUEST')
     const run = async (step, operation) => {
       try { return await operation() } catch (cause) {
         throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE', { cause, step })

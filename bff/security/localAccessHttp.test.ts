@@ -37,12 +37,12 @@ describe('exceptional local-access HTTP boundary', () => {
     let complete!: () => void
     const audit = vi.fn(() => new Promise<void>(resolve => { complete = resolve }))
     const verifier = vi.fn()
-    const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.example', audit })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', verifier, expectedOrigin: 'https://console.example', audit })
     const target = response()
     const pending = handler({ request: request(body, headers), response: target, pathname: '/api/console/v0/auth/local', correlationId })
     await vi.waitFor(() => expect(audit).toHaveBeenCalledTimes(1))
     expect(target.status).toBeUndefined()
-    const expected = { method: 'Local', outcome: 'Denied', cause, correlationId, reason: 'Rejected before credential verification' }
+    const expected = { method: 'Bootstrap', outcome: 'Denied', cause, correlationId, reason: 'Rejected before credential verification' }
     expect(audit.mock.calls[0]).toEqual([expected])
     expect(validateAuthenticationAuditEvent(expected)).toEqual(expected)
     complete()
@@ -59,7 +59,7 @@ describe('exceptional local-access HTTP boundary', () => {
     try {
       const audit = vi.fn(async () => { throw new Error('password=hunter2-MARKER') })
       const verifier = vi.fn()
-      const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.example', audit })
+      const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', verifier, expectedOrigin: 'https://console.example', audit })
       const target = response()
       await handler({ request: request(body, headers), response: target, pathname: '/api/console/v0/auth/local', correlationId })
       expect(target.status).toBe(503)
@@ -68,7 +68,7 @@ describe('exceptional local-access HTTP boundary', () => {
       expect(audit).toHaveBeenCalledTimes(1)
       expect(verifier).not.toHaveBeenCalled()
       expect(log).toHaveBeenCalledTimes(1)
-      expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ event: 'LOCAL_ACCESS_FAILED', cause: 'AUDIT', correlationId })
+      expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ event: 'LOCAL_ACCESS_FAILED', cause: 'PRE_VERIFIER_AUDIT', correlationId })
       expect(JSON.stringify([target, log.mock.calls])).not.toContain('MARKER')
     } finally { log.mockRestore() }
   })
@@ -83,7 +83,7 @@ describe('exceptional local-access HTTP boundary', () => {
     try {
       const audit = vi.fn()
       const verifier = vi.fn()
-      const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.example', audit })
+      const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', verifier, expectedOrigin: 'https://console.example', audit })
       const target = response()
       await handler({ request: request(body, headers), response: target, pathname: '/api/console/v0/auth/local', correlationId })
       expect(audit).toHaveBeenCalledTimes(1)
@@ -94,7 +94,7 @@ describe('exceptional local-access HTTP boundary', () => {
 
   it('does not audit non-matching paths or non-POST requests', async () => {
     const audit = vi.fn(), verifier = vi.fn()
-    const handler = createLocalAccessHttpHandler({ verifier, expectedOrigin: 'https://console.example', audit })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', verifier, expectedOrigin: 'https://console.example', audit })
     const target = response()
     expect(await handler({ request: request('{}'), response: target, pathname: '/other', correlationId })).toBe(false)
     expect(target.status).toBeUndefined()
@@ -106,13 +106,68 @@ describe('exceptional local-access HTTP boundary', () => {
   })
 
   it.each([undefined, null, {}, 'audit'])('requires an audit function at construction: %s', audit => {
-    expect(() => createLocalAccessHttpHandler({ verifier: vi.fn(), expectedOrigin: 'https://console.example', audit })).toThrow()
+    expect(() => createLocalAccessHttpHandler({ method: 'Bootstrap', verifier: vi.fn(), expectedOrigin: 'https://console.example', audit })).toThrow()
+  })
+
+
+  it.each([undefined, null, '', 'Local', 'OIDC', 'bootstrap', {}, []])('requires a configured exceptional method: %s', method => {
+    expect(() => createLocalAccessHttpHandler({ method, audit: vi.fn(), verifier: vi.fn(), expectedOrigin: 'https://console.example' }))
+      .toThrow(expect.objectContaining({ code: 'INVALID_CONFIGURATION' }))
+  })
+
+  it.each(['Bootstrap', 'BreakGlass'])('records the configured %s method', async method => {
+    const audit = vi.fn()
+    const handler = createLocalAccessHttpHandler({ method, audit, verifier: vi.fn(), expectedOrigin: 'https://console.example' })
+    const target = response()
+    await handler({ request: request('{'), response: target, pathname: '/api/console/v0/auth/local', correlationId })
+    expect(target.status).toBe(401)
+    expect(audit).toHaveBeenCalledExactlyOnceWith({ method, outcome: 'Denied', cause: 'REQUEST_INVALID', correlationId, reason: 'Rejected before credential verification' })
+  })
+
+  const valid = { username: 'admin', password: 'secret', reason: 'Emergency provider recovery MARKER' }
+  const invalidFields = [
+    {}, { ...valid, reason: 'short' }, { ...valid, username: ['MARKER'] },
+    ...['username', 'password', 'reason'].flatMap(field => [
+      Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field)),
+      ...[null, 42, {}, [], true].map(value => ({ ...valid, [field]: value })),
+    ]),
+  ]
+  it.each(invalidFields)('audits field-invalid JSON once without verifier work: %j', async body => {
+    const audit = vi.fn(), verifierAudit = vi.fn(), derive = vi.fn(), reserve = vi.fn(), isEnabled = vi.fn()
+    const verifier = createLocalAccessVerifier({ mode: 'BreakGlass', accounts: [], throttle: { reserve }, sessionStore: { create: vi.fn() }, audit: verifierAudit, derive, isEnabled })
+    await expect(verifier(body)).rejects.toMatchObject({ name: 'LocalAccessError', code: 'INVALID_REQUEST' })
+    const handler = createLocalAccessHttpHandler({ method: 'BreakGlass', audit, verifier, expectedOrigin: 'https://console.example' })
+    const target = response()
+    await handler({ request: request(JSON.stringify(body)), response: target, pathname: '/api/console/v0/auth/local', correlationId })
+    expect(target.status).toBe(401)
+    expect(JSON.parse(target.body!).error.code).toBe('LOCAL_ACCESS_REJECTED')
+    expect(audit).toHaveBeenCalledExactlyOnceWith({ method: 'BreakGlass', outcome: 'Denied', cause: 'REQUEST_INVALID', correlationId, reason: 'Rejected before credential verification' })
+    expect(verifierAudit).not.toHaveBeenCalled()
+    expect(derive).not.toHaveBeenCalled()
+    expect(reserve).not.toHaveBeenCalled()
+    expect(isEnabled).not.toHaveBeenCalled()
+    expect(JSON.stringify([audit.mock.calls, target])).not.toContain('MARKER')
+  })
+
+  it('fails closed when field-invalid JSON cannot be audited', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: {}, sessionStore: { create: vi.fn() } })
+      const audit = vi.fn(async () => { throw new Error('unavailable') })
+      const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit, verifier, expectedOrigin: 'https://console.example' })
+      const target = response()
+      await handler({ request: request('{}'), response: target, pathname: '/api/console/v0/auth/local', correlationId })
+      expect(target.status).toBe(503)
+      expect(JSON.parse(target.body!).error.code).toBe('LOCAL_ACCESS_UNAVAILABLE')
+      expect(audit).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ cause: 'PRE_VERIFIER_AUDIT' })
+    } finally { log.mockRestore() }
   })
 
   it('issues only Console cookies after exact-Origin JSON verification', async () => {
     const verifier = vi.fn(async () => ({ cookie: 'session-cookie', csrfCookie: 'csrf-cookie', session: { kind: 'ConsoleSession' } }))
     const audit = vi.fn()
-    const handler = createLocalAccessHttpHandler({ audit, verifier, expectedOrigin: 'https://console.example' })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit, verifier, expectedOrigin: 'https://console.example' })
     const target = response()
     await handler({ request: request(JSON.stringify({ username: 'admin', password: 'secret', reason: 'Emergency provider recovery' })), response: target, pathname: '/api/console/v0/auth/local', correlationId: 'corr-1' })
     expect(verifier).toHaveBeenCalledTimes(1)
@@ -125,7 +180,7 @@ describe('exceptional local-access HTTP boundary', () => {
 
   it('rejects origin and content type before reading credentials', async () => {
     const verifier = vi.fn()
-    const handler = createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
     const hostile = request('{"password":"secret"}', { origin: 'https://evil.example' })
     const target = response()
     await handler({ request: hostile, response: target, pathname: '/api/console/v0/auth/local', correlationId: 'corr-2' })
@@ -136,7 +191,7 @@ describe('exceptional local-access HTTP boundary', () => {
 
   it('bounds bodies and normalizes credential failures', async () => {
     const verifier = vi.fn(async () => { throw new LocalAccessError() })
-    const handler = createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
     const oversized = response()
     await handler({ request: request('', { 'content-length': '20000' }), response: oversized, pathname: '/api/console/v0/auth/local', correlationId: 'corr-3' })
     expect(oversized.status).toBe(401)
@@ -152,7 +207,7 @@ describe('exceptional local-access HTTP boundary', () => {
     try {
       const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [], throttle: {}, sessionStore: { create: vi.fn() },
         isEnabled: async () => { throw new Error('private enabled-check failure') } })
-      const handler = createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
+      const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
       const target = response()
       await handler({ request: request(JSON.stringify({ username: 'admin', password: 'secret', reason: 'Emergency provider recovery' })), response: target, pathname: '/api/console/v0/auth/local', correlationId: 'corr-00000000-0000-4000-8000-000000000001' })
       expect(target.status).toBe(503)
@@ -166,7 +221,7 @@ describe('exceptional local-access HTTP boundary', () => {
 
   it('distinguishes a fail-closed dependency outage without exposing its cause', async () => {
     const verifier = vi.fn(async () => { throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE') })
-    const handler = createLocalAccessHttpHandler({ audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier, expectedOrigin: 'https://console.example' })
     const target = response()
     await handler({ request: request(JSON.stringify({ username: 'admin', password: 'secret', reason: 'Emergency provider recovery' })), response: target, pathname: '/api/console/v0/auth/local', correlationId: 'corr-5' })
     expect(target.status).toBe(503)

@@ -1,5 +1,6 @@
 import { createHmac, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
+import { bounded, safeReason } from './authenticationAudit.mjs'
 import { classifyPgError, pgConnect, pgQuery } from './pgFailure.mjs'
 
 const scrypt = promisify(nodeScrypt)
@@ -13,6 +14,7 @@ const normalize = (value) => typeof value === 'string' ? value.normalize('NFKC')
 const validInput = ({ username, password, reason }) => username.length >= 1 && username.length <= 128
   && typeof password === 'string' && password.length >= 1 && password.length <= 1024
   && typeof reason === 'string' && reason.trim().length >= 12 && reason.length <= 512
+  && bounded(username, 256) && safeReason(reason.trim())
 
 export class LocalAccessError extends Error {
   constructor(code = 'LOCAL_ACCESS_REJECTED', { cause, step } = {}) {

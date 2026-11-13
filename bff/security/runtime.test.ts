@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import { createSessionRuntime, SessionRuntimeConfigurationError } from './runtime.mjs'
 
@@ -306,4 +307,45 @@ it.each(['3000', '60000'])('J4 derives query timeout from statement timeout %s',
   expect(config.statement_timeout).toBe(Number(value))
   expect(config.query_timeout).toBe(Number(value) + 1000)
   await runtime.close()
+})
+
+
+it.each([
+  { mode: 'bootstrap', method: 'Bootstrap', oidc: 'false' },
+  { mode: 'breakglass', method: 'BreakGlass', oidc: 'true' },
+])('wires $mode pre-verifier audit to $method through the runtime handler', async ({ mode, method, oidc }) => {
+  const record = vi.fn()
+  const runtime = await createSessionRuntime({
+    env: { ...baseEnv,
+      OK_CONSOLE_LOCAL_ACCESS_MODE: mode,
+      OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE: '/run/secrets/local-accounts',
+      OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper',
+      OK_CONSOLE_OIDC_ENABLED: oidc,
+      OK_CONSOLE_OIDC_PROVIDER_ID: 'provider-1',
+      OK_CONSOLE_OIDC_ISSUER: 'https://identity.example/',
+      OK_CONSOLE_OIDC_CLIENT_ID: 'ok-console',
+      OK_CONSOLE_OIDC_CLIENT_SECRET_FILE: '/run/secrets/oidc-client-secret',
+      OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE: '/run/secrets/oidc-subjects',
+    },
+    fileReader,
+    poolFactory: () => ({ end: vi.fn() }),
+    storeFactory: () => ({ authorize: vi.fn(), create: vi.fn() }),
+    throttleFactory: () => ({ reserve: vi.fn() }),
+    auditFactory: () => ({ record: vi.fn() }),
+    authenticationAuditFactory: () => ({ record }),
+    oidcProtocolFactory: async () => ({}),
+    transactionStoreFactory: () => ({}),
+  })
+  try {
+    const writeHead = vi.fn(), end = vi.fn()
+    const correlationId = 'corr-00000000-0000-4000-8000-000000000002'
+    const request = Object.assign(Readable.from(['{}']), {
+      method: 'POST', headers: { origin: 'https://wrong.example', 'content-type': 'application/json' },
+    })
+    await expect(runtime.localAccessHandler!({ request, response: { writeHead, end },
+      pathname: '/api/console/v0/auth/local', correlationId })).resolves.toBe(true)
+    expect(writeHead.mock.calls[0][0]).toBe(403)
+    expect(record).toHaveBeenCalledExactlyOnceWith({ method, outcome: 'Denied', cause: 'ORIGIN_REJECTED',
+      correlationId, reason: 'Rejected before credential verification' })
+  } finally { await runtime.close() }
 })

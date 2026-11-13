@@ -126,6 +126,14 @@ describe('exceptional local-access HTTP boundary', () => {
 
   const valid = { username: 'admin', password: 'secret', reason: 'Emergency provider recovery MARKER' }
   const invalidFields = [
+    // Username length is checked after NFKC normalization; its 128 limit also bounds audit principals to 256.
+    ...['Reset password after IdP outage', 'Recover with Bearer x', 'Recover using https://x',
+      'Recover using code=1', 'Emergency\trecovery', 'Reset authorization policy',
+      'Use access_token for recovery', 'Use id-token for recovery', 'Use refresh_token for recovery',
+      'Use client_secret for recovery', 'Use code_verifier for recovery'].map(reason => ({ ...valid, reason })),
+    ...['admin\u0001name', 'admin\u007fname', 'x'.repeat(129), '   ', '\ufdfa'.repeat(20)].map(username => ({ ...valid, username })),
+    { ...valid, password: 'x'.repeat(1025) }, { ...valid, reason: 'x'.repeat(513) },
+    { ...valid, reason: ' '.repeat(12) },
     {}, { ...valid, reason: 'short' }, { ...valid, username: ['MARKER'] },
     ...['username', 'password', 'reason'].flatMap(field => [
       Object.fromEntries(Object.entries(valid).filter(([key]) => key !== field)),
@@ -147,6 +155,25 @@ describe('exceptional local-access HTTP boundary', () => {
     expect(reserve).not.toHaveBeenCalled()
     expect(isEnabled).not.toHaveBeenCalled()
     expect(JSON.stringify([audit.mock.calls, target])).not.toContain('MARKER')
+  })
+
+  it('allows an ordinary trimmed reason through to KDF', async () => {
+    const derive = vi.fn(async () => Buffer.alloc(32))
+    const reserve = vi.fn(async () => ({ blocked: false }))
+    const isEnabled = vi.fn(async () => true)
+    const verifierAudit = vi.fn(), audit = vi.fn()
+    const verifier = createLocalAccessVerifier({ mode: 'BreakGlass', accounts: [], throttle: { reserve },
+      sessionStore: { create: vi.fn() }, audit: verifierAudit, derive, isEnabled })
+    const handler = createLocalAccessHttpHandler({ method: 'BreakGlass', audit, verifier, expectedOrigin: 'https://console.example' })
+    const target = response()
+    await handler({ request: request(JSON.stringify({ ...valid, username: ' Admin ', reason: '  Emergency provider recovery  ' })),
+      response: target, pathname: '/api/console/v0/auth/local', correlationId })
+    expect(target.status).toBe(401)
+    expect(reserve).toHaveBeenCalledExactlyOnceWith('admin')
+    expect(derive).toHaveBeenCalledTimes(1)
+    expect(isEnabled).toHaveBeenCalledTimes(1)
+    expect(verifierAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ principal: 'admin', reason: 'Emergency provider recovery' }))
+    expect(audit).not.toHaveBeenCalled()
   })
 
   it('fails closed when field-invalid JSON cannot be audited', async () => {

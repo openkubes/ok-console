@@ -24,11 +24,12 @@ export function evidencePresentation(item: EvidenceRef, fixture = false) {
 
 export function clusterPresentation(cluster: Cluster, data: PlatformSnapshot) {
   const evidence = data.evidence.find(item => item.id === cluster.evidenceId && (item.cluster === cluster.id || item.cluster === cluster.name))
-  const references = [cluster.evidenceId, ...(cluster.capabilityDetails?.map(item => item.evidenceId) ?? [])]
-  const observations = references.map(id => data.evidence.find(item => item.id === id && (item.cluster === cluster.id || item.cluster === cluster.name)))
+  // The detail route covers unloaded capability and placement Evidence. Only
+  // already-loaded observations can further constrain its verdict.
+  const observations = data.evidence.filter(item => item.cluster === cluster.id || item.cluster === cluster.name)
   return observationPresentation({
     // cluster.freshness retains the detail-route verdict and browser ageing cap.
-    freshness: conservativeVerdict(cluster.freshness, ...observations.map(item => item?.freshness)),
+    freshness: conservativeVerdict(cluster.freshness, evidence?.freshness, ...observations.map(item => item.freshness)),
     state: observations.some(item => item?.outcome === 'Unknown') ? 'Unknown' : cluster.readiness,
     hasEvidence: Boolean(evidence), immutable: evidence?.immutable, observedAt: evidence?.observedAt,
     fixture: data.source !== 'bff',

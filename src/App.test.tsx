@@ -697,22 +697,22 @@ describe('Identity & access preview navigation', () => {
   })
 })
 
-it.each(['mixed', 'envelope', 'capability', 'missing'] as const)('per-cluster %s rows and cards preserve the list banner', async scenario => {
+it.each(['mixed', 'envelope', 'capability', 'unloaded-capability', 'missing-detail'] as const)('per-cluster %s rows and cards preserve the list banner', async scenario => {
   dataMode.value = 'bff'
   const data = structuredClone(platformFixture)
   Object.assign(data, { source: 'bff', freshness: 'Current', clusterListFreshness: 'Stale', warnings: [] })
-  data.clusters = ['fresh', 'stale'].map(name => ({ ...data.clusters[0], id: `cluster-${name}`, name, evidenceId: `ev-${name}`, readiness: 'Ready', freshness: name === 'fresh' ? 'Current' : 'Stale',
+  data.clusters = ['fresh', 'stale'].map(name => ({ ...data.clusters[0], id: `cluster-${name}`, name, evidenceId: `ev-${name}`, readiness: 'Ready', freshness: name === 'fresh' ? scenario === 'missing-detail' ? 'Unknown' : 'Current' : 'Stale',
     capabilityDetails: name === 'fresh' ? [{ id: 'cap-own', name: 'Own', readiness: 'Ready', evidenceId: 'ev-cap' }] : [] }))
   data.evidence = [
-    ...data.clusters.map(cluster => ({ ...data.evidence[0], id: cluster.evidenceId, cluster: cluster.id, outcome: 'Ready' as const, immutable: false, freshness: scenario === 'envelope' ? 'Stale' as const : cluster.freshness })),
+    ...data.clusters.map(cluster => ({ ...data.evidence[0], id: cluster.evidenceId, cluster: cluster.id, outcome: 'Ready' as const, immutable: false, freshness: scenario === 'envelope' ? 'Stale' as const : cluster.name === 'fresh' ? 'Current' as const : 'Stale' as const })),
     { ...data.evidence[0], id: 'ev-cap', cluster: 'cluster-fresh', outcome: 'Ready' as const, immutable: false, freshness: scenario === 'capability' || scenario === 'envelope' ? 'Stale' as const : 'Current' as const },
-  ].filter(item => scenario !== 'missing' || item.id !== 'ev-cap')
+  ].filter(item => scenario !== 'unloaded-capability' || item.id !== 'ev-cap')
   const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
   try {
     await renderSignedIn()
-    const current = scenario === 'mixed'
+    const current = scenario === 'mixed' || scenario === 'unloaded-capability'
     const card = document.querySelectorAll('.cluster-card')[0]
-    expect(card).toHaveTextContent(current ? 'Current observation' : scenario === 'missing' ? 'Observation unavailable' : 'Last observed')
+    expect(card).toHaveTextContent(current ? 'Current observation' : scenario === 'missing-detail' ? 'Observation unavailable' : 'Last observed')
     expect(card.querySelectorAll('.live-dot')).toHaveLength(current ? 1 : 0)
     // Overview metrics remain suppressed by the list aggregate even with a current row.
     expect([...document.querySelectorAll('.metrics-grid .metric > strong')].map(item => item.textContent)).toEqual(Array(4).fill('Unavailable'))
@@ -720,7 +720,7 @@ it.each(['mixed', 'envelope', 'capability', 'missing'] as const)('per-cluster %s
     await screen.findByText('Some observations are stale')
     const fresh = screen.getByRole('button', { name: 'Open fresh' }).closest('.table-row')!
     const stale = screen.getByRole('button', { name: 'Open stale' }).closest('.table-row')!
-    expect(fresh).toHaveTextContent(current ? 'Current observation' : scenario === 'missing' ? 'Observation unavailable' : 'Last observed')
+    expect(fresh).toHaveTextContent(current ? 'Current observation' : scenario === 'missing-detail' ? 'Observation unavailable' : 'Last observed')
     expect(fresh.querySelectorAll('.live-dot')).toHaveLength(current ? 1 : 0)
     expect(stale).toHaveTextContent('Unknown'); expect(stale).toHaveTextContent('Last observed')
     expect(stale.querySelectorAll('.live-dot')).toHaveLength(0)

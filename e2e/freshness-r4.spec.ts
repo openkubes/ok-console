@@ -5,15 +5,18 @@ import { normalizeOpenKubesObservedState } from '../bff/adapters/openKubesObserv
 import { createConsoleBffHandler, prototypeAuthorizer } from '../bff/app.mjs'
 import { injectBffFailure, signInPrototype } from './support'
 
-const serve = async (page: Page, kind: 'mixed' | 'mixed-envelope' | 'mixed-capability' | 'item' | 'envelope' | 'deployment' | 'fresh' | 'future' | 'immutable' | 'immutable-future' | 'immutable-current') => {
+const serve = async (page: Page, kind: 'mixed' | 'mixed-envelope' | 'mixed-capability' | 'item' | 'envelope' | 'deployment' | 'deployment-unlisted' | 'unreferenced' | 'fresh' | 'future' | 'immutable' | 'immutable-future' | 'immutable-current') => {
   const golden = JSON.parse((await readFile(new URL('../bff/openKubesObservedState.fixtures.json', import.meta.url), 'utf8')).replaceAll('openkubes-management', 'community-preview'))
   const envelope = golden.snapshots['hosting-cluster']
   const now = () => new Date(envelope.metadata.observedAt)
   const nowMs = now().getTime()
   const cluster = envelope.data.clusters.find((item: { name: string }) => item.name === 'ok-shared')
-  const id = kind === 'deployment' ? envelope.data.placements[0].evidenceId : cluster.evidenceId
+  const id = kind.startsWith('deployment') ? envelope.data.placements[0].evidenceId : cluster.evidenceId
   const evidence = envelope.data.evidence.find((item: { id: string }) => item.id === id)
-  if (kind === 'item' || kind === 'deployment') evidence.observedAt = new Date(nowMs - 15 * 3600000).toISOString()
+  if (kind === 'item' || kind.startsWith('deployment')) evidence.observedAt = new Date(nowMs - 15 * 3600000).toISOString()
+  // A retained deployment observation can outlive its overview placement projection.
+  if (kind === 'deployment-unlisted') envelope.data.placements = []
+  if (kind === 'unreferenced') envelope.data.evidence.push({ ...structuredClone(evidence), id: 'ev-unreferenced-stale', observedAt: new Date(nowMs - 15 * 3600000).toISOString() })
   if (kind.includes('immutable')) evidence.classification = 'Immutable'
   if (kind.includes('future')) evidence.observedAt = new Date(nowMs + 60001).toISOString()
   if (kind === 'immutable') envelope.metadata.observedAt = new Date(nowMs - 15 * 3600000).toISOString()
@@ -45,13 +48,30 @@ const serve = async (page: Page, kind: 'mixed' | 'mixed-envelope' | 'mixed-capab
 }
 
 
-for (const kind of ['item', 'envelope', 'injection', 'fresh', 'deployment'] as const) {
+for (const kind of ['item', 'envelope', 'injection', 'fresh', 'deployment', 'deployment-unlisted', 'unreferenced'] as const) {
   test(`J1 ${kind}: cluster lifecycle framing`, async ({ page }) => {
     const fixture = kind === 'injection' ? undefined : await serve(page, kind)
     try {
       if (kind === 'injection') await injectBffFailure(page, 'stale')
       await signInPrototype(page)
-      await page.locator('.cluster-card').filter({ hasText: fixture?.cluster.name ?? 'ok-mgmt' }).locator('button.card-main').click()
+      if (kind.startsWith('deployment') || kind === 'unreferenced' || kind === 'fresh') {
+        // Worlds A/B: the route verdict includes Evidence beyond the primary reference.
+        const current = kind === 'fresh'
+        const card = page.locator('.cluster-card').filter({ hasText: fixture!.cluster.name })
+        await expect(card).toContainText(current ? 'Current observation' : 'Last observed')
+        await expect(card.locator('.live-dot')).toHaveCount(current ? 1 : 0)
+        if (!current) await expect(card).not.toContainText('Current observation')
+        await page.goto('/#/clusters')
+        const row = page.locator('.table-row.cluster-columns').filter({ hasText: fixture!.cluster.name })
+        await expect(row).toContainText(current ? 'Current observation' : 'Last observed')
+        await expect(row.locator('.live-dot')).toHaveCount(current ? 1 : 0)
+        if (!current) {
+          await expect(row).not.toContainText('Current observation')
+        }
+        await page.getByRole('button', { name: `Open ${fixture!.cluster.name}`, exact: true }).click()
+      } else {
+        await page.locator('.cluster-card').filter({ hasText: fixture?.cluster.name ?? 'ok-mgmt' }).locator('button.card-main').click()
+      }
       // #140 includes stale hosting placements in the tenant's response verdict.
       const stale = kind !== 'fresh'
       const unavailable = kind === 'item' || kind === 'envelope' || kind === 'injection'

@@ -13,6 +13,7 @@ import {
 } from '../domain/presentationContract'
 import type { Cluster, ConsoleDataPort, EvidenceRef, PlatformSnapshot } from '../domain/contracts'
 import { curatedAgents } from './agentCatalog'
+import { conservativeVerdict } from '../observationPresentation'
 
 export const BFF_REQUEST_TIMEOUT_MS = 15_000
 
@@ -77,12 +78,32 @@ const isRecordWithKind = (value: unknown): value is { kind: string } =>
   typeof value === 'object' && value !== null && 'kind' in value && typeof value.kind === 'string'
 
 export class BffConsoleAdapter implements ConsoleDataPort {
+  private readonly requestScopes = new WeakMap<AbortController, { active: number; waiting: (() => void)[] }>()
+  private readonly visibleDetails = new WeakMap<AbortController, Set<string>>()
+  private readonly detailRequests = new WeakMap<AbortController, Map<string, Promise<Cluster | undefined>>>()
+
   constructor(
     private readonly baseUrl = '/api/console/v0',
     private readonly fetcher: FetchLike = (...args) => fetch(...args),
   ) {}
 
+  // Include the selected detail in the same refresh budget as snapshot requests.
   private async request<T>(path: string, expectedKind: string, controller = new AbortController()): Promise<T> {
+    let scope = this.requestScopes.get(controller)
+    if (!scope) { scope = { active: 0, waiting: [] }; this.requestScopes.set(controller, scope) }
+    if (scope.active < 4) scope.active++
+    else await new Promise<void>(resolve => scope.waiting.push(resolve))
+    try {
+      if (controller.signal.aborted) throw controller.signal.reason
+      return await this.performRequest<T>(path, expectedKind, controller)
+    } finally {
+      const next = scope.waiting.shift()
+      if (next) next()
+      else scope.active--
+    }
+  }
+
+  private async performRequest<T>(path: string, expectedKind: string, controller = new AbortController()): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined
     let abortListener: (() => void) | undefined
     let payload: unknown
@@ -129,12 +150,14 @@ export class BffConsoleAdapter implements ConsoleDataPort {
     }
 
     if (isErrorResponse(payload)) {
-      throw new ConsoleDataError(
+      const error = new ConsoleDataError(
         payload.error.message,
         payload.error.code,
         payload.error.retryable,
         payload.meta.correlationId,
       )
+      if (error.code === 'UNAUTHENTICATED') controller.abort(error)
+      throw error
     }
 
     if (!isRecordWithKind(payload) || payload.kind !== expectedKind) {
@@ -163,36 +186,48 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       if (result.status === 'rejected') throw result.reason
       return result.value
     }) as [PlatformOverviewResponse, ClusterListResponse]
-    // Summaries omit capability references. Load only the existing detail projection
-    // needed to evaluate them; its route verdict remains reserved for the detail view.
-    const detailsPending = Promise.allSettled(clusters.data.items.map(cluster => cluster.capabilityCount === 0
-      ? Promise.resolve(undefined) : this.getCluster(cluster.id, controller)))
+    const settle = <T>(jobs: (() => Promise<T>)[]) => Promise.allSettled(jobs.map(job => job()))
     const evidenceIds = new Set([
       ...clusters.data.items.map((cluster) => cluster.evidenceId),
       ...overview.data.recentPlacements.map((placement) => placement.evidenceId),
     ])
-    let evidenceResults = await Promise.allSettled(
-      [...evidenceIds].map(async (id) => {
-        try { return await this.getEvidence(id, controller) }
-        catch (error) {
-          if (error instanceof ConsoleDataError && error.code === 'UNAUTHENTICATED') controller.abort(error)
-          throw error
-        }
-      }),
-    )
-    const detailResults = await detailsPending
+    // Interleave primary Evidence and detail requests so either authentication path
+    // can terminate a refresh even while another endpoint is hanging.
+    const jobs = clusters.data.items.flatMap(cluster => [
+      () => this.cachedCluster(cluster.id, controller),
+      () => this.getEvidence(cluster.evidenceId, controller),
+    ])
+    const placementIds = [...evidenceIds].filter(id => !clusters.data.items.some(cluster => cluster.evidenceId === id))
+    const initial = await settle<Cluster | EvidenceRef | undefined>([
+      ...jobs, ...placementIds.map(id => () => this.getEvidence(id, controller)),
+    ])
+    if (controller.signal.aborted) throw controller.signal.reason
+    const detailResults = clusters.data.items.map((_, index) => initial[index * 2] as PromiseSettledResult<Cluster | undefined>)
+    const detailFailures: string[] = []
     const details = detailResults.map((result, index) => {
       const summary = clusters.data.items[index]
-      const detail = result.status === 'fulfilled' ? result.value : undefined
-      return detail?.id === summary.id && detail.name === summary.name && detail.evidenceId === summary.evidenceId && detail.revision === summary.revision ? detail : undefined
+      if (result.status === 'rejected') {
+        detailFailures.push(result.reason instanceof ConsoleDataError ? result.reason.code : 'INTERNAL_ERROR')
+        return undefined
+      }
+      const detail = result.value
+      if (!detail) { detailFailures.push('NOT_FOUND'); return undefined }
+      if (detail.id !== summary.id || detail.name !== summary.name || detail.evidenceId !== summary.evidenceId ||
+          detail.revision !== summary.revision || detail.capabilityDetails?.length !== summary.capabilityCount) {
+        detailFailures.push('CONTRACT_INCOMPATIBLE')
+        return undefined
+      }
+      return detail
     })
-    const capabilityEvidenceIds = new Set(details.flatMap(detail => detail?.capabilityDetails?.map(item => item.evidenceId) ?? []))
-    const capabilityResults = await Promise.allSettled([...capabilityEvidenceIds].filter(id => !evidenceIds.has(id)).map(id => this.getEvidence(id, controller)))
-    evidenceResults = [...evidenceResults, ...capabilityResults]
-    for (const result of [...detailResults, ...evidenceResults]) {
-      if (result.status === 'rejected' && result.reason instanceof ConsoleDataError &&
-          (result.reason.code === 'UNAUTHENTICATED' || controller.signal.aborted)) throw result.reason
-    }
+    // These references support the visible detail capability labels, not row freshness.
+    const capabilityEvidenceIds = new Set(details.flatMap(detail => detail && this.visibleDetails.get(controller)?.has(detail.id)
+      ? detail.capabilityDetails?.map(item => item.evidenceId) ?? [] : []))
+    const capabilityResults = await settle([...capabilityEvidenceIds].filter(id => !evidenceIds.has(id)).map(id => () => this.getEvidence(id, controller)))
+    if (controller.signal.aborted) throw controller.signal.reason
+    const evidenceResults = [
+      ...clusters.data.items.map((_, index) => initial[index * 2 + 1]),
+      ...initial.slice(clusters.data.items.length * 2), ...capabilityResults,
+    ] as PromiseSettledResult<EvidenceRef | undefined>[]
     const evidence = evidenceResults
       .filter((result): result is PromiseFulfilledResult<EvidenceRef | undefined> => result.status === 'fulfilled')
       .map((result) => result.value)
@@ -209,15 +244,18 @@ export class BffConsoleAdapter implements ConsoleDataPort {
       clusterListFreshness: clusters.meta.freshness,
       warnings: [
         ...(overview.meta.warnings?.map((warning) => warning.message) ?? []),
+        ...(detailFailures.length > 0 ? [`${detailFailures.length} cluster detail${detailFailures.length === 1 ? '' : 's'} could not be loaded (${[...new Set(detailFailures)].sort().join(', ')}).`] : []),
         ...(unavailableEvidence > 0 ? [`${unavailableEvidence} evidence reference${unavailableEvidence === 1 ? '' : 's'} could not be loaded (${[...new Set(evidenceFailures)].join(', ')}).`] : []),
       ],
       overview: overview.data,
       clusters: clusters.data.items.map((cluster, index) => ({
         ...clusterFromSummary(cluster),
         capabilityDetails: details[index]?.capabilityDetails,
-        // The list verdict covers siblings. Evidence already carries envelope freshness.
-        freshness: cluster.capabilityCount > 0 && !details[index] ? 'Unknown'
-          : evidence.find(item => item?.id === cluster.evidenceId && (item.cluster === cluster.id || item.cluster === cluster.name))?.freshness ?? 'Unknown',
+        // The BFF detail verdict covers all of this cluster's Evidence, including
+        // placements and unreferenced items that the browser never loads.
+        freshness: conservativeVerdict(details[index]?.freshness,
+          evidence.find(item => item?.id === cluster.evidenceId && (item.cluster === cluster.id || item.cluster === cluster.name))?.freshness,
+          ...evidence.filter((item): item is EvidenceRef => Boolean(item && (item.cluster === cluster.id || item.cluster === cluster.name))).map(item => item.freshness)),
       })),
       capabilities: [],
       claims: overview.data.recentPlacements.map((placement) => ({
@@ -238,7 +276,25 @@ export class BffConsoleAdapter implements ConsoleDataPort {
     }
   }
 
-  async getCluster(id: string, controller = new AbortController()): Promise<Cluster | undefined> {
+  getCluster(id: string, controller = new AbortController()): Promise<Cluster | undefined> {
+    let visible = this.visibleDetails.get(controller)
+    if (!visible) { visible = new Set(); this.visibleDetails.set(controller, visible) }
+    visible.add(id)
+    return this.cachedCluster(id, controller)
+  }
+
+  private cachedCluster(id: string, controller: AbortController): Promise<Cluster | undefined> {
+    let requests = this.detailRequests.get(controller)
+    if (!requests) { requests = new Map(); this.detailRequests.set(controller, requests) }
+    let request = requests.get(id)
+    if (!request) {
+      request = this.loadCluster(id, controller)
+      requests.set(id, request)
+    }
+    return request
+  }
+
+  private async loadCluster(id: string, controller: AbortController): Promise<Cluster | undefined> {
     try {
       const response = await this.request<ClusterDetailResponse>(`/clusters/${encodeURIComponent(id)}`, 'ClusterDetail', controller)
       return { ...clusterFromDetail(response.data), freshness: response.meta.freshness }

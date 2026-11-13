@@ -88,7 +88,7 @@ it('R4 historical wording avoids last observed observation', () => {
   expect(observedText('Current observation; currently Ready', false)).toBe('last observation; previously Ready')
 })
 
-it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'outcome'] as const)('per-cluster capability Evidence %s caps its parent independently of the list', verdict => {
+it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'outcome'] as const)('per-cluster loaded capability Evidence %s constrains its parent; unloaded labels stay Unknown', verdict => {
   const data = structuredClone(platformFixture)
   Object.assign(data, { source: 'bff', freshness: 'Stale', clusterListFreshness: 'Stale' })
   const cluster = { ...data.clusters[0], freshness: 'Current' as const, readiness: 'Ready' as const,
@@ -97,7 +97,11 @@ it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'outcome'] as cons
   const cap = { ...primary, id: 'ev-cap-own', freshness: verdict === 'Stale' || verdict === 'Unknown' ? verdict : 'Current' as const,
     cluster: verdict === 'foreign' ? 'another-cluster' : cluster.name, outcome: verdict === 'outcome' ? 'Unknown' as const : 'Ready' as const }
   data.evidence = verdict === 'missing' ? [primary] : [primary, cap]
-  expect(clusterPresentation(cluster, data)).toMatchObject({ current: verdict === 'Current', verdict: verdict === 'Current' || verdict === 'Stale' ? verdict : 'Unknown' })
+  const parentCurrent = verdict === 'Current' || verdict === 'missing' || verdict === 'foreign'
+  expect(clusterPresentation(cluster, data)).toMatchObject({ current: parentCurrent, verdict: parentCurrent ? 'Current' : verdict === 'Stale' ? 'Stale' : 'Unknown' })
+  if (verdict === 'missing' || verdict === 'foreign') {
+    expect(capabilityPresentation(cluster.capabilityDetails[0], cluster, data)).toMatchObject({ current: false, verdict: 'Unknown' })
+  }
   if (verdict === 'Current') {
     expect(clusterPresentation({ ...cluster, freshness: 'Stale' }, data).verdict).toBe('Stale')
     expect(clusterPresentation({ ...cluster, freshness: 'Unknown' }, data).verdict).toBe('Unknown')

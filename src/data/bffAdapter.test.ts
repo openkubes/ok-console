@@ -218,7 +218,7 @@ it.each(['Current', 'Stale', 'Unknown'] as const)('U3 %s overview never fabricat
   expect(snapshot.evidence.some(item => /kagent|cluster.inspector/i.test(item.title))).toBe(false)
 })
 
-// List freshness is an aggregate; only cluster-scoped Evidence grants row currency.
+// List freshness is an aggregate; the matching detail route and own Evidence grant row currency.
 it.each(['mixed', 'envelope', 'missing', 'foreign'] as const)('per-cluster adapter: %s', async scenario => {
   const list = structuredClone(clusterList)
   list.meta.freshness = 'Stale'
@@ -227,6 +227,10 @@ it.each(['mixed', 'envelope', 'missing', 'foreign'] as const)('per-cluster adapt
     const url = String(input)
     if (url.endsWith('/overview')) return jsonResponse(platformOverview)
     if (url.endsWith('/clusters')) return jsonResponse(list)
+    if (url.includes('/clusters/')) {
+      const summary = list.data.items.find(item => url.endsWith(`/${item.id}`))!
+      return jsonResponse({ ...clusterDetail, meta: { ...clusterDetail.meta, freshness: scenario === 'envelope' || summary.name === 'stale' ? 'Stale' : 'Current' }, data: { ...clusterDetail.data, ...summary, capabilities: [] } })
+    }
     if (scenario === 'missing' && url.endsWith('/ev-fresh')) throw new Error('unavailable')
     const name = url.endsWith('/ev-fresh') ? 'fresh' : 'stale'
     const response = structuredClone(evidenceReference)
@@ -239,7 +243,7 @@ it.each(['mixed', 'envelope', 'missing', 'foreign'] as const)('per-cluster adapt
   expect(data.clusters.map(item => item.freshness)).toEqual(scenario === 'mixed' ? ['Current', 'Stale'] : scenario === 'envelope' ? ['Stale', 'Stale'] : scenario === 'missing' ? ['Unknown', 'Stale'] : ['Unknown', 'Unknown'])
 })
 
-it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'detail-unavailable', 'detail-foreign', 'detail-conflicting', 'detail-name', 'detail-reference', '401'] as const)('per-cluster adapter loads capability references: %s', async scenario => {
+it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'detail-unavailable', 'detail-foreign', 'detail-conflicting', 'detail-name', 'detail-reference', 'detail-count', '401'] as const)('per-cluster adapter loads capability references: %s', async scenario => {
   const list = structuredClone(clusterList)
   list.meta.freshness = 'Stale'
   list.data.items = [{ ...list.data.items[0], readiness: 'Ready', capabilityCount: 1 }]
@@ -252,7 +256,7 @@ it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'detail-unavailabl
       if (scenario === 'detail-unavailable') throw new Error('unavailable')
       return jsonResponse({ ...clusterDetail, meta: { ...clusterDetail.meta, freshness: 'Stale' }, data: {
         ...clusterDetail.data, ...cluster, id: scenario === 'detail-foreign' ? 'foreign' : cluster.id, name: scenario === 'detail-name' ? 'foreign' : cluster.name, evidenceId: scenario === 'detail-reference' ? 'foreign' : cluster.evidenceId, revision: scenario === 'detail-conflicting' ? 'different-revision' : cluster.revision,
-        capabilities: [{ ...clusterDetail.data.capabilities[0], evidenceId: 'ev-capability' }],
+        capabilities: scenario === 'detail-count' ? [] : [{ ...clusterDetail.data.capabilities[0], evidenceId: 'ev-capability' }],
       } })
     }
     const cap = url.endsWith('/ev-capability')
@@ -263,11 +267,116 @@ it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'detail-unavailabl
       clusterId: cap && scenario === 'foreign' ? 'foreign' : cluster.id,
     } })
   }) as typeof fetch
-  const pending = new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+  const adapter = new BffConsoleAdapter('/api/console/v0', fetcher)
+  const controller = new AbortController()
+  const selected = adapter.getCluster(cluster.id, controller).catch(() => undefined)
+  const pending = adapter.getSnapshot(controller)
   if (scenario === '401') { await expect(pending).rejects.toMatchObject({ code: 'UNAUTHENTICATED' }); return }
   const data = await pending
+  await selected
   expect(clusterPresentation(data.clusters[0], data)).toMatchObject({
-    current: scenario === 'Current', verdict: scenario === 'Current' || scenario === 'Stale' ? scenario : 'Unknown',
+    current: false, verdict: scenario.startsWith('detail-') || scenario === 'Unknown' ? 'Unknown' : 'Stale',
   })
   if (!scenario.startsWith('detail-')) expect(fetcher).toHaveBeenCalledWith('/api/console/v0/evidence/ev-capability', expect.anything())
+})
+
+// Zero capabilities is the hosting-cluster case from the real-BFF regressions.
+it.each(['Current', 'Stale', 'Unknown', 'absent', 'failed', 'wrong-kind', 'count', 'id', 'name', 'revision', 'reference', 'missing-verdict', 'null-verdict'] as const)('zero-capability detail verdict: %s', async scenario => {
+  const list = structuredClone(clusterList)
+  list.meta.freshness = 'Stale'
+  list.data.items = ['affected', 'sibling'].map(name => ({ ...list.data.items[0], id: `cluster-${name}`, name, evidenceId: `ev-${name}`, capabilityCount: 0, readiness: 'Ready' }))
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse({ ...platformOverview, data: { ...platformOverview.data, recentPlacements: [] } })
+    if (url.endsWith('/clusters')) return jsonResponse(list)
+    const affected = url.endsWith('affected')
+    const summary = list.data.items[affected ? 0 : 1]
+    if (url.includes('/clusters/')) {
+      if (affected && scenario === 'failed') throw new TypeError('unavailable')
+      if (affected && scenario === 'absent') return jsonResponse({ ...sourceUnavailable, error: { ...sourceUnavailable.error, code: 'NOT_FOUND' } }, 404)
+      if (affected && scenario === 'wrong-kind') return jsonResponse(evidenceReference)
+      const detail = { ...structuredClone(clusterDetail), data: { ...structuredClone(clusterDetail.data), ...summary, capabilities: [] as typeof clusterDetail.data.capabilities } }
+      detail.meta.freshness = affected && ['Stale', 'Unknown'].includes(scenario) ? scenario : 'Current'
+      if (affected) {
+        if (scenario === 'count') detail.data.capabilities.push(clusterDetail.data.capabilities[0])
+        if (scenario === 'id') detail.data.id = 'foreign'
+        if (scenario === 'name') detail.data.name = 'foreign'
+        if (scenario === 'revision') detail.data.revision = 'different'
+        if (scenario === 'reference') detail.data.evidenceId = 'foreign'
+        if (scenario === 'missing-verdict') Reflect.deleteProperty(detail.meta, 'freshness')
+        if (scenario === 'null-verdict') Object.assign(detail.meta, { freshness: null })
+      }
+      return jsonResponse(detail)
+    }
+    return jsonResponse({ ...evidenceReference, meta: { ...evidenceReference.meta, freshness: 'Current' }, data: { ...evidenceReference.data, id: summary.evidenceId, clusterId: summary.id } })
+  }) as typeof fetch
+  const data = await new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot()
+  const verdict = scenario === 'Current' || scenario === 'Stale' ? scenario : 'Unknown'
+  expect(data.clusters.map(cluster => clusterPresentation(cluster, data).verdict)).toEqual([verdict, 'Current'])
+  expect(data.clusters.map(cluster => cluster.freshness)).toEqual([verdict, 'Current'])
+  expect(fetcher).toHaveBeenCalledWith('/api/console/v0/clusters/cluster-affected', expect.anything())
+  const code = scenario === 'absent' ? 'NOT_FOUND' : scenario === 'failed' ? 'NETWORK_ERROR' : 'CONTRACT_INCOMPATIBLE'
+  if (!['Current', 'Stale', 'Unknown'].includes(scenario)) expect(data.warnings).toContain(`1 cluster detail could not be loaded (${code}).`)
+  if (['Current', 'Stale', 'Unknown'].includes(scenario)) expect(data.warnings?.filter(item => item.includes('cluster detail'))).toEqual([])
+})
+
+it.each(['http', 'contract'] as const)('detail %s UNAUTHENTICATED aborts hanging siblings and queued requests', async mode => {
+  const controller = new AbortController()
+  const list = structuredClone(clusterList)
+  list.data.items = Array.from({ length: 12 }, (_, i) => ({ ...list.data.items[0], id: `cluster-${i}`, evidenceId: `ev-${i}`, capabilityCount: 0 }))
+  const started: string[] = []
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse(platformOverview)
+    if (url.endsWith('/clusters')) return jsonResponse(list)
+    started.push(url)
+    if (url.endsWith('/clusters/cluster-0')) return mode === 'http' ? new Response('not json', { status: 401 }) : jsonResponse({ ...sourceUnavailable, error: { code: 'UNAUTHENTICATED', message: 'Sign in again.', retryable: false } }, 403)
+    return new Promise<Response>(() => {})
+  }) as typeof fetch
+  await expect(new BffConsoleAdapter('/api/console/v0', fetcher).getSnapshot(controller)).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+  expect(controller.signal.aborted).toBe(true)
+  expect(started.length).toBeLessThanOrEqual(4)
+})
+
+it('bounds detail and capability Evidence concurrency and reuses detail only within a refresh', async () => {
+  const list = structuredClone(clusterList)
+  list.data.items = Array.from({ length: 9 }, (_, i) => ({ ...list.data.items[0], id: `cluster-${i}`, name: `cluster-${i}`, evidenceId: `ev-${i}`, capabilityCount: 2 }))
+  const overview = { ...platformOverview, data: { ...platformOverview.data, recentPlacements: [] } }
+  let active = 0
+  let peak = 0
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/overview')) return jsonResponse(overview)
+    if (url.endsWith('/clusters')) return jsonResponse(list)
+    active++; peak = Math.max(active, peak)
+    await new Promise(resolve => setTimeout(resolve, 1))
+    active--
+    if (url.includes('/clusters/')) {
+      const summary = list.data.items.find(item => url.endsWith(`/${item.id}`))!
+      return jsonResponse({ ...clusterDetail, meta: { ...clusterDetail.meta, freshness: 'Current' }, data: { ...clusterDetail.data, ...summary, capabilities: [0, 1].map(i => ({ ...clusterDetail.data.capabilities[0], id: `cap-${i}`, evidenceId: `${summary.evidenceId}-cap-${i}` })) } })
+    }
+    const id = url.split('/').at(-1)!
+    const summary = list.data.items.find(item => id.startsWith(item.evidenceId))!
+    return jsonResponse({ ...evidenceReference, meta: { ...evidenceReference.meta, freshness: 'Current' }, data: { ...evidenceReference.data, id, clusterId: summary.id } })
+  }) as typeof fetch
+  const adapter = new BffConsoleAdapter('/api/console/v0', fetcher)
+  const scope = new AbortController()
+  const [data, selected] = await Promise.all([adapter.getSnapshot(scope), adapter.getCluster('cluster-8', scope)])
+  expect(data.clusters.every(item => clusterPresentation(item, data).current)).toBe(true)
+  expect(selected?.id).toBe('cluster-8')
+  expect(peak).toBe(4)
+  expect(data.evidence).toHaveLength(11)
+  expect(vi.mocked(fetcher).mock.calls.filter(([url]) => String(url).endsWith('/clusters/cluster-8'))).toHaveLength(1)
+  const next = await adapter.getSnapshot(new AbortController())
+  expect(next.evidence).toHaveLength(9)
+  expect(next.clusters.every(item => clusterPresentation(item, next).current)).toBe(true)
+  expect(vi.mocked(fetcher).mock.calls.filter(([url]) => String(url).endsWith('/clusters/cluster-8'))).toHaveLength(2)
+})
+
+it('contract detail denial aborts the refresh before releasing its request slot', async () => {
+  const controller = new AbortController()
+  const fetcher = vi.fn(async () => jsonResponse({ ...sourceUnavailable, error: { code: 'UNAUTHENTICATED', message: 'Sign in again.', retryable: false } }, 403)) as typeof fetch
+  await expect(new BffConsoleAdapter('/api/console/v0', fetcher).getCluster('cluster-test', controller)).rejects.toMatchObject({ code: 'UNAUTHENTICATED' })
+  expect(controller.signal.aborted).toBe(true)
+  expect(controller.signal.reason).toMatchObject({ code: 'UNAUTHENTICATED' })
 })

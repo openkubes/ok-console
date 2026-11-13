@@ -124,9 +124,9 @@ The `postgres` mode is atomic: process startup creates the PostgreSQL store,
 installs session-backed point-of-use authorization, and configures exact-Origin
 CSRF checks together. Missing or invalid inputs stop startup. Configure the
 observed-state source explicitly with `OK_CONSOLE_OBSERVED_STATE_MODE=fixture|openkubes`;
-there is no implicit source default for the PostgreSQL runtime, and an unset or
-empty value stops startup before resources are created. Disabled prototype
-sessions retain their fixture default. Configure the
+there is no implicit source default for the PostgreSQL runtime, and an unset,
+empty or any other value stops startup before resources are created. Disabled
+prototype sessions retain their fixture default. Configure the
 non-secret values and mount the database URL, CA certificate, and envelope keys
 as files as shown in `.env.example`. The key file is a bounded JSON object whose
 values are base64-encoded 32-byte AES keys; keep old keys present while their
@@ -395,9 +395,9 @@ deployment exercises rather than runtime fallbacks.
 
 ### Known limitation: global sourceRevision
 
-Every response carries the producer's global `sourceRevision`, so a tenant can
-observe when another tenant's objects change (timing only; no object, ID or count
-is revealed). Reopen if (i) any response starts carrying per-object/per-tenant
+Every observed-state response carries the producer's global `sourceRevision`, so
+a tenant can observe when another tenant's objects change (timing only; no object,
+ID or count is revealed). Reopen if (i) any response starts carrying per-object/per-tenant
 revision or count data derived from other tenants, (ii) `sourceRevision` becomes
 derivable into object identity/count, or (iii) a deployment requires tenant-level
 change-timing confidentiality.

@@ -251,7 +251,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     const throttle = new PostgresLocalAccessThrottle({ pool: limitedPool, pepper: Buffer.alloc(32, 5) })
     const { verify, derive, create, audit } = localVerifier(throttle)
     const locker = await pool.connect()
-    const handler = createLocalAccessHttpHandler({ audit: vi.fn(), verifier: verify, expectedOrigin: 'https://console.invalid' })
+    const handler = createLocalAccessHttpHandler({ method: 'Bootstrap', audit: vi.fn(), verifier: verify, expectedOrigin: 'https://console.invalid' })
     const server = createServer((request, response) => {
       void handler({ request, response, pathname: '/api/console/v0/auth/local', correlationId: 'lock-test' })
     })

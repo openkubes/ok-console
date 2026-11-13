@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { consoleData } from './data/consoleData'
 import { BffConsoleAdapter } from './data/bffAdapter'
@@ -17,6 +17,7 @@ const auth: ConsoleAuthClient = {
   mode: 'oidc', restoreSession: vi.fn(async () => ({ method: 'oidc' as const, identity: 'Freshness Viewer', source: 'test', assurance: 'Federated', expiresIn: '1h' })),
   startOidc: vi.fn(), authenticateLocal: vi.fn(), logout: vi.fn(),
 }
+beforeEach(() => { vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] }) })
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 const historyNote = /Earlier answer, based on data observed at/
 function textOf(scope: ParentNode) {
@@ -81,7 +82,7 @@ async function mount(view = 'overview', verdict: Freshness = 'Current', options:
   vi.spyOn(consoleData, 'getCluster').mockImplementation(id => adapter.getCluster(id))
   const result = render(<App auth={auth}/>)
   await act(async () => {})
-  screen.getByRole('heading', { name: view === 'overview' ? 'Hello Freshness' : view === 'agents' ? 'AI Agents' : view === 'clusters' || view === 'detail' ? 'Clusters' : 'Evidence & Audit' })
+  screen.getByRole('heading', { name: view === 'overview' ? 'Hello Freshness' : view === 'agents' ? 'AI Agents' : view === 'clusters' || view === 'detail' ? 'Clusters' : view === 'workloads' ? 'Workloads' : 'Evidence & Audit' })
   if (view === 'detail') {
     fireEvent.click(screen.getByRole('button', { name: `Open ${c.data.items[0].name}` }))
     await act(async () => {})
@@ -179,7 +180,14 @@ for (const option of ['readiness', 'outcome'] as const) {
 
 async function timers() { vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance'] }) }
 async function advance(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms) }) }
-function navigate() { act(() => { window.dispatchEvent(new HashChangeEvent('hashchange')) }) }
+async function navigate(event = 'hashchange') {
+  // Automatic navigation refreshes are due only after the last successful request.
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  await advance(30_001)
+  visibility.mockReturnValue('visible')
+  act(() => { (event === 'visibilitychange' ? document : window).dispatchEvent(new Event(event)) })
+  await act(async () => {})
+}
 
 it('polls at 30 seconds while visible; failures immediately retain only Last observed; recovery restores currency', async () => {
   await timers()
@@ -209,7 +217,7 @@ it('ceiling starts at initiation, including a slow successful fetch', async () =
   const { getSnapshot, snapshot } = await mount()
   let resolve!: (snapshot: PlatformSnapshot) => void
   getSnapshot.mockImplementationOnce(() => new Promise(done => { resolve = done }))
-  navigate()
+  await navigate()
   getSnapshot.mockImplementation(() => new Promise<PlatformSnapshot>(() => {}))
   await advance(60_001)
   await act(async () => { resolve(snapshot) })
@@ -219,41 +227,43 @@ it('hash navigation and visibility return refresh; hidden tabs do not poll', asy
   await timers()
   const { getSnapshot } = await mount()
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
-  await advance(30_000)
+  await advance(30_001)
   expect(getSnapshot).toHaveBeenCalledTimes(1)
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
   fireEvent(document, new Event('visibilitychange'))
   await act(async () => {})
   expect(getSnapshot).toHaveBeenCalledTimes(2)
-  navigate(); await act(async () => {})
+  await navigate(); await act(async () => {})
   expect(getSnapshot).toHaveBeenCalledTimes(3)
 })
 for (const late of ['success', 'failure'] as const) {
-  it(`discards an older ${late} completion after a newer success`, async () => {
+  it(`automatic events cannot overlap an in-flight ${late} completion`, async () => {
     const { getSnapshot, snapshot } = await mount()
     let resolve!: (snapshot: PlatformSnapshot) => void
     let reject!: (error: Error) => void
     getSnapshot.mockImplementationOnce(() => new Promise((done, fail) => { resolve = done; reject = fail }))
-    navigate()
-    navigate(); await act(async () => {})
+    await navigate()
+    await navigate(); await act(async () => {})
     await act(async () => { if (late === 'success') resolve({ ...snapshot, freshness: 'Stale' }); else reject(new Error('older failure')) })
     await act(async () => {})
-    fresh(document.querySelector('.snapshot')!)
+    expect(getSnapshot).toHaveBeenCalledTimes(2)
+    noCurrency(document.querySelector('.snapshot')!)
   })
 }
-it('older success cannot overwrite a newer failed refresh', async () => {
+it('a later failed refresh demotes an earlier successful completion', async () => {
   const { getSnapshot, snapshot } = await mount()
   let resolve!: (snapshot: PlatformSnapshot) => void
   getSnapshot.mockImplementationOnce(() => new Promise(done => { resolve = done })).mockRejectedValueOnce(new Error('newer failure'))
-  navigate(); navigate(); await act(async () => {})
+  await navigate()
   await act(async () => { resolve(snapshot) })
+  await navigate()
   noCurrency()
 })
 it('detail cap only clears for Evidence in a snapshot requested after detail arrived', async () => {
   const { getSnapshot, snapshot, cluster } = await mount('clusters')
   let resolve!: (snapshot: PlatformSnapshot) => void
   getSnapshot.mockImplementationOnce(() => new Promise(done => { resolve = done }))
-  navigate()
+  await navigate()
   vi.spyOn(consoleData, 'getCluster').mockResolvedValue({ ...snapshot.clusters[0], freshness: 'Stale' })
   fireEvent.click(screen.getByRole('button', { name: `Open ${cluster.name}` }))
   await act(async () => {})
@@ -261,14 +271,14 @@ it('detail cap only clears for Evidence in a snapshot requested after detail arr
   noCurrency(document.querySelector('.evidence-card')!)
   vi.mocked(consoleData.getCluster).mockResolvedValue({ ...snapshot.clusters[0], freshness: 'Current' })
   // A fresh snapshot and re-requested detail recover together.
-  fireEvent(document, new Event('visibilitychange'))
-  await waitFor(() => fresh(document.querySelector('.evidence-card')!))
+  await navigate('visibilitychange')
+  fresh(document.querySelector('.evidence-card')!)
 })
 it('failed refetch demotes an already-open drawer and retains widget answers as history', async () => {
   const { getSnapshot } = await mount('drawer')
   widget(); fresh()
   getSnapshot.mockRejectedValueOnce(new Error('offline'))
-  navigate(); await act(async () => {})
+  await navigate(); await act(async () => {})
   noCurrency()
   expect(screen.getAllByText(historyNote)[0]).toBeVisible()
 })
@@ -276,7 +286,7 @@ it('Overview deduplicates affected clusters and placements by id', async () => {
   const { getSnapshot, snapshot } = await mount('overview', 'Stale', { mixed: true })
   const duplicated = { ...snapshot, clusters: [...snapshot.clusters, ...snapshot.clusters], claims: [...snapshot.claims, ...snapshot.claims] }
   getSnapshot.mockResolvedValueOnce(duplicated)
-  navigate(); await act(async () => {})
+  await navigate(); await act(async () => {})
   expect(document.querySelector('.snapshot')).toHaveTextContent('1 item stale, 1 unavailable')
 })
 
@@ -307,14 +317,14 @@ it('Unknown Detail cap survives a newer Stale snapshot; only later Current Evide
   await act(async () => {})
   const staleEvidence = { ...snapshot, evidence: snapshot.evidence.map(item => ({ ...item, freshness: 'Stale' as const })) }
   getSnapshot.mockResolvedValueOnce(staleEvidence)
-  fireEvent(document, new Event('visibilitychange')); await act(async () => {})
+  await navigate('visibilitychange')
   expect(document.querySelector('.evidence-card')).toHaveTextContent('Observation unavailable')
   vi.mocked(consoleData.getCluster).mockResolvedValue({ ...snapshot.clusters[0], freshness: 'Current' })
   getSnapshot.mockResolvedValueOnce(snapshot)
-  fireEvent(document, new Event('visibilitychange')); await act(async () => {})
+  await navigate('visibilitychange')
   fresh(document.querySelector('.evidence-card')!)
   getSnapshot.mockResolvedValueOnce(staleEvidence)
-  fireEvent(document, new Event('visibilitychange')); await act(async () => {})
+  await navigate('visibilitychange')
   expect(document.querySelector('.evidence-card')).toHaveTextContent('Last observed')
   expect(document.querySelector('.evidence-card')).not.toHaveTextContent('Observation unavailable')
 })
@@ -322,8 +332,7 @@ it('Unknown Detail cap survives a newer Stale snapshot; only later Current Evide
 it('ceiling timeout demotes between poll ticks after a navigation refresh', async () => {
   await timers()
   const { getSnapshot } = await mount()
-  await advance(1_000)
-  navigate(); await act(async () => {})
+  await navigate(); await act(async () => {})
   widget(); fresh()
   getSnapshot.mockImplementation(() => new Promise<PlatformSnapshot>(() => {}))
   await advance(59_999); fresh()
@@ -383,14 +392,14 @@ it('R3 polling stops at four minutes idle, focus does not restart it, and input 
   await advance(30_000)
   expect(getSnapshot).toHaveBeenCalledTimes(stopped + 2)
 })
-it('R3 one in-flight refresh coalesces many triggers into one follow-up', async () => {
+it('R2 automatic trigger bursts never queue a follow-up while a refresh is in flight', async () => {
   const { getSnapshot, snapshot } = await mount()
   let resolve!: (value: PlatformSnapshot) => void
   getSnapshot.mockImplementationOnce(() => new Promise(done => { resolve = done }))
-  navigate(); navigate(); navigate()
+  await navigate(); await navigate(); await navigate()
   expect(getSnapshot).toHaveBeenCalledTimes(2)
   await act(async () => { resolve(snapshot) })
-  expect(getSnapshot).toHaveBeenCalledTimes(3)
+  expect(getSnapshot).toHaveBeenCalledTimes(2)
 })
 it('R3 Retry clears the error, renders loading, and double-click cannot overlap', async () => {
   window.history.replaceState(null, '', '#/overview')
@@ -438,7 +447,7 @@ it.each(['focus', 'online', 'visibilitychange'])('R3 %s demotes on a wall-clock 
 it('R3 mutable Overview remains Current with immutable receipts present', async () => {
   const { snapshot, getSnapshot } = await mount()
   getSnapshot.mockResolvedValueOnce({ ...snapshot, evidence: [...snapshot.evidence, { ...snapshot.evidence[0], id: 'receipt', immutable: true, freshness: 'Stale' }] })
-  navigate(); await act(async () => {})
+  await navigate(); await act(async () => {})
   fresh(document.querySelector('.snapshot')!)
   expect(screen.getByText(/Immutable Evidence receipts are retained separately/)).toBeVisible()
 })
@@ -548,4 +557,92 @@ it('integration non-observation chips never reuse the live observation dot', asy
   expect(document.querySelector('.fixture-label .live-dot')).toBeNull()
   expect(screen.getByText('NVKE-managed Kubernetes cluster · simulated')).toBeVisible()
   expect(screen.getByText('Unverified demo metadata')).toBeVisible()
+})
+
+it.each(['Stale', 'Unknown'] as const)('R2 B1 %s list shows Unknown rows and zero Ready in filter chips', async freshness => {
+  await mount('clusters', 'Current', { clusters: freshness })
+  expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Unknown$/)
+  expect(screen.getByRole('button', { name: 'Ready · 0' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Attention · 1' })).toBeVisible()
+})
+it('R2 B1 current Ready row is counted by the chip', async () => {
+  await mount('clusters')
+  expect(document.querySelector('.table-row .status')).toHaveTextContent(/^Ready$/)
+  expect(screen.getByRole('button', { name: 'Ready · 1' })).toBeVisible()
+})
+
+it.each(['Current', 'Stale', 'Unknown', 'missing', 'foreign', 'collision', 'immutable', 'Unknown outcome', 'Stale Unknown placement', 'Stale snapshot', 'Unknown snapshot'] as const)('R2 B2 replicas use only the placement own presented Evidence: %s', async basis => {
+  const { snapshot, getSnapshot } = await mount('workloads')
+  const cluster = snapshot.clusters[0]
+  const own = { ...snapshot.evidence[0], id: 'placement-evidence', cluster: cluster.id, revision: 'deployment:v2;replicas:2/2', freshness: basis === 'Stale Unknown placement' ? 'Stale' as const : basis === 'Stale' || basis === 'Unknown' ? basis : 'Current' as const, outcome: basis === 'Unknown outcome' ? 'Unknown' as const : 'Ready' as const, immutable: basis === 'immutable' }
+  const foreign = { ...own, cluster: 'foreign-cluster', revision: 'deployment:v9;replicas:9/9', freshness: 'Current' as const }
+  const next: PlatformSnapshot = { ...snapshot, freshness: basis === 'Stale snapshot' ? 'Stale' : basis === 'Unknown snapshot' ? 'Unknown' : snapshot.freshness, claims: [{ id: 'deployment', name: 'Replica test', kind: 'Observed Deployment', owner: 'test', intent: '', targetCluster: cluster.name, readiness: basis === 'Stale Unknown placement' ? 'Unknown' : 'Ready', requiredCapabilities: [], decision: '', evidenceId: own.id }], evidence: basis === 'missing' ? [] : basis === 'foreign' ? [foreign] : basis === 'collision' ? [foreign, own] : [own] }
+  getSnapshot.mockResolvedValue(next)
+  await navigate()
+  const line = document.querySelector('.claim-card .decision')!
+  if (basis === 'Current' || basis === 'collision') {
+    expect(line).toHaveTextContent('Available / desired replicas2/2')
+  } else if (basis === 'Stale' || basis === 'Stale Unknown placement' || basis === 'Stale snapshot') {
+    expect(line).toHaveTextContent('Last observed2/2')
+    expect(line).not.toHaveTextContent('Available / desired replicas')
+  } else {
+    expect(line).toHaveTextContent('Observation unavailable - readiness Unknown')
+    expect(line.querySelector('strong')).toHaveTextContent(/^Unknown$/)
+    expect(line).not.toHaveTextContent(/2\/2|9\/9|Available \/ desired replicas/)
+  }
+  expect(line).not.toHaveTextContent('9/9')
+})
+
+it('R2 RT1 new shell commands use refreshed lifecycle and revision; earlier output remains historical', async () => {
+  const { snapshot, getSnapshot } = await mount('detail')
+  fireEvent.click(screen.getByRole('button', { name: 'Open Shell' }))
+  const input = screen.getByRole('textbox', { name: 'Command or question' })
+  const run = (value: string) => {
+    fireEvent.change(input, { target: { value } })
+    fireEvent.submit(input.closest('form')!)
+  }
+  run('evidence')
+  run('kubectl get clusterconditions -o wide')
+  const previous = [...document.querySelectorAll('.terminal-entry.terminal-output, .terminal-entry.terminal-ai')]
+  const cluster = { ...snapshot.clusters[0], readiness: 'Failed' as const, revision: 'producer-revision-r2', lifecycle: [{ label: 'Nodes', state: 'Failed' as const, detail: 'New producer node failure' }] }
+  getSnapshot.mockResolvedValue({ ...snapshot, clusters: [cluster], evidence: snapshot.evidence.map(e => ({ ...e, outcome: 'Failed' as const })) })
+  vi.mocked(consoleData.getCluster).mockResolvedValue(cluster)
+  await advance(30_000)
+  run('evidence')
+  expect(document.querySelector('.terminal-entry:last-child')).toHaveTextContent('REVISION producer-revision-r2')
+  expect(document.querySelector('.terminal-entry:last-child')).toHaveTextContent('READINESS Failed (Current observation)')
+  run('kubectl get clusterconditions -o wide')
+  expect(document.querySelector('.terminal-entry:last-child')).toHaveTextContent(/Nodes\s+Failed\s+New producer node failure/)
+  run('why')
+  expect(document.querySelector('.terminal-ai')).toHaveTextContent('Nodes: Failed — New producer node failure')
+  expect(previous.length).toBeGreaterThan(0)
+  for (const entry of previous) {
+    expect(entry).toHaveTextContent('Earlier output, based on data observed at')
+    noCurrency(entry)
+    expect(entry).not.toHaveTextContent('producer-revision-r2')
+  }
+})
+
+it('R2 S2 failed refresh retains aged data and shows a bounded reason, correlation id and working retry', async () => {
+  const { getSnapshot } = await mount()
+  const { ConsoleDataError } = await import('./data/bffAdapter')
+  getSnapshot.mockRejectedValueOnce(new ConsoleDataError('Producer refresh unavailable. ' + 'x'.repeat(500), 'SOURCE_UNAVAILABLE', true, 'r2-correlation'))
+  await advance(30_000)
+  const alert = screen.getByRole('alert')
+  expect(alert).toHaveTextContent('Observation refresh failed')
+  expect(alert).toHaveTextContent('Producer refresh unavailable.')
+  expect(alert).toHaveTextContent('Correlation ID r2-correlation')
+  expect(alert.textContent!.length).toBeLessThan(400)
+  expect(screen.getByRole('heading', { name: 'Hello Freshness' })).toBeVisible()
+  noCurrency(document.querySelector('.snapshot')!)
+  fireEvent.click(screen.getByRole('button', { name: 'Retry safely' }))
+  await act(async () => {})
+  expect(getSnapshot).toHaveBeenCalledTimes(3)
+  expect(screen.queryByRole('alert')).toBeNull()
+  fresh(document.querySelector('.snapshot')!)
+})
+
+it('R2 N1 fixture Overview header has one Fixture snapshot label', async () => {
+  await mount('overview', 'Current', { fixture: true })
+  expect(document.querySelector('.snapshot')!.textContent!.match(/Fixture snapshot/g)).toHaveLength(1)
 })

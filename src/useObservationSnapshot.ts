@@ -37,10 +37,11 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
     let active = true // This closure is a session epoch; all callbacks check it.
     let generation = 0
     let inFlight = false
-    let pending: 'auto' | 'user' | undefined
+    let pending: 'user' | undefined
     let lastInput = performance.now()
     let idle = false
     let lastSuccess = -Infinity
+    let lastStarted = -Infinity
     let lastWallStart = -Infinity
     let lastDetailWallStart = -Infinity
     let controller: AbortController | undefined
@@ -68,13 +69,13 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
     const refresh = (kind: 'auto' | 'user' | 'retry' = 'user') => {
       if (!active || (kind === 'auto' && idle)) return
       if (inFlight) {
-        if (kind !== 'retry') pending = kind === 'user' || pending === 'user' ? 'user' : 'auto'
+        if (kind === 'user') pending = 'user'
         return
       }
       inFlight = true
       pending = undefined
       const request = ++generation
-      const startedAt = performance.now()
+      const startedAt = lastStarted = performance.now()
       const wallStart = Date.now()
       const cluster = selectedRef.current
       const selection = selectionEpoch.current.value
@@ -118,10 +119,12 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
       setTick(value => value + 1)
     }
     checkWallRef.current = checkWall
-    const visibleRefresh = () => { checkWall(); if (document.visibilityState === 'visible') refresh('auto') }
+    const visibleRefresh = () => {
+      checkWall()
+      if (document.visibilityState === 'visible' && performance.now() - Math.max(lastSuccess, lastStarted) > SNAPSHOT_POLL_MS) refresh('auto')
+    }
     const stopIdle = () => {
       idle = true
-      if (pending === 'auto') pending = undefined
     }
     const armIdle = () => { window.clearTimeout(idleTimer); idleTimer = window.setTimeout(stopIdle, USER_INPUT_IDLE_MS) }
     armIdle()
@@ -131,13 +134,12 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
       lastInput = performance.now()
       const wasIdle = idle
       idle = false
-      if (wasIdle && performance.now() - lastSuccess > SNAPSHOT_POLL_MS) refresh()
+      if (wasIdle && !inFlight && performance.now() - lastSuccess > SNAPSHOT_POLL_MS) refresh()
     }
     poll = window.setInterval(() => {
       checkWall()
       if (performance.now() - lastInput >= USER_INPUT_IDLE_MS) {
         idle = true
-        if (pending === 'auto') pending = undefined
       }
       if (!idle && document.visibilityState === 'visible') refresh('auto')
     }, SNAPSHOT_POLL_MS)
@@ -200,11 +202,11 @@ export function useObservationSnapshot(enabled: boolean, selected?: Cluster, onS
   }
   const summary = data?.clusters.find(item => item.id === selected?.id)
   const loadedDetail = detail?.data.id === selected?.id ? detail : undefined
-  const basis = loadedDetail?.data ?? selected
+  const basis = loadedDetail && result && loadedDetail.startedAt >= result.startedAt ? loadedDetail.data : summary ?? loadedDetail?.data ?? selected
   const effectiveDetail = basis && data && {
     ...basis,
     readiness: loadedDetail && result && loadedDetail.startedAt >= result.startedAt ? basis.readiness : summary?.readiness ?? basis.readiness,
-    freshness: conservativeVerdict(basis.freshness, summary?.freshness, basis.readiness === 'Unknown' || summary?.readiness === 'Unknown' ? 'Unknown' : 'Current', detailAged ? 'Stale' : 'Current'),
+    freshness: conservativeVerdict(basis.freshness, loadedDetail?.data.freshness ?? basis.freshness, summary?.freshness, basis.readiness === 'Unknown' || loadedDetail?.data.readiness === 'Unknown' || summary?.readiness === 'Unknown' ? 'Unknown' : 'Current', detailAged ? 'Stale' : 'Current'),
   }
   const snapshotCurrent = !!data && [data.freshness, data.clusterListFreshness, ...data.clusters.map(item => item.freshness), ...data.evidence.map(item => item.freshness)].includes('Current')
   const detailCurrent = effectiveDetail?.freshness === 'Current'

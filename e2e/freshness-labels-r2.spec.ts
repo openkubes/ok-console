@@ -54,21 +54,25 @@ for (const mechanism of ['server ageing', 'browser ceiling'] as const) {
   test(`${mechanism}: hash navigation downgrades Overview, Clusters, Detail, Evidence, drawer and widget`, async ({ page }) => {
     const bff = await clockBff(page)
     try {
-      if (mechanism === 'browser ceiling') await page.clock.install()
+      await page.clock.install()
       await signInPrototype(page)
       const shared = page.locator('.cluster-card').filter({ hasText: 'ok-shared' })
       await expect(shared).toContainText('Current observation')
       await expect(shared.locator('.live-dot')).toHaveCount(1)
       await page.getByRole('button', { name: /Ask OK AI/ }).click()
       await page.getByRole('button', { name: 'Platform status', exact: true }).click()
+      await page.clock.pauseAt(new Date(Date.now() + 1000))
       if (mechanism === 'server ageing') {
         const before = bff.requests()
         bff.advance()
+        // Navigation shares the same successful-refresh gate as tab-return events.
+        await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }))
+        await page.clock.runFor(30_001)
+        await page.evaluate(() => Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }))
         await navigate(page, 'clusters')
         await expect.poll(bff.requests).toBeGreaterThan(before)
         await noCurrency(page)
       } else {
-        await page.clock.pauseAt(new Date(Date.now() + 1000))
         bff.block()
         // Keep every refresh unresolved and advance only the browser monotonic clock.
         await page.clock.runFor(60_001)

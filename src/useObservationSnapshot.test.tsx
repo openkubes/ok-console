@@ -233,3 +233,65 @@ it('R6 a forward wall gap demotes within one second with performance frozen', as
   await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
   expect(renders).toBe(demoted)
 })
+
+it.each(['success', 'failure'] as const)('R2 S1 tab return burst issues one overview request after %s', async completion => {
+  vi.useFakeTimers()
+  const { BffConsoleAdapter } = await import('./data/bffAdapter')
+  const overview = (await import('../contracts/presentation/v0alpha1/examples/platform-overview.json')).default
+  const clusters = (await import('../contracts/presentation/v0alpha1/examples/cluster-list.json')).default
+  const evidence = (await import('../contracts/presentation/v0alpha1/examples/evidence-reference.json')).default
+  const requests = vi.fn(async (url: RequestInfo | URL) => new Response(JSON.stringify(String(url).endsWith('/overview') ? overview : String(url).endsWith('/clusters') ? clusters : evidence)))
+  const adapter = new BffConsoleAdapter('/api/console/v0', requests as typeof globalThis.fetch)
+  const fetch = vi.spyOn(consoleData, 'getSnapshot').mockImplementation(scope => adapter.getSnapshot(scope))
+  renderHook(() => useObservationSnapshot(true))
+  await act(async () => {})
+  const overviewRequests = () => requests.mock.calls.filter(([url]) => String(url).endsWith('/overview')).length
+  expect(overviewRequests()).toBe(1)
+  const visible = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_001) })
+  visible.mockReturnValue('visible')
+  let resolve!: () => void
+  let reject!: (cause: Error) => void
+  fetch.mockImplementationOnce(async scope => {
+    const data = await adapter.getSnapshot(scope)
+    return new Promise<PlatformSnapshot>((done, fail) => { resolve = () => done(data); reject = fail })
+  })
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('hashchange'))
+    window.dispatchEvent(new Event('online'))
+  })
+  expect(overviewRequests()).toBe(2)
+  await act(async () => { if (completion === 'success') resolve(); else reject(new Error('offline')) })
+  // Even events delivered after completion belong to the same return burst.
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('online'))
+    window.dispatchEvent(new Event('hashchange'))
+  })
+  expect(overviewRequests()).toBe(2)
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+  expect(overviewRequests()).toBe(2)
+})
+
+it.each(['Current', 'Stale', 'Unknown'] as const)('R2 RT1 newer snapshot supplies lifecycle and revision while its %s detail is pending', async detailFreshness => {
+  vi.useFakeTimers()
+  const data = snapshot()
+  const initial = { ...data.clusters[0], readiness: 'Ready' as const, freshness: 'Current' as const, revision: 'old-revision', lifecycle: [{ label: 'Nodes', state: 'Ready' as const, detail: 'Old nodes' }] }
+  data.clusters = [initial]
+  const fetch = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
+  const detailFetch = vi.spyOn(consoleData, 'getCluster').mockResolvedValue({ ...initial, freshness: detailFreshness })
+  const { result } = renderHook(() => useObservationSnapshot(true, initial))
+  await act(async () => {})
+  const next = { ...initial, readiness: 'Failed' as const, revision: 'new-revision', lifecycle: [{ label: 'Nodes', state: 'Failed' as const, detail: 'New nodes' }] }
+  fetch.mockResolvedValue({ ...data, clusters: [next] })
+  let resolve!: (cluster: Cluster) => void
+  detailFetch.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+  expect(result.current.detail?.revision).toBe('new-revision')
+  expect(result.current.detail?.lifecycle).toEqual(next.lifecycle)
+  expect(result.current.detail?.freshness).toBe(detailFreshness)
+  await act(async () => { resolve({ ...next, revision: 'new-detail-revision' }) })
+  expect(result.current.detail?.revision).toBe('new-detail-revision')
+})

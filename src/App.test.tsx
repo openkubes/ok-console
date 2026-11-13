@@ -438,7 +438,7 @@ describe('OpenKubes Console', () => {
     }
   })
 
-  it.each(['resolved', 'rejected'] as const)('keeps shell lifecycle session-scoped when BFF detail is %s', async (status) => {
+  it.each(['resolved', 'rejected'] as const)('uses the latest effective cluster for new shell commands when BFF detail is %s', async (status) => {
     dataMode.value = 'bff'
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
@@ -472,20 +472,24 @@ describe('OpenKubes Console', () => {
       fireEvent.click(shell.getByRole('button', { name: 'ok evidence explain' }))
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'ok evidence explain'),
-        entry('ai', `This shell session holds readiness Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'}) for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.`),
+        entry('ai', status === 'resolved'
+          ? 'This shell session holds readiness Unknown (last observed Failed) for ok-mgmt. Its 1 lifecycle stage(s) all report Ready; stages do not establish overall readiness.'
+          : 'This shell session holds readiness Unknown (last observed Ready) for ok-mgmt. This shell session holds no lifecycle detail for ok-mgmt.'),
         proposal,
       ])
       shell.run('clear')
       fireEvent.click(shell.getByRole('button', { name: 'kubectl get clusterconditions -o wide' }))
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'kubectl get clusterconditions -o wide'),
-        entry('blocked', 'UNAVAILABLE · This shell session holds no lifecycle detail for ok-mgmt.'),
+        status === 'resolved'
+          ? entry('output', 'This shell session holds the following lifecycle snapshot (Unknown (last observed Failed)):\nControl plane      Ready    Endpoint observed through the management plane')
+          : entry('blocked', 'UNAVAILABLE · This shell session holds no lifecycle detail for ok-mgmt.'),
       ])
       shell.run('clear')
       shell.run('evidence')
       expect(shellEntries(shell.log)).toEqual([
         entry('command', 'evidence'),
-        entry('output', `This shell session holds the following evidence snapshot:\nEVIDENCE     ev-mgmt-ready\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     rev-7d2a9c\nREADINESS    Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'})\nSOURCE       bff`),
+        entry('output', `This shell session holds the following evidence snapshot:\nEVIDENCE     ${status === 'resolved' ? 'ev-ai-ready' : 'ev-mgmt-ready'}\nCONTRACT     platform.openkubes.io/v1alpha1\nREVISION     ${status === 'resolved' ? 'rev-new' : 'rev-7d2a9c'}\nREADINESS    Unknown (last observed ${status === 'resolved' ? 'Failed' : 'Ready'})\nSOURCE       bff`),
       ])
     } finally {
       release()

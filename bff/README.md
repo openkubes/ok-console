@@ -361,7 +361,7 @@ and redirects are rejected. HTTPS sources require an explicit CA plus a client
 certificate/private-key pair from bounded mounted files. The client verifies
 the producer DNS identity and presents its certificate without using ambient
 machine trust or bearer credentials. The adapter uses GET with the versioned JSON
-profile, a bounded timeout and a streaming 2 MiB response limit. It
+profile, a bounded timeout and a streaming 2 MiB response limit. The browser has a fixed 15-second request timeout, so keep `OK_CONSOLE_OBSERVED_STATE_TIMEOUT_MS` below that deadline with room for BFF processing and network latency, or the browser can time out before the BFF returns its source result. It
 requires exactly one management plane, validates readiness enums and Evidence
 references, derives freshness locally, and converts upstream partial status to
 a safe `PARTIAL_DATA` warning. Upstream diagnostic text is never forwarded.

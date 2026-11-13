@@ -36,11 +36,15 @@ test('fresh producer changes content while Detail and widget remain open', async
     await page.getByRole('button', { name: /Ask OK AI/ }).click()
     await page.getByRole('button', { name: 'ok-shared status', exact: true }).click()
     await expect(page.locator('.diagnostic-message.assistant').last()).toContainText('Current observation. Ready.')
+    await page.getByRole('button', { name: 'Open Shell' }).click()
+    await page.getByRole('button', { name: 'kubectl get clusterconditions -o wide', exact: true }).click()
+    const originalOutput = page.locator('.terminal-entry.terminal-output').first()
     now += 3_600_000
     envelope.metadata.observedAt = new Date(now).toISOString()
     for (const item of envelope.data.evidence) item.observedAt = new Date(now).toISOString()
     const shared = envelope.data.clusters.find((cluster: { name: string }) => cluster.name === 'ok-shared')
     shared.readiness = 'Failed'
+    shared.revision = 'nodes:31461261;deployment:31452634'
     for (const step of shared.lifecycle) step.state = 'Failed'
     envelope.data.evidence.find((item: { id: string }) => item.id === shared.evidenceId).outcome = 'Failed'
     await page.clock.runFor(30_001)
@@ -48,6 +52,16 @@ test('fresh producer changes content while Detail and widget remain open', async
     await expect(page.locator('.live-label')).toContainText('Observed')
     for (const status of await page.locator('.lifecycle-step .status').all()) await expect(status).toHaveText('Failed')
     await expect(page.locator('.evidence-card').filter({ hasText: 'ok-shared hosting-cluster state' })).toContainText('Failed')
+    await expect(originalOutput).toContainText('Earlier output, based on data observed at')
+    await expect(originalOutput).not.toContainText(/\bcurrent(ly)?\b/i)
+    await page.getByRole('button', { name: 'kubectl get clusterconditions -o wide', exact: true }).click()
+    await expect(page.locator('.terminal-entry.terminal-output').last()).toContainText(/Nodes\s+Failed/)
+    const command = page.getByRole('textbox', { name: 'Command or question' })
+    await command.fill('evidence')
+    await command.press('Enter')
+    await expect(page.locator('.terminal-entry.terminal-output').last()).toContainText('REVISION     nodes:31461261;deployment:31452634')
+    await expect(page.locator('.terminal-entry.terminal-output').last()).toContainText('READINESS    Failed (Current observation)')
+    await page.getByRole('button', { name: 'Close cluster shell' }).click()
     const earlier = page.locator('.diagnostic-message.assistant').last()
     await expect(earlier).toContainText('Earlier answer, based on data observed at')
     await expect(earlier).not.toContainText(/\bcurrent(ly)?\b/i)

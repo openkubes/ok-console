@@ -31,7 +31,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   const ready = data.clusters.filter((item) => item.readiness === 'Ready' && clusterPresentation(item, data).current).length
   const nonReady = data.clusters.length - ready
   return {
-    text: `The Console displays ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${summary.current ? 'current' : summary.label.replace(/\.$/, '')}.${data.warnings?.length ? ` Note: ${data.warnings[0]}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
+    text: `The Console displays ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${summary.current ? 'current' : summary.label.replace(/\.$/, '')}.${data.warnings?.length ? ` Note: ${data.warnings.join(' ')}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
   }
 }
 

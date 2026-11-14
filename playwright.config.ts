@@ -22,12 +22,17 @@ export default defineConfig({
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },
-  webServer: {
+  webServer: [{
     command: 'pnpm e2e:serve',
     url: 'http://127.0.0.1:8787/health/ready',
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
-  },
+  }, {
+    command: 'node e2e/current-fixture-server.mjs',
+    url: 'http://127.0.0.1:8789/health/ready',
+    reuseExistingServer: false,
+    timeout: 30_000,
+  }],
   projects: [
     {
       name: 'chromium-desktop',

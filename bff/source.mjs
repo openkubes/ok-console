@@ -12,7 +12,7 @@ const positiveInteger = (value, fallback, name) => {
 
 export const createObservedStateSource = (environment = process.env, options = {}) => {
   const mode = environment.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture'
-  if (mode === 'fixture') return new FixtureObservedStateAdapter(options.fixtureUrl)
+  if (mode === 'fixture') return new FixtureObservedStateAdapter(options.fixtureUrl, { now: options.now })
   if (mode !== 'openkubes') throw new Error('OK_CONSOLE_OBSERVED_STATE_MODE must be fixture or openkubes.')
   if (!environment.OK_CONSOLE_OBSERVED_STATE_URL) throw new Error('OK_CONSOLE_OBSERVED_STATE_URL is required in openkubes mode.')
   const sourceUrl = new URL(environment.OK_CONSOLE_OBSERVED_STATE_URL)

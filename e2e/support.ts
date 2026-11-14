@@ -32,3 +32,19 @@ export const injectBffFailure = async (page: Page, failure: 'stale' | 'degraded'
     await route.continue({ url: target.href })
   })
 }
+
+
+// Called before installing the injector, against the test-only pinned-clock server.
+export const assertCurrentFixture = async (page: Page) => {
+  await signInPrototype(page)
+  const response = await page.request.get('/api/console/v0/overview')
+  expect(response.ok()).toBe(true)
+  const baseline = await response.json()
+  expect(baseline.meta.freshness).toBe('Current')
+  for (const code of ['SOURCE_STALE', 'PARTIAL_DATA']) {
+    expect(baseline.meta.warnings).not.toContainEqual(expect.objectContaining({ code }))
+  }
+  const management = page.locator('.cluster-card').filter({ hasText: 'ok-mgmt' })
+  await expect(management.getByText('Ready', { exact: true })).toBeVisible()
+  await expect(management.getByText('Unknown', { exact: true })).toHaveCount(0)
+}

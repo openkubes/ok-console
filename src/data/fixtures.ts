@@ -41,7 +41,7 @@ export const platformFixture: PlatformSnapshot = {
         { label: 'Declared', state: 'Unknown', detail: 'Historical fixture · Contract accepted · generation 3' },
         { label: 'Infrastructure', state: 'Unknown', detail: 'Historical fixture · 5 nodes provisioned' },
         { label: 'Control plane', state: 'Unknown', detail: 'Historical fixture · API observed' },
-        { label: 'Capabilities', state: 'Unknown', detail: 'Historical fixture · Messaging evidence is still converging' },
+        { label: 'Capabilities', state: 'Unknown', detail: 'Historical fixture · Messaging evidence was still converging' },
       ],
     },
     {
@@ -52,7 +52,7 @@ export const platformFixture: PlatformSnapshot = {
       lifecycle: [
         { label: 'Declared', state: 'Unknown', detail: 'Historical fixture · Legacy contract recognized' },
         { label: 'Infrastructure', state: 'Unknown', detail: 'Historical fixture · 2 edge nodes registered' },
-        { label: 'Control plane', state: 'Unknown', detail: 'Historical fixture · Observation is older than freshness window' },
+        { label: 'Control plane', state: 'Unknown', detail: 'Historical fixture · Observation was older than freshness window' },
         { label: 'Capabilities', state: 'Unknown', detail: 'Historical fixture · Read-only compatibility mode' },
       ],
     },
@@ -67,9 +67,9 @@ export const platformFixture: PlatformSnapshot = {
     { id: 'cap-gitops', name: 'GitOps', description: 'Desired-state delivery and reconciliation', implementation: 'Argo CD', contractVersion: 'gitops.openkubes.io/v1alpha1', coverage: 100, clusters: 1, readiness: 'Unknown', evidenceId: 'ev-mgmt-ready' },
   ],
   claims: [
-    { id: 'claim-private-ai', name: 'private-ai-workspace', kind: 'OpenWebUIClaim', owner: 'AI Platform Team', intent: 'Sovereign assistant with GPU inference', targetCluster: 'ok-ai', readiness: 'Unknown', requiredCapabilities: ['Persistent Storage', 'Ingress', 'Observability'], decision: 'Placed on ok-ai · all required capabilities conform', evidenceId: 'ev-ai-ready' },
-    { id: 'claim-event-bus', name: 'factory-event-bus', kind: 'MessagingClaim', owner: 'Edge Operations', intent: 'Durable factory event streaming', targetCluster: 'ok-shared', readiness: 'Unknown', requiredCapabilities: ['Messaging', 'Observability'], decision: 'Placed on ok-shared · awaiting messaging receipt', evidenceId: 'ev-shared-pending' },
-    { id: 'claim-registry', name: 'sovereign-registry', kind: 'ArtifactRegistryClaim', owner: 'Platform Engineering', intent: 'Internal OCI mirror for air-gapped sites', targetCluster: 'ok-shared', readiness: 'Unknown', requiredCapabilities: ['Artifact Registry', 'Persistent Storage'], decision: 'Placement accepted · storage conformance pending', evidenceId: 'ev-shared-pending' },
+    { id: 'claim-private-ai', name: 'private-ai-workspace', kind: 'OpenWebUIClaim', owner: 'AI Platform Team', intent: 'Sovereign assistant with GPU inference', targetCluster: 'ok-ai', readiness: 'Unknown', requiredCapabilities: ['Persistent Storage', 'Ingress', 'Observability'], decision: 'Placed on ok-ai · all required capabilities conformed at recording time', evidenceId: 'ev-ai-ready' },
+    { id: 'claim-event-bus', name: 'factory-event-bus', kind: 'MessagingClaim', owner: 'Edge Operations', intent: 'Durable factory event streaming', targetCluster: 'ok-shared', readiness: 'Unknown', requiredCapabilities: ['Messaging', 'Observability'], decision: 'Placed on ok-shared · was awaiting messaging receipt at recording time', evidenceId: 'ev-shared-pending' },
+    { id: 'claim-registry', name: 'sovereign-registry', kind: 'ArtifactRegistryClaim', owner: 'Platform Engineering', intent: 'Internal OCI mirror for air-gapped sites', targetCluster: 'ok-shared', readiness: 'Unknown', requiredCapabilities: ['Artifact Registry', 'Persistent Storage'], decision: 'Placement accepted · storage conformance was pending at recording time', evidenceId: 'ev-shared-pending' },
   ],
   agents: [
     {
@@ -137,10 +137,10 @@ export const platformFixture: PlatformSnapshot = {
     { id: 'agentdep-openclaw-ai', name: 'operations-assistant', agentId: 'agent-openclaw', agentName: 'OpenClaw Operations Assistant', version: 'v0.4.1', cluster: 'ok-ai', namespace: 'openkubes-agents', readiness: 'Unknown', authority: 'curated MCP tools', evidenceId: 'ev-ai-ready' },
   ],
   evidence: [
-    { id: 'ev-mgmt-ready', title: 'Management plane readiness receipt', type: 'Transition', outcome: 'Unknown', cluster: 'ok-mgmt', contract: 'OpenKubesCluster/v1alpha1', revision: 'sha256:71d4…9ab2', observedAt: '2026-08-20T19:41:22Z', source: 'ok-mgmt observer', summary: 'All management-plane invariants are satisfied for generation 14.', immutable: true },
+    { id: 'ev-mgmt-ready', title: 'Management plane readiness receipt', type: 'Transition', outcome: 'Unknown', cluster: 'ok-mgmt', contract: 'OpenKubesCluster/v1alpha1', revision: 'sha256:71d4…9ab2', observedAt: '2026-08-20T19:41:22Z', source: 'ok-mgmt observer', summary: 'All management-plane invariants were satisfied for generation 14 at recording time.', immutable: true },
     { id: 'ev-ai-ready', title: 'AI cluster capability conformance', type: 'Observation', outcome: 'Unknown', cluster: 'ok-ai', contract: 'CapabilitySet/v1alpha1', revision: 'sha256:e503…14cf', observedAt: '2026-08-20T19:39:08Z', source: 'capability observer', summary: 'Storage, ingress, and observability contracts were conformant at the recorded observation time.', immutable: false },
-    { id: 'ev-shared-pending', title: 'Shared services convergence', type: 'Observation', outcome: 'Unknown', cluster: 'ok-shared', contract: 'CapabilitySet/v1alpha1', revision: 'sha256:103a…81de', observedAt: '2026-08-20T19:38:51Z', source: 'capability observer', summary: 'Messaging endpoint evidence has not entered the required freshness window.', immutable: false },
-    { id: 'ev-edge-unknown', title: 'Edge observation freshness exceeded', type: 'Observation', outcome: 'Unknown', cluster: 'edge-07', contract: 'OpenKubesCluster/v1alpha0', revision: 'sha256:c11a…067f', observedAt: '2026-08-20T15:03:17Z', source: 'edge observer', summary: 'Last observation is outside the contract freshness window; no failure is inferred.', immutable: false },
+    { id: 'ev-shared-pending', title: 'Shared services convergence', type: 'Observation', outcome: 'Unknown', cluster: 'ok-shared', contract: 'CapabilitySet/v1alpha1', revision: 'sha256:103a…81de', observedAt: '2026-08-20T19:38:51Z', source: 'capability observer', summary: 'Messaging endpoint evidence had not entered the required freshness window at recording time.', immutable: false },
+    { id: 'ev-edge-unknown', title: 'Edge observation freshness exceeded', type: 'Observation', outcome: 'Unknown', cluster: 'edge-07', contract: 'OpenKubesCluster/v1alpha0', revision: 'sha256:c11a…067f', observedAt: '2026-08-20T15:03:17Z', source: 'edge observer', summary: 'The last observation was outside the contract freshness window at recording time; no failure was inferred.', immutable: false },
     { id: 'ev-auth-32', title: 'CreateCluster authorization grant', type: 'Authorization', outcome: 'Approved', cluster: 'ok-ai', contract: 'CreateCluster/v1alpha1', revision: 'grant:single-use:32', observedAt: '2026-08-18T08:13:04Z', source: 'platform authority', summary: 'Single-use execution grant consumed for the reviewed payload digest.', immutable: true },
     { id: 'ev-auth-denied', title: 'Profile change denied', type: 'Authorization', outcome: 'Denied', cluster: 'edge-07', contract: 'ChangeClusterProfile/v1alpha1', revision: 'decision:policy:712', observedAt: '2026-08-19T12:31:44Z', source: 'platform policy', summary: 'Change denied because current evidence was outside the required freshness window.', immutable: true },
   ],

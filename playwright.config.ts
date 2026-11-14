@@ -29,6 +29,7 @@ export default defineConfig({
     timeout: 30_000,
   }, {
     command: 'node e2e/current-fixture-server.mjs',
+    gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 },
     url: 'http://127.0.0.1:8789/health/ready',
     reuseExistingServer: false,
     timeout: 30_000,

@@ -53,7 +53,7 @@ const openShell = async (name = 'ok-mgmt') => {
 
 describe('OpenKubes Console', () => {
 
-  it('suppresses all Platform metrics values and notes in stale browser fixture mode', async () => {
+  it('suppresses all Platform metrics values and notes in browser fixture mode', async () => {
     await renderSignedIn()
     const metrics = await screen.findByRole('region', { name: 'Platform metrics' })
     expect(metrics).toHaveTextContent('ClustersUnavailableUnavailableCapabilitiesUnavailableUnavailableWorkload claimsUnavailableUnavailableOpen findingsUnavailableUnavailable')
@@ -516,14 +516,17 @@ describe('OpenKubes Console', () => {
   })
 
   it('deploys a verified Agent only through a conformant Worker Cluster review', async () => {
+    const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(currentSnapshot())
     window.location.hash = '#/agents'
     await renderSignedIn()
+    observation.mockRestore()
     expect(await screen.findByRole('heading', { name: 'AI Agents' })).toBeInTheDocument()
     expect(screen.getByText('Kagent Platform Operator')).toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole('button', { name: /Deploy Agent/i })[0])
     expect(await screen.findByRole('heading', { name: /Deploy Kagent Platform Operator/i })).toBeInTheDocument()
     const target = screen.getByRole('radio', { name: /ok-ai/i })
+    expect(document.querySelector('.fit-yes')).not.toBeNull()
     expect(target).toBeChecked()
     expect(screen.queryByRole('radio', { name: /ok-mgmt/i })).not.toBeInTheDocument()
 
@@ -592,8 +595,10 @@ describe('OpenKubes Console', () => {
 
 it('shows unavailable observed metrics and no invented management plane for a tenant-only fleet', async () => {
   window.location.hash = '#/overview'
-  const snapshot = await consoleData.getSnapshot()
+  const snapshot = currentSnapshot()
   snapshot.clusters = snapshot.clusters.filter((cluster) => cluster.id === 'cluster-ok-ai')
+  snapshot.claims = []
+  snapshot.evidence = snapshot.evidence.filter(item => item.cluster === 'ok-ai')
   snapshot.overview = {
     ...overviewExample.data as PlatformOverviewData,
     managementPlane: null,
@@ -605,12 +610,15 @@ it('shows unavailable observed metrics and no invented management plane for a te
   try {
     await renderSignedIn()
     expect(await screen.findAllByText('Unavailable')).toHaveLength(8)
-    expect(screen.queryByText(/0 management plane/)).not.toBeInTheDocument()
+    for (const card of document.querySelectorAll('.metric')) {
+      expect(card.querySelector('strong')).toHaveTextContent('Unavailable')
+      expect(card.querySelector('small')).toHaveTextContent('Unavailable')
+    }
     expect(document.querySelector('.management-ribbon')).toBeNull()
     window.location.hash = '#/clusters'
     fireEvent(window, new Event('hashchange'))
-    expect(await screen.findByRole('button', { name: 'Ready · 0' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Attention · 1' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Ready · 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Attention · 0' })).toBeInTheDocument()
     expect(document.querySelector('.management-row')).toBeNull()
   } finally {
     observation.mockRestore()
@@ -733,5 +741,53 @@ it.each(['mixed', 'envelope', 'capability', 'unloaded-capability', 'missing-deta
     expect(fresh.querySelectorAll('.live-dot')).toHaveLength(current ? 1 : 0)
     expect(stale).toHaveTextContent('Unknown'); expect(stale).toHaveTextContent('Last observed')
     expect(stale.querySelectorAll('.live-dot')).toHaveLength(0)
+  } finally { observation.mockRestore() }
+})
+
+// Explicit current BFF control, independent of browser fixture defaults.
+function currentSnapshot() {
+  const snapshot = structuredClone(platformFixture)
+  snapshot.source = 'bff'
+  snapshot.freshness = 'Current'
+  snapshot.clusterListFreshness = 'Current'
+  for (const cluster of snapshot.clusters) { cluster.freshness = 'Current'; cluster.readiness = 'Ready' }
+  for (const claim of snapshot.claims) claim.readiness = 'Ready'
+  for (const evidence of snapshot.evidence) { evidence.freshness = 'Current'; evidence.outcome = 'Ready'; evidence.immutable = false }
+  snapshot.overview = structuredClone(overviewExample.data) as PlatformOverviewData
+  return snapshot
+}
+
+it('shows Current BFF metric totals and notes', async () => {
+  const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(currentSnapshot())
+  try {
+    await renderSignedIn()
+    const metrics = await screen.findByRole('region', { name: 'Platform metrics' })
+    expect([...metrics.querySelectorAll('.metric > strong')].map(item => item.textContent)).toEqual(['4', '7', '3', '2'])
+    expect([...metrics.querySelectorAll('.metric > small')].map(item => item.textContent)).toEqual(['2 ready · 1 management plane', '5 conformant · 2 converging', '1 ready · 2 in progress', '0 critical policy violations'])
+  } finally { observation.mockRestore() }
+})
+
+it('has no conformant Agent target in browser fixture mode', async () => {
+  window.location.hash = '#/agents'
+  await renderSignedIn()
+  fireEvent.click(screen.getAllByRole('button', { name: /Deploy Agent/i })[0])
+  expect(await screen.findByRole('heading', { name: /Deploy Kagent Platform Operator/i })).toBeInTheDocument()
+  expect(document.querySelector('.fit-yes')).toBeNull()
+  expect(screen.getAllByText('Observation unavailable · readiness Unknown').length).toBeGreaterThan(0)
+})
+
+it('shows zero management plane for a Current BFF tenant fleet with available metrics', async () => {
+  const snapshot = currentSnapshot()
+  snapshot.clusters = snapshot.clusters.filter(cluster => cluster.name === 'ok-ai')
+  snapshot.claims = []
+  snapshot.evidence = snapshot.evidence.filter(item => item.cluster === 'ok-ai')
+  snapshot.overview!.managementPlane = null
+  snapshot.overview!.clusters = { total: 1, ready: 1, pending: 0, failed: 0, unknown: 0 }
+  const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot)
+  try {
+    await renderSignedIn()
+    expect(await screen.findByText('1 ready · 0 management plane')).toBeInTheDocument()
+    expect(document.querySelector('.metrics-grid .metric > strong')).toHaveTextContent('1')
+    expect(document.querySelector('.management-ribbon')).toBeNull()
   } finally { observation.mockRestore() }
 })

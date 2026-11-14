@@ -12,8 +12,15 @@ const fixture = JSON.parse(await readFile(new URL('../bff/fixtures/observed-stat
 // management receipt. Make this test world wholly current before injection.
 for (const evidence of fixture.evidence) {
   evidence.observedAt = fixture.observedAt
+  evidence.outcome = 'Ready'
   evidence.classification = 'Current'
 }
+for (const cluster of fixture.clusters) {
+  cluster.readiness = 'Ready'
+  for (const capability of cluster.capabilities) capability.readiness = 'Ready'
+  for (const stage of cluster.lifecycle ?? []) stage.state = 'Ready'
+}
+for (const placement of fixture.placements) placement.readiness = 'Ready'
 const directory = await mkdtemp(join(tmpdir(), 'ok-console-current-fixture-'))
 try {
   const fixturePath = join(directory, 'observed-state.json')

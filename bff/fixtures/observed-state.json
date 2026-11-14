@@ -340,7 +340,7 @@
       "revision": "external-observation",
       "observedAt": "2026-08-21T17:59:30Z",
       "source": "Operator-provided read-only observation bundle",
-      "summary": "All management-plane invariants are satisfied for generation 14.",
+      "summary": "All management-plane invariants were satisfied for generation 14 at recording time.",
       "classification": "Immutable",
       "ownership": {
         "environmentId": "community-preview",
@@ -357,7 +357,7 @@
       "revision": "external-observation",
       "observedAt": "2026-08-21T17:59:30Z",
       "source": "Operator-provided read-only observation bundle",
-      "summary": "Storage, ingress and observability contracts are currently conformant.",
+      "summary": "Storage, ingress and observability contracts were conformant at recording time.",
       "classification": "Current",
       "ownership": {
         "environmentId": "community-preview",
@@ -374,7 +374,7 @@
       "revision": "nodes:31461260;deployment:31452633",
       "observedAt": "2026-08-21T17:58:51Z",
       "source": "Bounded Kubernetes API projection",
-      "summary": "Messaging endpoint evidence has not entered the required freshness window.",
+      "summary": "Messaging endpoint evidence had not entered the required freshness window at recording time.",
       "classification": "Current",
       "ownership": {
         "environmentId": "community-preview",
@@ -391,7 +391,7 @@
       "revision": "external-observation",
       "observedAt": "2026-08-21T13:03:17Z",
       "source": "Operator-provided read-only observation bundle",
-      "summary": "Last observation is outside the contract freshness window; no failure is inferred.",
+      "summary": "Last observation was outside the contract freshness window at recording time; no failure was inferred.",
       "classification": "Current",
       "ownership": {
         "environmentId": "community-preview",

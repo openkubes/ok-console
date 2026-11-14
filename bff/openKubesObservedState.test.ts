@@ -31,7 +31,7 @@ type MutableEnvelope = {
 }
 
 const servers: Server[] = []
-const fixtureSource = new FixtureObservedStateAdapter()
+const fixtureSource = new FixtureObservedStateAdapter(undefined, { now: () => new Date('2026-08-21T18:00:00Z') })
 
 const closeServer = async (server: Server) => {
   server.closeAllConnections()
@@ -782,7 +782,7 @@ describe('OpenKubes observed-state query adapter', () => {
     expect(JSON.stringify(body)).not.toContain('private upstream outage detail')
   })
 
-  it('preserves the default fixture source and supports explicit fixture rollback', () => {
+  it('preserves the default fixture source and supports explicit local fixture selection', () => {
     expect(createObservedStateSource({})).toBeInstanceOf(FixtureObservedStateAdapter)
     expect(createObservedStateSource({ OK_CONSOLE_OBSERVED_STATE_MODE: 'fixture' })).toBeInstanceOf(FixtureObservedStateAdapter)
     expect(() => createObservedStateSource({ OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes' })).toThrow('OK_CONSOLE_OBSERVED_STATE_URL')

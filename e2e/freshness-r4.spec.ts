@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { normalizeOpenKubesObservedState } from '../bff/adapters/openKubesObservedState.mjs'
 import { createConsoleBffHandler, prototypeAuthorizer } from '../bff/app.mjs'
-import { injectBffFailure, signInPrototype } from './support'
+import { assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
 
 const serve = async (page: Page, kind: 'mixed' | 'mixed-envelope' | 'mixed-capability' | 'item' | 'envelope' | 'deployment' | 'deployment-unlisted' | 'unreferenced' | 'fresh' | 'future' | 'immutable' | 'immutable-future' | 'immutable-current') => {
   const golden = JSON.parse((await readFile(new URL('../bff/openKubesObservedState.fixtures.json', import.meta.url), 'utf8')).replaceAll('openkubes-management', 'community-preview'))
@@ -49,46 +49,52 @@ const serve = async (page: Page, kind: 'mixed' | 'mixed-envelope' | 'mixed-capab
 
 
 for (const kind of ['item', 'envelope', 'injection', 'fresh', 'deployment', 'deployment-unlisted', 'unreferenced'] as const) {
-  test(`J1 ${kind}: cluster lifecycle framing`, async ({ page }) => {
-    const fixture = kind === 'injection' ? undefined : await serve(page, kind)
-    try {
-      if (kind === 'injection') await injectBffFailure(page, 'stale')
-      await signInPrototype(page)
-      if (kind.startsWith('deployment') || kind === 'unreferenced' || kind === 'fresh') {
-        // Worlds A/B: the route verdict includes Evidence beyond the primary reference.
-        const current = kind === 'fresh'
-        const card = page.locator('.cluster-card').filter({ hasText: fixture!.cluster.name })
-        await expect(card).toContainText(current ? 'Current observation' : 'Last observed')
-        await expect(card.locator('.live-dot')).toHaveCount(current ? 1 : 0)
-        if (!current) await expect(card).not.toContainText('Current observation')
-        await page.goto('/#/clusters')
-        const row = page.locator('.table-row.cluster-columns').filter({ hasText: fixture!.cluster.name })
-        await expect(row).toContainText(current ? 'Current observation' : 'Last observed')
-        await expect(row.locator('.live-dot')).toHaveCount(current ? 1 : 0)
-        if (!current) {
-          await expect(row).not.toContainText('Current observation')
+  test.describe(`${kind} fixtures`, () => {
+    if (kind === 'injection') test.use({ baseURL: 'http://127.0.0.1:8789' })
+    test(`J1 ${kind}: cluster lifecycle framing`, async ({ page }) => {
+      const fixture = kind === 'injection' ? undefined : await serve(page, kind)
+      try {
+        if (kind === 'injection') {
+          await assertCurrentFixture(page)
+          await injectBffFailure(page, 'stale')
+          await signInPrototype(page)
+        } else await signInPrototype(page)
+        if (kind.startsWith('deployment') || kind === 'unreferenced' || kind === 'fresh') {
+          // Worlds A/B: the route verdict includes Evidence beyond the primary reference.
+          const current = kind === 'fresh'
+          const card = page.locator('.cluster-card').filter({ hasText: fixture!.cluster.name })
+          await expect(card).toContainText(current ? 'Current observation' : 'Last observed')
+          await expect(card.locator('.live-dot')).toHaveCount(current ? 1 : 0)
+          if (!current) await expect(card).not.toContainText('Current observation')
+          await page.goto('/#/clusters')
+          const row = page.locator('.table-row.cluster-columns').filter({ hasText: fixture!.cluster.name })
+          await expect(row).toContainText(current ? 'Current observation' : 'Last observed')
+          await expect(row.locator('.live-dot')).toHaveCount(current ? 1 : 0)
+          if (!current) {
+            await expect(row).not.toContainText('Current observation')
+          }
+          await page.getByRole('button', { name: `Open ${fixture!.cluster.name}`, exact: true }).click()
+        } else {
+          await page.locator('.cluster-card').filter({ hasText: fixture?.cluster.name ?? 'ok-mgmt' }).locator('button.card-main').click()
         }
-        await page.getByRole('button', { name: `Open ${fixture!.cluster.name}`, exact: true }).click()
-      } else {
-        await page.locator('.cluster-card').filter({ hasText: fixture?.cluster.name ?? 'ok-mgmt' }).locator('button.card-main').click()
-      }
-      // #140 includes stale hosting placements in the tenant's response verdict.
-      const stale = kind !== 'fresh'
-      const unavailable = kind === 'item' || kind === 'envelope' || kind === 'injection'
-      await expect(page.locator('.detail-grid .eyebrow').first()).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed posture' : 'Current observation')
-      await expect(page.locator('.live-label')).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed' : 'Observed')
-      await expect(page.locator('.live-label .live-dot')).toHaveCount(stale ? 0 : 1)
-      const details = await page.locator('.lifecycle-step p').allTextContents()
-      expect(details.length).toBeGreaterThan(0)
-      for (const text of details) expect(text.startsWith('Last observed: ')).toBe(stale)
-      if (kind !== 'injection') {
-        await expect(page.locator('.lifecycle')).toContainText(`${stale ? 'Last observed: ' : ''}Ready: 1; not ready: 0`)
-        await expect(page.locator('.lifecycle')).toContainText(`${stale ? 'Last observed: ' : ''}Available replicas: 2 of 2`)
-      }
-      await page.getByRole('tab', { name: 'Lifecycle', exact: true }).click()
-      await expect(page.locator('.wide-panel .eyebrow')).toHaveText(stale ? 'Intent → last observation' : 'Intent → observation')
-      await expect(page.locator('.timeline p')).toHaveText(details)
-    } finally { await fixture?.close() }
+        // #140 includes stale hosting placements in the tenant's response verdict.
+        const stale = kind !== 'fresh'
+        const unavailable = kind === 'item' || kind === 'envelope' || kind === 'injection'
+        await expect(page.locator('.detail-grid .eyebrow').first()).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed posture' : 'Current observation')
+        await expect(page.locator('.live-label')).toHaveText(unavailable ? 'Observation unavailable - readiness Unknown' : stale ? 'Last observed' : 'Observed')
+        await expect(page.locator('.live-label .live-dot')).toHaveCount(stale ? 0 : 1)
+        const details = await page.locator('.lifecycle-step p').allTextContents()
+        expect(details.length).toBeGreaterThan(0)
+        for (const text of details) expect(text.startsWith('Last observed: ')).toBe(stale)
+        if (kind !== 'injection') {
+          await expect(page.locator('.lifecycle')).toContainText(`${stale ? 'Last observed: ' : ''}Ready: 1; not ready: 0`)
+          await expect(page.locator('.lifecycle')).toContainText(`${stale ? 'Last observed: ' : ''}Available replicas: 2 of 2`)
+        }
+        await page.getByRole('tab', { name: 'Lifecycle', exact: true }).click()
+        await expect(page.locator('.wide-panel .eyebrow')).toHaveText(stale ? 'Intent → last observation' : 'Intent → observation')
+        await expect(page.locator('.timeline p')).toHaveText(details)
+      } finally { await fixture?.close() }
+    })
   })
 }
 

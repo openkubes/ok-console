@@ -8,7 +8,7 @@ import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs
 import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 
 const server = createServer(createConsoleBffHandler({
-  source: new FixtureObservedStateAdapter(),
+  source: new FixtureObservedStateAdapter(undefined, { now: () => new Date('2026-08-21T18:00:00Z') }),
   authorizer: prototypeAuthorizer,
   correlationId: () => 'corr-vertical-slice',
 }))

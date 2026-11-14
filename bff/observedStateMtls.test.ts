@@ -40,7 +40,7 @@ beforeAll(async () => {
   issue('old-console', 'trusted-ca', 'clientAuth', 'URI:spiffe://openkubes.io/ns/openkubes-console/sa/ok-console-bff')
   issue('other-client', 'trusted-ca', 'clientAuth', 'URI:spiffe://openkubes.io/ns/other-namespace/sa/ok-console')
 
-  const fixture = await new FixtureObservedStateAdapter().readSnapshot()
+  const fixture = await new FixtureObservedStateAdapter(undefined, { now: () => new Date('2026-08-21T18:00:00Z') }).readSnapshot()
   const envelope = {
     apiVersion: 'observed.openkubes.io/v0alpha2',
     kind: 'ConsoleObservedState',

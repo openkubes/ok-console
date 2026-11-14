@@ -31,3 +31,18 @@ describe('FixtureConsoleAdapter', () => {
     expect(second.clusters[0].name).toBe('ok-mgmt')
   })
 })
+
+it('presents static browser fixture observations as Stale and Unknown', async () => {
+  const snapshot = await new FixtureConsoleAdapter().getSnapshot()
+  expect(snapshot.freshness).toBe('Stale')
+  for (const cluster of snapshot.clusters) {
+    expect(cluster.readiness).toBe('Unknown')
+    for (const stage of cluster.lifecycle) expect(stage.state).toBe('Unknown')
+  }
+  for (const item of [...snapshot.capabilities, ...snapshot.claims, ...snapshot.agentDeployments]) {
+    expect(item.readiness).toBe('Unknown')
+  }
+  for (const item of snapshot.evidence.filter(item => item.type !== 'Authorization')) {
+    expect(item.outcome).toBe('Unknown')
+  }
+})

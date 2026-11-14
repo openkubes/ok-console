@@ -1,21 +1,43 @@
 import { expect, test } from '@playwright/test'
-import { injectBffFailure, signInPrototype } from './support'
+import { assertUnavailableMetrics, assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
+
+test('default recorded fixtures show Unknown without failure injection', async ({ page }) => {
+  await signInPrototype(page)
+  const clusters = page.locator('.cluster-card')
+  await expect(clusters).toHaveCount(4)
+  await expect(clusters.getByText('Unknown', { exact: true })).toHaveCount(4)
+  await expect(clusters.getByText('Ready', { exact: true })).toHaveCount(0)
+  await expect(clusters.locator('.live-dot')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Platform metrics' })).toContainText('Unavailable')
+  await page.goto('/#/clusters')
+  const management = page.locator('.table-row.cluster-columns').filter({ hasText: 'ok-mgmt' })
+  await expect(management).toContainText('Unknown')
+  await management.getByRole('button', { name: 'Open ok-mgmt' }).click()
+  await expect(page.locator('.title-actions .status')).toHaveText('Unknown')
+  await expect(page.locator('.lifecycle-step .status')).toHaveCount(4)
+  for (const stage of await page.locator('.lifecycle-step .status').all()) await expect(stage).toHaveText('Unknown')
+})
 
 for (const failure of ['stale', 'degraded'] as const) {
-  test(`${failure} observations remain usable and visibly qualified`, async ({ page }) => {
-    await injectBffFailure(page, failure)
-    await signInPrototype(page)
-    const status = page.getByRole('status')
-    await expect(status).toBeVisible()
-    await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')
-    await expect(page.getByRole('heading', { name: 'Cluster posture' })).toBeVisible()
-    if (failure === 'stale') {
-      const clusters = page.locator('.cluster-card')
-      await expect(clusters).toHaveCount(4)
-      await expect(clusters.getByText('Unknown', { exact: true })).toHaveCount(4)
-      await expect(clusters.getByText('Ready', { exact: true })).toHaveCount(0)
-      await expect(page.getByRole('region', { name: 'Platform metrics' })).toContainText('Unavailable')
-    }
+  test.describe(`${failure} injection on current fixtures`, () => {
+    test.use({ baseURL: 'http://127.0.0.1:8789' })
+    test(`${failure} observations remain usable and visibly qualified`, async ({ page }) => {
+      await assertCurrentFixture(page)
+      await injectBffFailure(page, failure)
+      await signInPrototype(page)
+      if (failure === 'stale') await assertUnavailableMetrics(page)
+      const status = page.getByRole('status')
+      await expect(status).toBeVisible()
+      await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')
+      await expect(page.getByRole('heading', { name: 'Cluster posture' })).toBeVisible()
+      if (failure === 'stale') {
+        const clusters = page.locator('.cluster-card')
+        await expect(clusters).toHaveCount(4)
+        await expect(clusters.getByText('Unknown', { exact: true })).toHaveCount(4)
+        await expect(clusters.getByText('Ready', { exact: true })).toHaveCount(0)
+        await expect(page.getByRole('region', { name: 'Platform metrics' })).toContainText('Unavailable')
+      }
+    })
   })
 }
 

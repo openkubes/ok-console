@@ -53,6 +53,15 @@ const openShell = async (name = 'ok-mgmt') => {
 
 describe('OpenKubes Console', () => {
 
+  it('suppresses all Platform metrics values and notes in browser fixture mode', async () => {
+    await renderSignedIn()
+    const metrics = await screen.findByRole('region', { name: 'Platform metrics' })
+    expect(metrics).toHaveTextContent('ClustersUnavailableUnavailableCapabilitiesUnavailableUnavailableWorkload claimsUnavailableUnavailableOpen findingsUnavailableUnavailable')
+    expect(within(metrics).getAllByText('Unavailable', { exact: true })).toHaveLength(8)
+    expect(metrics).not.toHaveTextContent(/ready|conformant|converging|in progress|critical|management plane/i)
+  })
+
+
   it('keeps protected platform content behind federated-first sign-in', async () => {
     render(<App />)
     expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
@@ -261,7 +270,7 @@ describe('OpenKubes Console', () => {
     shell.run('why is this cluster ready?')
     expect(shellEntries(shell.log)).toEqual([
       entry('command', 'why is this cluster ready?'),
-      entry('ai', 'This shell session holds readiness Ready and 4 lifecycle stage(s), all reporting Ready.'),
+      entry('ai', 'This shell session holds readiness Unknown for ok-mgmt.\nDeclared: Unknown — Historical fixture · Contract accepted · generation 14\nInfrastructure: Unknown — Historical fixture · 3 control-plane nodes healthy\nControl plane: Unknown — Historical fixture · API and controllers observed\nCapabilities: Unknown — Historical fixture · 4 of 4 required contracts conformant'),
       proposal,
     ])
   })
@@ -507,14 +516,17 @@ describe('OpenKubes Console', () => {
   })
 
   it('deploys a verified Agent only through a conformant Worker Cluster review', async () => {
+    const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(currentSnapshot())
     window.location.hash = '#/agents'
     await renderSignedIn()
+    observation.mockRestore()
     expect(await screen.findByRole('heading', { name: 'AI Agents' })).toBeInTheDocument()
     expect(screen.getByText('Kagent Platform Operator')).toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole('button', { name: /Deploy Agent/i })[0])
     expect(await screen.findByRole('heading', { name: /Deploy Kagent Platform Operator/i })).toBeInTheDocument()
     const target = screen.getByRole('radio', { name: /ok-ai/i })
+    expect(document.querySelector('.fit-yes')).not.toBeNull()
     expect(target).toBeChecked()
     expect(screen.queryByRole('radio', { name: /ok-mgmt/i })).not.toBeInTheDocument()
 
@@ -549,7 +561,7 @@ describe('OpenKubes Console', () => {
     expect(screen.getByRole('dialog', { name: 'OK AI Diagnostic preview' })).toBeInTheDocument()
     expect(screen.getByText(/no live AI service or cluster actions are connected/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
-    expect(await screen.findByText(/ok-shared: Fixture snapshot.*Last observed: Pending/i)).toBeInTheDocument()
+    expect(await screen.findByText(/ok-shared: Fixture snapshot.*Last observed: Unknown/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /View evidence · Shared services convergence/i }))
     expect(await screen.findByRole('heading', { name: 'Shared services convergence' })).toBeInTheDocument()
   })
@@ -583,8 +595,10 @@ describe('OpenKubes Console', () => {
 
 it('shows unavailable observed metrics and no invented management plane for a tenant-only fleet', async () => {
   window.location.hash = '#/overview'
-  const snapshot = await consoleData.getSnapshot()
+  const snapshot = currentSnapshot()
   snapshot.clusters = snapshot.clusters.filter((cluster) => cluster.id === 'cluster-ok-ai')
+  snapshot.claims = []
+  snapshot.evidence = snapshot.evidence.filter(item => item.cluster === 'ok-ai')
   snapshot.overview = {
     ...overviewExample.data as PlatformOverviewData,
     managementPlane: null,
@@ -595,8 +609,11 @@ it('shows unavailable observed metrics and no invented management plane for a te
   const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot)
   try {
     await renderSignedIn()
-    expect(await screen.findAllByText('Unavailable')).toHaveLength(3)
-    expect(screen.getByText(/0 management plane/)).toBeInTheDocument()
+    expect(await screen.findAllByText('Unavailable')).toHaveLength(8)
+    for (const card of document.querySelectorAll('.metric')) {
+      expect(card.querySelector('strong')).toHaveTextContent('Unavailable')
+      expect(card.querySelector('small')).toHaveTextContent('Unavailable')
+    }
     expect(document.querySelector('.management-ribbon')).toBeNull()
     window.location.hash = '#/clusters'
     fireEvent(window, new Event('hashchange'))
@@ -724,5 +741,53 @@ it.each(['mixed', 'envelope', 'capability', 'unloaded-capability', 'missing-deta
     expect(fresh.querySelectorAll('.live-dot')).toHaveLength(current ? 1 : 0)
     expect(stale).toHaveTextContent('Unknown'); expect(stale).toHaveTextContent('Last observed')
     expect(stale.querySelectorAll('.live-dot')).toHaveLength(0)
+  } finally { observation.mockRestore() }
+})
+
+// Explicit current BFF control, independent of browser fixture defaults.
+function currentSnapshot() {
+  const snapshot = structuredClone(platformFixture)
+  snapshot.source = 'bff'
+  snapshot.freshness = 'Current'
+  snapshot.clusterListFreshness = 'Current'
+  for (const cluster of snapshot.clusters) { cluster.freshness = 'Current'; cluster.readiness = 'Ready' }
+  for (const claim of snapshot.claims) claim.readiness = 'Ready'
+  for (const evidence of snapshot.evidence) { evidence.freshness = 'Current'; evidence.outcome = 'Ready'; evidence.immutable = false }
+  snapshot.overview = structuredClone(overviewExample.data) as PlatformOverviewData
+  return snapshot
+}
+
+it('shows Current BFF metric totals and notes', async () => {
+  const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(currentSnapshot())
+  try {
+    await renderSignedIn()
+    const metrics = await screen.findByRole('region', { name: 'Platform metrics' })
+    expect([...metrics.querySelectorAll('.metric > strong')].map(item => item.textContent)).toEqual(['4', '7', '3', '2'])
+    expect([...metrics.querySelectorAll('.metric > small')].map(item => item.textContent)).toEqual(['2 ready · 1 management plane', '5 conformant · 2 converging', '1 ready · 2 in progress', '0 critical policy violations'])
+  } finally { observation.mockRestore() }
+})
+
+it('has no conformant Agent target in browser fixture mode', async () => {
+  window.location.hash = '#/agents'
+  await renderSignedIn()
+  fireEvent.click(screen.getAllByRole('button', { name: /Deploy Agent/i })[0])
+  expect(await screen.findByRole('heading', { name: /Deploy Kagent Platform Operator/i })).toBeInTheDocument()
+  expect(document.querySelector('.fit-yes')).toBeNull()
+  expect(screen.getAllByText('Observation unavailable · readiness Unknown').length).toBeGreaterThan(0)
+})
+
+it('shows zero management plane for a Current BFF tenant fleet with available metrics', async () => {
+  const snapshot = currentSnapshot()
+  snapshot.clusters = snapshot.clusters.filter(cluster => cluster.name === 'ok-ai')
+  snapshot.claims = []
+  snapshot.evidence = snapshot.evidence.filter(item => item.cluster === 'ok-ai')
+  snapshot.overview!.managementPlane = null
+  snapshot.overview!.clusters = { total: 1, ready: 1, pending: 0, failed: 0, unknown: 0 }
+  const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot)
+  try {
+    await renderSignedIn()
+    expect(await screen.findByText('1 ready · 0 management plane')).toBeInTheDocument()
+    expect(document.querySelector('.metrics-grid .metric > strong')).toHaveTextContent('1')
+    expect(document.querySelector('.management-ribbon')).toBeNull()
   } finally { observation.mockRestore() }
 })

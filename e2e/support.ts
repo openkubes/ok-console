@@ -32,3 +32,28 @@ export const injectBffFailure = async (page: Page, failure: 'stale' | 'degraded'
     await route.continue({ url: target.href })
   })
 }
+
+
+// Called before installing the injector, against the test-only pinned-clock server.
+export const assertCurrentFixture = async (page: Page) => {
+  await signInPrototype(page)
+  const response = await page.request.get('/api/console/v0/overview')
+  expect(response.ok()).toBe(true)
+  const baseline = await response.json()
+  expect(baseline.meta.freshness).toBe('Current')
+  for (const code of ['SOURCE_STALE', 'PARTIAL_DATA']) {
+    expect(baseline.meta.warnings).not.toContainEqual(expect.objectContaining({ code }))
+  }
+  const metrics = page.getByRole('region', { name: 'Platform metrics' })
+  await expect(metrics.locator('.metric > strong')).toHaveText(['4', '7', '3', '2'])
+  await expect(metrics.locator('.metric > small')).toHaveText(['4 ready · 1 management plane', '5 conformant · 2 converging', '1 ready · 2 in progress', '0 critical policy violations'])
+  const management = page.locator('.cluster-card').filter({ hasText: 'ok-mgmt' })
+  await expect(management.getByText('Ready', { exact: true })).toBeVisible()
+  await expect(management.getByText('Unknown', { exact: true })).toHaveCount(0)
+}
+
+export const assertUnavailableMetrics = async (page: Page) => {
+  const metrics = page.getByRole('region', { name: 'Platform metrics' })
+  await expect(metrics.locator('.metric > strong')).toHaveText(Array(4).fill('Unavailable'))
+  await expect(metrics.locator('.metric > small')).toHaveText(Array(4).fill('Unavailable'))
+}

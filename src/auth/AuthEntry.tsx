@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { ConsoleAuthError, type AuthMode, type LocalAccessCredentials } from './authClient'
+import { PoweredBy, useBrandTerms, useBranding } from '../branding/BrandingContext'
 
 export type PrototypeSession = {
   method: 'oidc' | 'local'
@@ -31,22 +32,33 @@ function AuthIcon({ name, size = 18 }: { name: AuthIconName; size?: number }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>
 }
 
+function AuthorityName() {
+  return <>{useBrandTerms().authorityName}</>
+}
+
+function BrandShortName() {
+  return <>{useBranding().productShortName}</>
+}
+
 function BrandedLoginShell({ authMode, children }: { authMode: AuthMode; children: ReactNode }) {
   const live = authMode !== 'prototype'
+  const branding = useBranding()
+  const { headline } = branding.login
   return <main className="auth-shell">
-    <section className="auth-story" aria-label="OpenKubes trust model">
-      <div className="auth-brand"><img src="./openkubes-icon.png" alt="OpenKubes"/><span><strong>OpenKubes</strong><small>Platform Console</small></span></div>
-      <div className="auth-story-copy"><span className="auth-kicker">Sovereign platform operations</span><h2>Contracts.<br/>Clusters.<br/><em>Evidence.</em></h2><p>One trusted entry point for platform intent, observed state, and reviewable operations — from local laptop to edge, bare metal, and cloud.</p></div>
+    <section className="auth-story" aria-label={`${branding.productShortName} trust model`}>
+      <div className="auth-brand"><img src={branding.logoUrl} alt={branding.logoAlt}/><span><strong>{branding.productShortName}</strong><small>{branding.productTagline}</small></span></div>
+      <div className="auth-story-copy"><span className="auth-kicker">{branding.login.kicker}</span><h2>{headline.map((line, index) => index === headline.length - 1 ? <em key={index}>{line}</em> : <span key={index}>{line}<br/></span>)}</h2><p>{branding.login.text}</p></div>
       <div className="auth-principles"><span><AuthIcon name="shield"/>{authMode === 'local' ? 'Local development' : 'Federated by default'}</span><span><AuthIcon name="lock"/>Least authority</span><span><AuthIcon name="check"/>Evidence-backed</span></div>
-      <p className="auth-story-foot">{live ? 'OpenKubes Console · Secure entry' : 'OpenKubes Console Prototype · OK-154'}</p>
+      <p className="auth-story-foot">{live ? `${branding.productName} · Secure entry` : `${branding.productName} Prototype · OK-154`}</p>
     </section>
-    <section className="auth-panel" aria-label="Sign in to OpenKubes">
+    <section className="auth-panel" aria-label={`Sign in to ${branding.productShortName}`}>
       <div className="auth-card">
         <div className="auth-environment"><span className="auth-live-dot"/><span><small>Environment</small><strong>{authMode === 'local' ? 'Local development · ok-local' : 'Community preview'}</strong></span><em>{authMode === 'local' ? 'Local authentication' : live ? (authMode === 'bootstrap' ? 'Bootstrap authentication' : 'Federated authentication') : 'Prototype · no live auth'}</em></div>
 
         {children}
       </div>
-      <footer className="auth-panel-footer"><span>Privacy</span><span>Security</span><span>OpenKubes</span><small>console.openkubes.io/v0alpha1</small></footer>
+      <footer className="auth-panel-footer"><span>Privacy</span><span>Security</span><span>{branding.productShortName}</span><small>console.openkubes.io/v0alpha1</small></footer>
+      <PoweredBy className="auth-powered-by"/>
     </section>
   </main>
 }
@@ -149,7 +161,7 @@ function ExceptionalAuthEntry({ onAuthenticated, authMode = 'prototype', onStart
   return <>
     {stage === 'entry' && <>
       {authMode === "prototype" && import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === "true" && <div role="note" aria-label="Simulated demo" className="auth-privacy"><strong>SIMULATED DEMO</strong> · Sample data only. No live infrastructure connected.</div>}
-      <div className="auth-heading"><span className="auth-kicker">Welcome</span><h1>Welcome to OpenKubes</h1><p>{authMode === 'bootstrap' ? 'Use the reviewed bootstrap account to establish the platform before federation is configured.' : 'Sign in with a configured identity provider. Your provider verifies identity; OpenKubes evaluates authority separately.'}</p></div>
+      <div className="auth-heading"><span className="auth-kicker">Welcome</span><h1>Welcome to <BrandShortName/></h1><p>{authMode === 'bootstrap' ? 'Use the reviewed bootstrap account to establish the platform before federation is configured.' : <>Sign in with a configured identity provider. Your provider verifies identity; <AuthorityName/> evaluates authority separately.</>}</p></div>
       {serviceError && <div className="auth-error" role="alert">{serviceError}{onRetry && <button type="button" className="auth-text-button" onClick={onRetry}>Retry session check</button>}</div>}
       {availableProviders.length > 0 && <div className="auth-provider-list" aria-label="Configured identity providers">
         {availableProviders.map((item, index) => <button type="button" className="auth-provider" key={item.id} onClick={() => { setProvider(item); setStage('oidc-redirect') }}><span className="auth-provider-mark">{index === 0 ? 'OK' : 'ID'}</span><span><strong>Continue with {item.name}</strong><small>{item.detail}</small></span><AuthIcon name="arrow"/></button>)}
@@ -163,7 +175,7 @@ function ExceptionalAuthEntry({ onAuthenticated, authMode = 'prototype', onStart
 
     {stage === 'oidc-redirect' && <>
       <button className="auth-back" type="button" onClick={reset}>← All sign-in methods</button>
-      <div className="auth-heading"><span className="auth-kicker">Federated sign-in</span><h1>Continue to {provider.name}</h1><p>{oidcEnabled ? 'The Console redirects to the configured provider.' : 'The production Console will redirect to the configured provider.'} OpenKubes never receives your provider password.</p></div>
+      <div className="auth-heading"><span className="auth-kicker">Federated sign-in</span><h1>Continue to {provider.name}</h1><p>{oidcEnabled ? 'The Console redirects to the configured provider.' : 'The production Console will redirect to the configured provider.'} <AuthorityName/> never receives your provider password.</p></div>
       <div className="auth-flow-card"><span className="auth-provider-mark">OK</span><div><small>Protocol</small><strong>Authorization Code + PKCE</strong></div><div><small>Return</small><strong>Server-side session boundary</strong></div></div>
       <ol className="auth-flow-steps"><li><span>1</span><div><strong>Redirect to identity provider</strong><p>Provider performs authentication and MFA.</p></div></li><li><span>2</span><div><strong>Validate secure return</strong><p>State, nonce, issuer, audience, and PKCE are checked server-side.</p></div></li><li><span>3</span><div><strong>Create bounded Console session</strong><p>No token is stored in browser storage.</p></div></li></ol>
       <button className="auth-primary" type="button" onClick={() => oidcEnabled ? onStartOidc?.() : setStage('oidc-review')}>{oidcEnabled ? 'Continue to identity provider' : 'Simulate identity provider return'} <AuthIcon name="arrow"/></button>
@@ -215,7 +227,7 @@ function OrdinaryLocalLogin({ onAuthenticated, onAuthenticateLocal, serviceError
     finally { setPassword(''); setPending(false) }
   }
   return <>
-    <div className="auth-heading"><span className="auth-kicker">Local sign-in</span><h1>Sign in to OpenKubes</h1><p>Local development · ok-local · password authentication without MFA. No external identity provider is required.</p></div>
+    <div className="auth-heading"><span className="auth-kicker">Local sign-in</span><h1>Sign in to <BrandShortName/></h1><p>Local development · ok-local · password authentication without MFA. No external identity provider is required.</p></div>
     {serviceError && <div className="auth-error" role="alert">{serviceError}{onRetry && <button type="button" className="auth-text-button" onClick={onRetry}>Retry session check</button>}</div>}
     <form className="auth-local-form" onSubmit={submit}>
       <label><span>Username</span><input required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" maxLength={32}/></label>

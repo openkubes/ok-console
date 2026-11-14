@@ -19,6 +19,7 @@
     "verify:kind": "./deploy/kubernetes/verify-local-kind.sh",
     "pretest:e2e": "VITE_CONSOLE_DATA_MODE=bff VITE_CONSOLE_AUTH_MODE=prototype pnpm build",
     "test:e2e": "playwright test",
+    "test:e2e:branding": "VITE_CONSOLE_DATA_MODE=fixture VITE_CONSOLE_AUTH_MODE=prototype pnpm build && playwright test -c playwright.branding.config.ts",
     "e2e:serve": "OK_CONSOLE_DEV_PROTOTYPE_ENABLED=true OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION=true OK_CONSOLE_BFF_HOST=127.0.0.1 OK_CONSOLE_BFF_PORT=8787 node bff/server.mjs",
     "test:postgres": "vitest run --no-file-parallelism bff/security/postgresSessionStore.integration.test.ts bff/security/localIdentity.integration.test.mjs",
     "preview": "vite preview"

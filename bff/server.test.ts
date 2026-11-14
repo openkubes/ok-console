@@ -69,4 +69,31 @@ describe('Console server prototype startup', () => {
     expect(response.status).toBe(200)
     expect(body).toMatchObject({ kind: 'PlatformOverview' })
   })
+
+  it('refuses an invalid or contradictory deployment policy before creating the HTTP server', async () => {
+    const serverFactory = vi.fn((handler) => createServer(handler))
+    for (const env of [
+      { OK_CONSOLE_DEPLOYMENT_POLICY: 'read-only' },
+      { OK_CONSOLE_DEPLOYMENT_POLICY: 'fixture-read-only', OK_CONSOLE_DRY_RUN_URL: 'https://runner.invalid/dry-run' },
+      { OK_CONSOLE_DEPLOYMENT_POLICY: 'fixture-read-only', OK_CONSOLE_OBSERVED_STATE_MODE: 'openkubes' },
+    ]) {
+      await expect(createConsoleServer({ env: { OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', ...env }, serverFactory })).rejects.toThrow('Invalid deployment policy configuration')
+    }
+    expect(serverFactory).not.toHaveBeenCalled()
+  })
+
+  it('keeps branding and deployment permissions independent', async () => {
+    const serverFactory = vi.fn((handler) => createServer(handler))
+    const brandingLoader = vi.fn(async () => ({ branding: { productName: 'Acme Ops Console' }, assets: new Map() }))
+    const branded = await createConsoleServer({
+      env: { OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_BRANDING_DIR: '/etc/branding', OK_CONSOLE_DRY_RUN_URL: 'https://runner.invalid/dry-run' },
+      serverFactory,
+      brandingLoader: brandingLoader as never,
+    })
+    expect(branded.deploymentPolicy).toBeNull()
+    const readOnly = await createConsoleServer({ env: { OK_CONSOLE_DEV_PROTOTYPE_ENABLED: 'true', OK_CONSOLE_DEPLOYMENT_POLICY: 'fixture-read-only' }, serverFactory })
+    expect(readOnly.deploymentPolicy?.name).toBe('fixture-read-only')
+    expect(readOnly.branding).toBeNull()
+    expect(serverFactory).toHaveBeenCalledTimes(2)
+  })
 })

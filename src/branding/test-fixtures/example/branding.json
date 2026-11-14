@@ -1,0 +1,15 @@
+{
+  "schema": "openkubes.console.branding/v1",
+  "productName": "Example Ops Console",
+  "productShortName": "Example Ops",
+  "productTagline": "Synthetic test brand",
+  "logo": { "file": "example-mark.svg", "alt": "Example Ops" },
+  "favicon": "example-mark.svg",
+  "colors": { "primary": "#5b2a86", "accent": "#ffd166" },
+  "login": {
+    "kicker": "Synthetic brand · tests only",
+    "headline": ["Observe.", "Explain.", "Prove."],
+    "text": "A fictitious brand used by the branding tests. Not a real organisation."
+  },
+  "poweredBy": { "name": "Example Platform" }
+}

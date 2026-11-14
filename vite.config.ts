@@ -1,8 +1,9 @@
 import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { installationFilesPlugin } from './bff/installationDevServer.mjs'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), installationFilesPlugin()],
   base: './',
   server: {
     proxy: {

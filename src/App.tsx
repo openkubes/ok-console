@@ -3,6 +3,8 @@ import { capabilityPresentation, clusterPresentation, conservativeVerdict, evide
 import { useObservationSnapshot } from './useObservationSnapshot'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import DiagnosticWidget from './DiagnosticWidget'
+import { PoweredBy, useBrandTerms, useBranding } from './branding/BrandingContext'
+import { useDeploymentPolicy } from './deploymentPolicy'
 import DeveloperWorkspaces from './workspaces/DeveloperWorkspaces'
 import { consoleAuth, ConsoleAuthError, type ConsoleAuthClient } from './auth/authClient'
 import { consoleDataMode } from './data/consoleData'
@@ -105,16 +107,21 @@ function EvidenceLink({ id, evidence, onSelect }: { id: string; evidence: Eviden
   return <button className="evidence-link" onClick={() => onSelect(item)}><Icon name="evidence" size={15}/>{item.revision}<Icon name="chevron" size={14}/></button>
 }
 
+function BrandMark() {
+  const { logoUrl } = useBranding()
+  return <img src={logoUrl} alt=""/>
+}
+
 function EmptyLoading() {
-  return <main className="loading"><img src="./openkubes-icon.png" alt=""/><p>Loading contract-aligned platform view…</p></main>
+  return <main className="loading"><BrandMark/><p>Loading contract-aligned platform view…</p></main>
 }
 
 function AuthLoading() {
-  return <main className="loading"><img src="./openkubes-icon.png" alt=""/><p>Checking secure Console session…</p></main>
+  return <main className="loading"><BrandMark/><p>Checking secure Console session…</p></main>
 }
 
 function LoadFailure({ error, retry }: { error: ConsoleDataError; retry: () => void }) {
-  return <main className="loading load-failure" role="alert"><img src="./openkubes-icon.png" alt=""/><span className="eyebrow">Read-only Console</span><h1>Platform data is unavailable</h1><p>{error.message}</p><small>{error.code}{error.correlationId ? ` · Correlation ID ${error.correlationId}` : ''}</small>{error.retryable && <button className="primary-button" onClick={retry}>Retry safely</button>}</main>
+  return <main className="loading load-failure" role="alert"><BrandMark/><span className="eyebrow">Read-only Console</span><h1>Platform data is unavailable</h1><p>{error.message}</p><small>{error.code}{error.correlationId ? ` · Correlation ID ${error.correlationId}` : ''}</small>{error.retryable && <button className="primary-button" onClick={retry}>Retry safely</button>}</main>
 }
 
 function EmptyState({ title, description }: { title: string; description: string }) {
@@ -132,12 +139,14 @@ function OverviewMetric({ suppressed, ...props }: Parameters<typeof Metric>[0] &
 }
 
 function Overview({ data, identity, openCluster, openEvidence, publicDemo = false }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void; publicDemo?: boolean }) {
+  const branding = useBranding()
+  const terms = useBrandTerms()
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
   const presentation = overviewPresentation(data)
   const overview = data.overview
   const observedMetric = (value: number | null) => value ?? 'Unavailable'
   return <>
-    <PageTitle eyebrow="Platform posture" title={publicDemo ? "Welcome to OpenKubes" : `Hello ${identity.trim().split(/\s+/)[0]}`} description={publicDemo ? "Explore a simulated sovereign OpenKubes platform through contracts, clusters, and evidence." : "One evidence-backed view across your sovereign OpenKubes platforms."} action={<span className="snapshot"><ObservationLabel presentation={presentation}/> · {data.source === 'bff' ? 'BFF observation · ' : ''}{new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
+    <PageTitle eyebrow="Platform posture" title={publicDemo ? `Welcome to ${branding.productShortName}` : `Hello ${identity.trim().split(/\s+/)[0]}`} description={publicDemo ? `Explore a simulated sovereign ${terms.platformNoun} platform through contracts, clusters, and evidence.` : `One evidence-backed view across your sovereign ${terms.platformNoun} platforms.`} action={<span className="snapshot"><ObservationLabel presentation={presentation}/> · {data.source === 'bff' ? 'BFF observation · ' : ''}{new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}/>
     <FreshnessWarning data={data} freshness={data.freshness}/>
     {data.source === 'bff' && data.evidence.some(item => item.immutable) && <p className="receipt-note">Immutable Evidence receipts are retained separately from mutable observations.</p>}
     <section className="metrics-grid" aria-label="Platform metrics">
@@ -170,9 +179,10 @@ function Overview({ data, identity, openCluster, openEvidence, publicDemo = fals
 }
 
 function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void }) {
+  const { clusterLifecycleAvailable } = useDeploymentPolicy()
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready' && (data.source !== 'bff' || clusterPresentation(cluster, data).current)).length
   return <>
-    <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={<div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div>}/>
+    <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={clusterLifecycleAvailable ? <div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div> : <span className="lifecycle-unavailable-badge" role="note">Read-only installation · cluster lifecycle unavailable</span>}/>
     <FreshnessWarning data={data} freshness={data.clusterListFreshness}/>
     {wjaxLocalPreviewEnabled && (
       <section aria-label="W-JAX local kind lab" style={{ padding: '18px 20px', marginBottom: 18, border: '1px solid #65a5d255', borderRadius: 12, background: '#e8f5ff' }}>
@@ -407,6 +417,15 @@ function CreateCluster({ onSessionEnded }: { onSessionEnded: () => void }) {
 
 const registrationSteps = ['Connect', 'Discover', 'Scope', 'Review', 'Authorize', 'Evidence'] as const
 
+function LifecycleUnavailable({ action }: { action: 'create' | 'register' }) {
+  const { policy } = useDeploymentPolicy()
+  return <section className="panel lifecycle-unavailable" role="note" aria-label="Cluster lifecycle not available">
+    <span className="eyebrow">Not available in this installation</span>
+    <h2>{action === 'register' ? 'Registering clusters' : 'Creating clusters'} is not part of this installation</h2>
+    <p>{policy === 'fixture-read-only' ? 'This installation runs under the fixture-read-only deployment policy. It shows simulated fixture data and cannot create, register, or contact any cluster; the server refuses such requests.' : 'The deployment policy of this installation could not be confirmed, so cluster lifecycle actions stay unavailable.'}</p>
+  </section>
+}
+
 function RegisterCluster() {
   const [step, setStep] = useState(0)
   const [name, setName] = useState('external-production-eu')
@@ -607,6 +626,9 @@ function EvidenceDrawer({ item, close, fixture, observedStale = false }: { item:
 }
 
 export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }) {
+  const branding = useBranding()
+  const terms = useBrandTerms()
+  const policy = useDeploymentPolicy()
   const [session, setSession] = useState<PrototypeSession>()
   const [authStatus, setAuthStatus] = useState<'checking' | 'ready'>(auth.mode === 'prototype' ? 'ready' : 'checking')
   const [authError, setAuthError] = useState<string>()
@@ -682,7 +704,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   }, [])
 
   const title = useMemo(() => !session ? 'Sign in' : selectedCluster?.name ?? (page === 'users' ? 'User & Project Management' : page === 'wjax' ? 'W-JAX Local Kubernetes' : page === 'create' ? 'Create Cluster' : page === 'register' ? 'Register Existing Cluster' : NAV.find((item) => item.id === page)?.label), [page, selectedCluster, session])
-  useEffect(() => { document.title = `${title} · OpenKubes Console` }, [title])
+  useEffect(() => { document.title = `${title} · ${branding.productName}` }, [title, branding.productName])
 
   if (authStatus === 'checking') return <AuthLoading/>
   if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
@@ -703,23 +725,25 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     : page === 'agents' ? <Agents data={data} openEvidence={setSelectedEvidence}/>
     : page === 'capabilities' ? <Capabilities data={data} openEvidence={setSelectedEvidence}/>
     : page === 'evidence' ? <Evidence data={data} openEvidence={setSelectedEvidence}/>
+    : !policy.clusterLifecycleAvailable ? <LifecycleUnavailable action={page === 'register' ? 'register' : 'create'}/>
     : page === 'register' ? <RegisterCluster/>
     : <CreateCluster onSessionEnded={endSession}/>
 
   return <div className="app-shell">
     <a href="#main-content" className="skip-link">Skip to content</a>
     <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
-      <div className="brand"><img src="./openkubes-icon.png" alt="OpenKubes"/><div><strong>OpenKubes</strong><span>Platform Console</span></div><button className="menu-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><Icon name="x"/></button></div>
+      <div className="brand"><img src={branding.logoUrl} alt={branding.logoAlt}/><div><strong>{branding.productShortName}</strong><span>{branding.productTagline}</span></div><button className="menu-close" onClick={() => setMenuOpen(false)} aria-label="Close navigation"><Icon name="x"/></button></div>
       <div className="context-switcher"><span className="context-mark">OK</span><span><small>Distribution</small><strong>OpenKubes Platform</strong></span><Icon name="chevron" size={15}/></div>
       <nav aria-label="Primary navigation">{NAV.map((item) => <a href={`#/${item.id}`} className={page === item.id && !selectedCluster ? 'active' : ''} key={item.id}><Icon name={item.id}/><span><strong>{item.label}</strong><small>{item.caption}</small></span></a>)}{wjaxLocalPreviewEnabled && <a href="#/users" className={page === 'users' ? 'active' : ''}><Icon name="shield"/><span><strong>User & Project Management</strong><small>Preview · identity & access</small></span></a>}</nav>
       <div className="sidebar-spacer"/>
-      <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div>
-      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{signOutError ?? (publicDemo ? 'Simulated Session' : session.method === 'oidc' ? 'Federated identity' : auth.mode === 'local' ? 'Local development session' : 'Break-glass session')}</small></span><button className="signout-button" aria-label="Sign out of OpenKubes Console" disabled={signingOut} onClick={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div>
+      {policy.clusterLifecycleAvailable ? <div className="cluster-quick-actions"><a href="#/create" className={`create-nav ${page === 'create' ? 'active' : ''}`}><Icon name="create"/><span><strong>Create Cluster</strong><small>Draft a new contract</small></span></a><a href="#/register" className={`create-nav register-nav ${page === 'register' ? 'active' : ''}`}><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Connect external infrastructure</small></span></a></div> : <div className="cluster-quick-actions is-unavailable" role="group" aria-label="Cluster lifecycle: not available in this installation"><span className="create-nav" aria-disabled="true"><Icon name="create"/><span><strong>Create Cluster</strong><small>Not available · read-only</small></span></span><span className="create-nav register-nav" aria-disabled="true"><Icon name="register"/><span><strong>Register Existing Cluster</strong><small>Not available · read-only</small></span></span></div>}
+      <PoweredBy className="sidebar-powered-by"/>
+      <div className="sidebar-footer"><div className="avatar">{session.identity.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</div><span><strong>{session.identity}</strong><small>{signOutError ?? (publicDemo ? 'Simulated Session' : session.method === 'oidc' ? 'Federated identity' : auth.mode === 'local' ? 'Local development session' : 'Break-glass session')}</small></span><button className="signout-button" aria-label={`Sign out of ${branding.productName}`} disabled={signingOut} onClick={signOut}>{signingOut ? 'Signing out…' : 'Sign out'}</button></div>
     </aside>
     {menuOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)}/>}
     <div className="main-column">
-      <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>OpenKubes</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
-      <main id="main-content" className="content" tabIndex={-1}>{publicDemo && <div role="note" aria-label="Simulated demo" style={{ padding: "12px 16px", marginBottom: 18, border: "1px solid #65a5d255", borderRadius: 10, background: "#e8f5ff", color: "#15375b", fontSize: 14 }}><strong>SIMULATED DEMO</strong> · Sample cluster data only. No live infrastructure or AI service is connected.</div>}{observation.error && <div className="data-warning" role="alert"><Icon name="clock"/><div><strong>Observation refresh failed</strong><span>{observation.error.message.slice(0, 240)}{observation.error.correlationId ? ` · Correlation ID ${observation.error.correlationId.slice(0, 128)}` : ''}</span><button className="secondary-button" disabled={observation.loading} onClick={observation.retry}>Retry safely</button></div></div>}{view}<footer className="product-footer"><span>OpenKubes Console Prototype · OK-153 / OK-154 / OK-159</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
+      <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>{branding.productShortName}</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
+      <main id="main-content" className="content" tabIndex={-1}>{publicDemo && <div role="note" aria-label="Simulated demo" style={{ padding: "12px 16px", marginBottom: 18, border: "1px solid #65a5d255", borderRadius: 10, background: "#e8f5ff", color: "#15375b", fontSize: 14 }}><strong>SIMULATED DEMO</strong> · Sample cluster data only. No live infrastructure or AI service is connected.</div>}{observation.error && <div className="data-warning" role="alert"><Icon name="clock"/><div><strong>Observation refresh failed</strong><span>{observation.error.message.slice(0, 240)}{observation.error.correlationId ? ` · Correlation ID ${observation.error.correlationId.slice(0, 128)}` : ''}</span><button className="secondary-button" disabled={observation.loading} onClick={observation.retry}>Retry safely</button></div></div>}{view}<footer className="product-footer"><span>{terms.whiteLabel ? `${branding.productName} Prototype · Built on OpenKubes Console` : 'OpenKubes Console Prototype · OK-153 / OK-154 / OK-159'}</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
     </div>
     {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget generation={observation.generation} data={data} openEvidence={setSelectedEvidence}/>}
     {selectedEvidence && <EvidenceDrawer observedStale={observation.originalEvidence?.some(item => item.id === selectedEvidence.id && item.freshness === 'Stale')} fixture={data.source !== 'bff'} item={data.evidence.find(item => item.id === selectedEvidence.id) ?? { ...selectedEvidence, freshness: 'Unknown' }} close={() => setSelectedEvidence(undefined)}/>}

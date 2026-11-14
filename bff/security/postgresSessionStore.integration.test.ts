@@ -670,6 +670,9 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       await locker.query('BEGIN')
       await locker.query("UPDATE ok_console.local_access_throttle SET failures = 5, blocked_until = clock_timestamp() + interval '400 milliseconds' WHERE principal_digest = $1", [throttle.digest('recovery-admin')])
       pending = throttle.success('recovery-admin', reservation)
+      // Observed later by `await pending`; this only keeps an early lock timeout from
+      // surfacing as an unhandled rejection while the test is still waiting.
+      pending.catch(() => {})
       await waitForReserveLock()
       // The seeded deadline is visible only inside the locker's open transaction.
       await waitForDatabaseTimePast('SELECT blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')], locker)
@@ -689,6 +692,9 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       await locker.query('BEGIN')
       await locker.query('SELECT * FROM ok_console.local_access_throttle ORDER BY principal_digest FOR UPDATE')
       pending = throttle.reserve('recovery-admin')
+      // Observed later by `await pending`; this only keeps an early lock timeout from
+      // surfacing as an unhandled rejection while the test is still waiting.
+      pending.catch(() => {})
       await waitForReserveLock()
       await waitForDatabaseTimePast("SELECT max(window_started_at) + interval '15 minutes' FROM ok_console.local_access_throttle", [], locker)
       await locker.query('COMMIT')

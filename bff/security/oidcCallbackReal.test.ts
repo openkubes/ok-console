@@ -5,18 +5,21 @@ import { beforeAll, expect, it, vi } from 'vitest'
 
 const exec = promisify(execFile)
 type Result = {
-  status: number; error: string | null; cookieNames: string[]; onlyClearTransaction: boolean
+  cookieStrings: string[]; status: number; error: string | null; cookieNames: string[]; onlyClearTransaction: boolean
   sessions: number; transactions: number; audit: { method: string; outcome: string; cause: string }[]
   leaks: string[]; tokenRequests: number; redemptions: number; signedTokens: number; jwks: number
 }
 type Flow = { mode: string; rejected: string[]; start: { status: number; method: string; challengeMatches: boolean; stateMatches: boolean; nonceMatches: boolean; redirectMatches: boolean }; first: Result; replay?: Result }
+const knownModes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub', 'untrusted-tls']
 let flows: Flow[]
 let childStderr: string
 beforeAll(async () => {
-  const { stdout, stderr } = await exec(process.execPath, ['bff/test-fixtures/oidcCallbackIssuer.mjs'], { timeout: 65000 })
+  const { stdout, stderr } = await exec(process.execPath, ['bff/test-fixtures/oidcCallbackIssuer.mjs'], { timeout: 110000, env: Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+    !/^(NODE_TLS_REJECT_UNAUTHORIZED|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|OIDC_CALLBACK_TLS_DIR|OIDC_CALLBACK_UNTRUSTED)$/i.test(name))) })
   childStderr = stderr
   flows = stdout.trim().split('\n').map(line => JSON.parse(line))
-}, 70000)
+  expect(flows.map(flow => flow.mode).sort()).toEqual([...knownModes].sort())
+}, 120000)
 
 const get = (mode: string) => {
   const flow = flows.find(value => value.mode === mode)!
@@ -30,6 +33,11 @@ const auditEvent = (outcome: string, cause: string) => [expect.objectContaining(
 const granted = (result: Result) => {
   expect(result).toMatchObject({ status: 303, error: null, sessions: 1, transactions: 0, signedTokens: 1, tokenRequests: 1, redemptions: 1, leaks: [] })
   expect(result.cookieNames).toEqual(['__Host-ok_console_oidc', '__Host-ok_console_session', '__Host-ok_console_csrf'])
+  expect(result.cookieStrings).toEqual([
+    '__Host-ok_console_oidc=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0',
+    '__Host-ok_console_session=<session-id>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600',
+    '__Host-ok_console_csrf=<csrf-token>; Path=/; Secure; SameSite=Lax; Max-Age=3600',
+  ])
   expect(result.audit).toEqual(auditEvent('Granted', 'VERIFIED'))
 }
 
@@ -37,13 +45,13 @@ it('positive control validates ID token claims over trusted TLS and issues a ses
   granted(get('positive').first)
 })
 
-it.each(['wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'missing-id-token', 'nonstring-sub'])('rejects %s through the real protocol client without session or secret disclosure', mode => {
+it.each(['wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'missing-id-token', 'nonstring-sub'])('rejects %s through the real protocol client without session or secret disclosure', mode => {
   const { first, rejected } = get(mode)
   expect(first).toMatchObject({ status: 401, error: 'OIDC_CALLBACK_REJECTED', onlyClearTransaction: true, sessions: 0, transactions: 0, leaks: [] })
   expect(first.cookieNames).toEqual(['__Host-ok_console_oidc'])
   expect(first.audit).toEqual(auditEvent('Denied', 'CALLBACK_REJECTED'))
-  expect(first.tokenRequests).toBe(mode === 'state' ? 0 : 1)
-  expect(first.signedTokens).toBe(['state', 'pkce', 'redirect'].includes(mode) ? 0 : 1)
+  expect(first.tokenRequests).toBe(['state', 'token-untrusted-tls', 'token-wrong-name'].includes(mode) ? 0 : 1)
+  expect(first.signedTokens).toBe(['state', 'pkce', 'redirect', 'token-untrusted-tls', 'token-wrong-name'].includes(mode) ? 0 : 1)
   expect(rejected).toEqual(mode === 'pkce' ? ['pkce'] : mode === 'redirect' ? ['redirect_uri'] : [])
 })
 
@@ -51,6 +59,7 @@ it('replay rejects the consumed transaction before a second code redemption', ()
   const { first, replay } = get('replay')
   granted(first)
   expect(replay).toMatchObject({ status: 401, error: 'OIDC_TRANSACTION_INVALID', onlyClearTransaction: true, sessions: 1, transactions: 0, tokenRequests: 1, redemptions: 1, leaks: [] })
+  expect(replay!.cookieStrings).toEqual(['__Host-ok_console_oidc=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0'])
   expect(replay!.audit).toEqual(auditEvent('Denied', 'TRANSACTION_INVALID'))
 })
 
@@ -61,10 +70,18 @@ it('records single-audience foreign azp behavior for the PR scope', () => {
   console.info(`OIDC_SINGLE_AUDIENCE_FOREIGN_AZP accepted=${first.status === 303} status=${first.status}`)
 })
 
-it('untrusted-tls rejects discovery before constructing a session handler', () => {
-  expect(flows.find(flow => flow.mode === 'untrusted-tls')).toEqual({
-    mode: 'untrusted-tls', discoveryRejected: true, sessions: 0, cookieNames: [], jwks: 0,
-  })
+it('untrusted-tls rejects discovery with a certificate verification cause before any HTTP request', () => {
+  const flow = flows.find(flow => flow.mode === 'untrusted-tls')
+  expect(flow).toMatchObject({ mode: 'untrusted-tls', discoveryRejected: true, discoveryRequests: 0 })
+  expect(['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'SELF_SIGNED_CERT_IN_CHAIN']).toContain((flow as unknown as { causeCode: string }).causeCode)
+})
+
+it('http-issuer is rejected by the protocol client factory', () => {
+  expect(flows.find(flow => flow.mode === 'http-issuer')).toMatchObject({ discoveryRejected: true, discoveryRequests: 0 })
+})
+
+it('records that openid-client 6.8.7 accepts future iat (nbf is checked separately)', () => {
+  granted(get('future-iat').first)
 })
 
 // With expectedNonce active, the real library rejects missing id_token before

@@ -1,7 +1,8 @@
 // Run in a child so its disposable CA is trusted without weakening TLS checks.
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { createServer } from 'node:https'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createServer as createHttpServer } from 'node:http'
+import { mkdtempSync, readFileSync, rmSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,19 +20,29 @@ const redirectUri = 'https://console.invalid' + callbackPath
 const clearedTransaction = '__Host-ok_console_oidc=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0'
 const opaque = () => randomBytes(32).toString('base64url')
 const challenge = value => createHash('sha256').update(value).digest('base64url')
-const modes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub']
+const modes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub']
 
-export const createCallbackIssuer = async root => {
+// Secret material travels only over the private pipe, never stdout or evidence logs.
+const leakCandidates = material => Object.entries(material).flatMap(([label, values]) => values.flatMap(value => {
+  const variants = [value, Buffer.from(value).toString('base64'), Buffer.from(value).toString('base64url')]
+  if (label === 'id_token') variants.push(...value.split('.'))
+  if (['access_token', 'code', 'code_verifier', 'session_id', 'csrf_token'].includes(label)) variants.push(value.slice(0, 16))
+  return variants.map(value => ({ label, value }))
+})).concat({ label: 'basic', value: 'Basic ' + Buffer.from(clientId + ':' + clientSecret).toString('base64') })
+const scanLeaks = (text, candidates) => [...new Set(candidates.filter(({ value }) => text.includes(value)).map(({ label }) => label))]
+
+export const createCallbackIssuer = async (root, mode = 'positive') => {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'callback-key', alg: 'RS256', use: 'sig' }
   const codes = new Map()
   const records = { discovery: 0, jwks: 0, tokenRequests: 0, redemptions: 0, idTokens: [], accessTokens: [], rejected: [] }
   let issuer
-  const server = createServer({ key: readFileSync(join(root, 'server.key')), cert: readFileSync(join(root, 'server.crt')) }, async (request, response) => {
+  let tokenEndpoint
+  const handler = async (request, response) => {
     const json = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json', ...(request.url === '/token' ? { 'Cache-Control': 'no-store' } : {}) }); response.end(JSON.stringify(body)) }
     if (request.method === 'GET' && request.url === '/.well-known/openid-configuration') {
       records.discovery++
-      json(200, { issuer, authorization_endpoint: issuer + '/authorize', token_endpoint: issuer + '/token', jwks_uri: issuer + '/jwks', response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'], token_endpoint_auth_methods_supported: ['client_secret_basic'] })
+      json(200, { issuer, authorization_endpoint: issuer + '/authorize', token_endpoint: tokenEndpoint ?? issuer + '/token', jwks_uri: issuer + '/jwks', response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'], token_endpoint_auth_methods_supported: ['client_secret_basic'] })
     } else if (request.method === 'GET' && request.url === '/jwks') {
       records.jwks++
       json(200, { keys: [jwk] })
@@ -60,18 +71,30 @@ export const createCallbackIssuer = async root => {
       records.idTokens.push(idToken); records.accessTokens.push(accessToken)
       json(200, { token_type: 'Bearer', access_token: accessToken, ...(bound.mode === 'missing-id-token' ? {} : { id_token: idToken }), expires_in: 300 })
     } else json(404, { error: 'not_found' })
-  })
+  }
+  const tls = name => ({ key: readFileSync(join(root, name + '.key')), cert: readFileSync(join(root, name + '.crt')) })
+  const server = mode === 'http-issuer' ? createHttpServer(handler) : createServer(tls('server'), handler)
+  let tokenServer
+  if (mode.startsWith('token-')) {
+    tokenServer = createServer(tls(mode === 'token-untrusted-tls' ? 'untrusted-server' : 'wrong-name'), handler)
+    await new Promise(resolve => tokenServer.listen(0, '127.0.0.1', resolve))
+    tokenEndpoint = `https://127.0.0.1:${tokenServer.address().port}/token`
+  }
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  issuer = `https://127.0.0.1:${server.address().port}`
+  issuer = `${mode === 'http-issuer' ? 'http' : 'https'}://127.0.0.1:${server.address().port}`
   return {
     issuer, records,
     mint: bound => { const code = opaque(); codes.set(code, bound); return code },
-    close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) },
+    close: async () => {
+      for (const listener of [server, tokenServer].filter(Boolean)) {
+        listener.closeAllConnections(); await new Promise(resolve => listener.close(resolve))
+      }
+    },
   }
 }
 
 const flow = async (root, mode) => {
-  const fixture = await createCallbackIssuer(root)
+  const fixture = await createCallbackIssuer(root, mode)
   const transactions = new Map(), audit = [], lines = []
   const originals = Object.fromEntries(['error', 'warn', 'log', 'info', 'debug'].map(method => [method, console[method]]))
   try {
@@ -80,17 +103,27 @@ const flow = async (root, mode) => {
     try {
       protocol = await createOidcProtocolClient({ issuer: fixture.issuer, clientId, clientSecret })
     } catch (error) {
-      if (mode !== 'untrusted-tls') throw error
+      if (!['untrusted-tls', 'http-issuer'].includes(mode)) throw error
       // Discovery fails before a handler/session store can be constructed.
-      return { mode, discoveryRejected: true, sessions: 0, cookieNames: [], jwks: fixture.records.jwks }
+      let cause = error
+      while (cause.cause) cause = cause.cause
+      return { mode, discoveryRejected: true, causeCode: cause.code, discoveryRequests: fixture.records.discovery }
     }
-    const sessionStore = new InMemorySessionStore()
+    if (['untrusted-tls', 'http-issuer'].includes(mode)) return { mode, discoveryRejected: false }
+    // Capture random values before the store formats cookies; expected values
+    // must not be derived from the headers being tested.
+    const generated = []
+    const sessionStore = new InMemorySessionStore({ random: size => {
+      const bytes = randomBytes(size)
+      generated.push(bytes.toString('base64url'))
+      return bytes
+    } })
     const sessionMaterial = { session_id: [], csrf_token: [] }
     const createSession = sessionStore.create.bind(sessionStore)
     sessionStore.create = async authorization => {
       const issued = await createSession(authorization)
-      sessionMaterial.session_id.push(issued.cookie.split(';')[0].split('=')[1])
-      sessionMaterial.csrf_token.push(issued.csrfToken)
+      sessionMaterial.session_id.push(generated.at(-2))
+      sessionMaterial.csrf_token.push(generated.at(-1))
       return issued
     }
     const transactionStore = {
@@ -123,7 +156,9 @@ const flow = async (root, mode) => {
     if (mode.startsWith('multi-aud')) claims.aud = [clientId, 'foreign-client']
     if (mode.endsWith('foreign-azp')) claims.azp = 'foreign-client'
     if (mode === 'nonce') claims.nonce = opaque()
-    if (mode === 'expired') claims.exp = Math.floor(Date.now() / 1000) - 3600
+    if (mode === 'expired') claims.exp = Math.floor(Date.now() / 1000) - 60
+    if (mode === 'future-iat') claims.iat = Math.floor(Date.now() / 1000) + 120
+    if (mode === 'future-nbf') claims.nbf = Math.floor(Date.now() / 1000) + 120
     const code = fixture.mint({ mode, nonce: location.searchParams.get('nonce'), challenge: mode === 'pkce' ? challenge(opaque()) : location.searchParams.get('code_challenge'), redirectUri: mode === 'redirect' ? 'https://foreign.invalid/callback' : location.searchParams.get('redirect_uri'), claims })
     const state = mode === 'state' ? opaque() : location.searchParams.get('state')
     const url = callbackPath + '?' + new URLSearchParams({ code, state })
@@ -132,12 +167,19 @@ const flow = async (root, mode) => {
       const setCookie = result.headers['Set-Cookie']
       const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
       const responseHeaders = Object.fromEntries(Object.entries(result.headers).map(([name, value]) => [name,
-        name.toLowerCase() === 'set-cookie' && result.status === 303 && ['positive', 'replay', 'single-aud-foreign-azp'].includes(mode)
+        name.toLowerCase() === 'set-cookie' && result.status === 303 && ['positive', 'replay', 'single-aud-foreign-azp', 'future-iat'].includes(mode)
           ? cookies.filter(cookie => !/^__Host-ok_console_(session|csrf)=/.test(cookie)) : value,
       ]))
       const serialized = JSON.stringify({ audit, lines, body: result.body, headers: responseHeaders })
       const material = { clientSecret: [clientSecret], ...sessionMaterial, code: [code], state: [state, transaction.state], nonce: [transaction.nonce, ...(claims.nonce ? [claims.nonce] : [])], code_verifier: [transaction.codeVerifier], id_token: fixture.records.idTokens, access_token: fixture.records.accessTokens }
-      return { status: result.status, error: result.body ? JSON.parse(result.body).error?.code : null, cookieNames: cookies.map(value => value.split('=')[0]), onlyClearTransaction: cookies.length === 1 && cookies[0] === clearedTransaction, sessions: sessionStore.sessions.size, transactions: transactions.size, audit: structuredClone(audit), leaks: Object.keys(material).filter(key => material[key].some(value => serialized.includes(value))), tokenRequests: fixture.records.tokenRequests, redemptions: fixture.records.redemptions, signedTokens: fixture.records.idTokens.length, jwks: fixture.records.jwks }
+      const candidates = leakCandidates(material)
+      writeSync(3, JSON.stringify(candidates) + '\n')
+      const cookieStrings = cookies.map(cookie => {
+        for (const value of sessionMaterial.session_id) cookie = cookie.replace(value, '<session-id>')
+        for (const value of sessionMaterial.csrf_token) cookie = cookie.replace(value, '<csrf-token>')
+        return cookie
+      })
+      return { cookieStrings, status: result.status, error: result.body ? JSON.parse(result.body).error?.code : null, cookieNames: cookies.map(value => value.split('=')[0]), onlyClearTransaction: cookies.length === 1 && cookies[0] === clearedTransaction, sessions: sessionStore.sessions.size, transactions: transactions.size, audit: structuredClone(audit), leaks: scanLeaks(serialized, candidates), tokenRequests: fixture.records.tokenRequests, redemptions: fixture.records.redemptions, signedTokens: fixture.records.idTokens.length, jwks: fixture.records.jwks }
     }
     const first = snapshot(await invoke(callbackPath, url, cookie))
     let replay
@@ -156,18 +198,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!process.env.OIDC_CALLBACK_TLS_DIR) {
     const root = mkdtempSync(join(tmpdir(), 'ok-oidc-callback-'))
     try {
-      for (const name of ['ca', 'server']) {
-        execFileSync('openssl', ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', name + '.key', '-out', name + '.csr', '-subj', '/CN=' + (name === 'ca' ? 'Callback Test CA' : 'localhost')], { cwd: root, stdio: 'ignore' })
-        issueTestCertificate({ root, name, selfSigned: name === 'ca', extensions: name === 'ca' ? 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' : 'basicConstraints=CA:FALSE\nsubjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' })
+      for (const name of ['ca', 'untrusted-ca', 'server', 'untrusted-server', 'wrong-name']) {
+        execFileSync('openssl', ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', name + '.key', '-out', name + '.csr', '-subj', '/CN=' + (name.endsWith('ca') ? name : 'localhost')], { cwd: root, stdio: 'ignore' })
+        issueTestCertificate({ root, name, issuer: name === 'untrusted-server' ? 'untrusted-ca' : name.endsWith('ca') ? name : 'ca', selfSigned: name.endsWith('ca'), extensions: name.endsWith('ca') ? 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' : `basicConstraints=CA:FALSE\nsubjectAltName=${name === 'wrong-name' ? 'DNS:localhost' : 'IP:127.0.0.1'}\nextendedKeyUsage=serverAuth\n` })
       }
       // Node TLS and proxy settings must not silently change the trust boundary.
       const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
         !/^(NODE_TLS_REJECT_UNAUTHORIZED|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|OIDC_CALLBACK_TLS_DIR|OIDC_CALLBACK_UNTRUSTED)$/i.test(name)))
       for (const untrusted of [false, true]) {
         const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-          encoding: 'utf8', timeout: 60000,
+          encoding: 'utf8', timeout: 25000, stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
           env: { ...env, OIDC_CALLBACK_TLS_DIR: root, ...(untrusted ? { OIDC_CALLBACK_UNTRUSTED: '1' } : { NODE_EXTRA_CA_CERTS: join(root, 'ca.crt') }) },
         })
+        const candidates = (child.output[3] ?? '').trim().split('\n').filter(Boolean).flatMap(line => JSON.parse(line))
+        const rawLeaks = scanLeaks((child.stdout ?? '') + (child.stderr ?? ''), candidates)
+        if (rawLeaks.length) throw new Error('Child raw output disclosed: ' + rawLeaks.join(', '))
         process.stdout.write(child.stdout ?? ''); process.stderr.write(child.stderr ?? '')
         if (child.error) throw child.error
         if (child.status !== 0) { process.exitCode = child.status ?? 1; break }

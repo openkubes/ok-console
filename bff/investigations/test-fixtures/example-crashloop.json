@@ -1,0 +1,77 @@
+{
+  "schema": "openkubes.console.investigation-pack/v1alpha1",
+  "scenario": {
+    "id": "example-crashloop",
+    "title": "Example: container restarts after a missing setting",
+    "description": "Neutral synthetic pack used by the Console tests. Not a product scenario.",
+    "fixture": "example-crashloop@1",
+    "synthetic": true
+  },
+  "target": {
+    "cluster": "example-cluster",
+    "namespace": "example",
+    "workload": { "kind": "Deployment", "name": "example-api" }
+  },
+  "evidence": [
+    {
+      "id": "ev-status",
+      "type": "pod-status",
+      "source": "k8s_get_resources",
+      "uri": "k8s://example-cluster/namespaces/example/pods/example-api-5d8f9-abcde/status",
+      "collectedAt": "2026-01-01T00:00:00Z",
+      "digest": "sha256:ed41abbf4ee44eed5356815a9d84b183e430022f190b87e9e9457b36f6e86442",
+      "data": {
+        "containerStatuses": [
+          { "name": "api", "ready": false, "restartCount": 3, "state": { "waiting": { "reason": "CrashLoopBackOff" } }, "lastState": { "terminated": { "reason": "Error", "exitCode": 2 } } }
+        ]
+      }
+    },
+    {
+      "id": "ev-logs",
+      "type": "pod_logs",
+      "source": "k8s_get_pod_logs",
+      "uri": "k8s://example-cluster/namespaces/example/pods/example-api-5d8f9-abcde/logs?container=api&previous=true",
+      "collectedAt": "2026-01-01T00:00:00Z",
+      "digest": "sha256:ee5e9e50e19fde06757473f799cd0febcee45fc8c82c8e5f15fa35e37db82c67",
+      "data": { "container": "api", "previous": true, "lines": ["starting", "error: EXAMPLE_SETTING is required"] }
+    },
+    {
+      "id": "ev-spec",
+      "type": "pod-spec",
+      "source": "k8s_get_resources",
+      "uri": "k8s://example-cluster/namespaces/example/pods/example-api-5d8f9-abcde/spec",
+      "collectedAt": "2026-01-01T00:00:00Z",
+      "digest": "sha256:e5e5354a19f95da72003588aebe575cb443c4b32066b19aac74000052785a449",
+      "data": { "containers": [ { "name": "api", "env": { "names": ["PORT"], "valuesIncluded": false }, "envFrom": [] } ] }
+    }
+  ],
+  "analysis": {
+    "kind": "recorded",
+    "producer": "recorded-fixture example-crashloop@1",
+    "hypotheses": [
+      {
+        "id": "h1-missing-setting",
+        "statement": "The api container exits at start because EXAMPLE_SETTING is not provided.",
+        "evidenceRefs": ["ev-status", "ev-logs", "ev-spec"],
+        "claims": [
+          { "id": "c1-crashloop", "statement": "The container waits in CrashLoopBackOff.", "factRef": "ev-status#/containerStatuses/0/state/waiting/reason", "assertion": { "kind": "container.state.waiting.reason", "op": "equals", "value": "CrashLoopBackOff" } },
+          { "id": "c2-restarts", "statement": "The container restarted at least 3 times.", "factRef": "ev-status#/containerStatuses/0/restartCount", "assertion": { "kind": "container.restartCount", "op": "gte", "value": 3 } },
+          { "id": "c3-exit-code", "statement": "The last run exited with code 2.", "factRef": "ev-status#/containerStatuses/0/lastState/terminated/exitCode", "assertion": { "kind": "container.lastState.terminated.exitCode", "op": "equals", "value": 2 } },
+          { "id": "c4-log", "statement": "The log names the missing setting.", "factRef": "ev-logs#/lines", "assertion": { "kind": "log.line", "op": "contains", "value": "EXAMPLE_SETTING is required" } },
+          { "id": "c5-env", "statement": "The environment does not define EXAMPLE_SETTING.", "factRef": "ev-spec#/containers/0/env/names", "assertion": { "kind": "container.env.names", "op": "excludes", "value": "EXAMPLE_SETTING" } }
+        ]
+      },
+      {
+        "id": "h2-oom",
+        "statement": "Alternative: the container is killed for exceeding its memory limit.",
+        "evidenceRefs": ["ev-status"],
+        "claims": [
+          { "id": "c6-oom", "statement": "The last run was OOMKilled.", "factRef": "ev-status#/containerStatuses/0/lastState/terminated/reason", "assertion": { "kind": "container.lastState.terminated.reason", "op": "equals", "value": "OOMKilled" } }
+        ]
+      }
+    ],
+    "recommendations": [
+      { "id": "r1-provide-setting", "text": "Provide EXAMPLE_SETTING to the container. To be carried out by a human operator.", "basedOn": ["h1-missing-setting"], "actionClass": "configuration_change" }
+    ]
+  }
+}

@@ -10,6 +10,8 @@ import { createRuntimeHttpHandler } from './runtimeHttp.mjs'
 import { createClusterDryRunHttpAdapter } from './adapters/createClusterDryRun.mjs'
 import { loadBrandingDirectory } from './brandingRuntime.mjs'
 import { resolveDeploymentPolicy } from './deploymentPolicy.mjs'
+import { loadInvestigationPacks } from './investigations/pack.mjs'
+import { createInvestigationService } from './investigations/service.mjs'
 
 export const createConsoleServer = async ({
   env = process.env,
@@ -19,6 +21,7 @@ export const createConsoleServer = async ({
   runtimeHttpFactory = createRuntimeHttpHandler,
   dryRunFactory = createClusterDryRunHttpAdapter,
   brandingLoader = loadBrandingDirectory,
+  investigationPackLoader = loadInvestigationPacks,
   sourceFailureLog = (line) => console.log(line),
 } = {}) => {
   const host = env.OK_CONSOLE_BFF_HOST ?? '127.0.0.1'
@@ -30,6 +33,9 @@ export const createConsoleServer = async ({
   // Both fail closed before anything listens. They are independent: branding never decides permissions.
   const deploymentPolicy = resolveDeploymentPolicy(env)
   const branding = await brandingLoader(env.OK_CONSOLE_BRANDING_DIR)
+  // Synthetic fixture investigations; unset means the investigation routes do not exist.
+  const investigationPacks = await investigationPackLoader(env.OK_CONSOLE_INVESTIGATION_PACKS_DIR)
+  const investigationService = investigationPacks ? createInvestigationService({ packs: investigationPacks }) : null
   const sessionRuntime = await sessionRuntimeFactory({ env })
   const dryRunExecutor = env.OK_CONSOLE_DRY_RUN_URL
     ? dryRunFactory({ url: env.OK_CONSOLE_DRY_RUN_URL })
@@ -46,6 +52,7 @@ export const createConsoleServer = async ({
     localIdentityHandler: sessionRuntime.localIdentityHandler,
     enableFailureInjection: env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true',
     dryRunExecutor,
+    investigationService,
     sourceFailureObserver: sourceFailureLog,
     requestObserver: ({ stage, method, pathname, correlationId }) => {
       console.log(`${method} ${pathname} · ${correlationId} stage=${stage}`)
@@ -63,7 +70,7 @@ export const createConsoleServer = async ({
     factory = serverFactory ?? ((handler) => createHttpsServer(tls, handler))
   }
   const server = factory(runtimeHttpFactory({ apiHandler, readiness: sessionRuntime.ready, brandingAssets: branding?.assets ?? null, brandingDocument: branding?.branding ?? null, deploymentPolicy }))
-  return { server, sessionRuntime, host, port, branding: branding?.branding ?? null, deploymentPolicy, sourceMode: env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture' }
+  return { server, sessionRuntime, host, port, branding: branding?.branding ?? null, deploymentPolicy, investigationScenarios: investigationPacks ? [...investigationPacks.keys()] : [], sourceMode: env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture' }
 }
 
 const startConsoleServer = async () => {
@@ -75,6 +82,7 @@ const startConsoleServer = async () => {
     console.log(`Failure injection: ${process.env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true' ? 'enabled' : 'disabled'}`)
     console.log(`Session store: ${sessionRuntime.mode}`)
     console.log(`Deployment policy: ${deploymentPolicy?.name ?? 'default'}`)
+    console.log(`Fixture investigations: ${runtime.investigationScenarios.length ? runtime.investigationScenarios.join(', ') : 'not configured'}`)
     console.log(`Branding: ${branding ? `${branding.productName} (OK_CONSOLE_BRANDING_DIR)` : 'built-in default'}`)
   })
 

@@ -20,6 +20,13 @@ export const AUTHENTICATION_WRITES = Object.freeze([
   Object.freeze({ method: 'DELETE', path: `${API_ROOT}/auth/session` }), // sign-out (httpSession)
 ])
 
+// The only other state-changing request allowed under fixture-read-only: starting a fixture
+// investigation, which evaluates a loaded synthetic pack in memory and never contacts a cluster or a model
+// (bff/investigations). Exact method and path; result and evidence reads are GET.
+export const FIXTURE_EVALUATION_WRITES = Object.freeze([
+  Object.freeze({ method: 'POST', path: `${API_ROOT}/investigations` }),
+])
+
 export class DeploymentPolicyError extends Error {
   constructor(problems) {
     super(`Invalid deployment policy configuration:\n- ${problems.join('\n- ')}`)
@@ -52,7 +59,7 @@ export const deploymentPolicyAllows = (policy, method, pathname) => {
   try { path = decodeURIComponent(pathname).toLowerCase() } catch { return false }
   if (/\/operations(?:\/|$)/.test(path)) return false
   if (method === 'GET' || method === 'HEAD') return true
-  return AUTHENTICATION_WRITES.some((entry) => entry.method === method && entry.path === pathname)
+  return [...AUTHENTICATION_WRITES, ...FIXTURE_EVALUATION_WRITES].some((entry) => entry.method === method && entry.path === pathname)
 }
 
 // What the Console reads at startup to label the UI. The server enforces the policy either way.

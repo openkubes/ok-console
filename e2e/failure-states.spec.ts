@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { injectBffFailure, signInPrototype } from './support'
+import { assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
 
 test('default recorded fixtures show Unknown without failure injection', async ({ page }) => {
   await signInPrototype(page)
@@ -19,20 +19,24 @@ test('default recorded fixtures show Unknown without failure injection', async (
 })
 
 for (const failure of ['stale', 'degraded'] as const) {
-  test(`${failure} observations remain usable and visibly qualified`, async ({ page }) => {
-    await injectBffFailure(page, failure)
-    await signInPrototype(page)
-    const status = page.getByRole('status')
-    await expect(status).toBeVisible()
-    await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')
-    await expect(page.getByRole('heading', { name: 'Cluster posture' })).toBeVisible()
-    if (failure === 'stale') {
-      const clusters = page.locator('.cluster-card')
-      await expect(clusters).toHaveCount(4)
-      await expect(clusters.getByText('Unknown', { exact: true })).toHaveCount(4)
-      await expect(clusters.getByText('Ready', { exact: true })).toHaveCount(0)
-      await expect(page.getByRole('region', { name: 'Platform metrics' })).toContainText('Unavailable')
-    }
+  test.describe(`${failure} injection on current fixtures`, () => {
+    test.use({ baseURL: 'http://127.0.0.1:8789' })
+    test(`${failure} observations remain usable and visibly qualified`, async ({ page }) => {
+      await assertCurrentFixture(page)
+      await injectBffFailure(page, failure)
+      await signInPrototype(page)
+      const status = page.getByRole('status')
+      await expect(status).toBeVisible()
+      await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')
+      await expect(page.getByRole('heading', { name: 'Cluster posture' })).toBeVisible()
+      if (failure === 'stale') {
+        const clusters = page.locator('.cluster-card')
+        await expect(clusters).toHaveCount(4)
+        await expect(clusters.getByText('Unknown', { exact: true })).toHaveCount(4)
+        await expect(clusters.getByText('Ready', { exact: true })).toHaveCount(0)
+        await expect(page.getByRole('region', { name: 'Platform metrics' })).toContainText('Unavailable')
+      }
+    })
   })
 }
 

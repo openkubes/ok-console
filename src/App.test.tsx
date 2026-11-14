@@ -53,6 +53,15 @@ const openShell = async (name = 'ok-mgmt') => {
 
 describe('OpenKubes Console', () => {
 
+  it('suppresses all Platform metrics values and notes in stale browser fixture mode', async () => {
+    await renderSignedIn()
+    const metrics = await screen.findByRole('region', { name: 'Platform metrics' })
+    expect(metrics).toHaveTextContent('ClustersUnavailableUnavailableCapabilitiesUnavailableUnavailableWorkload claimsUnavailableUnavailableOpen findingsUnavailableUnavailable')
+    expect(within(metrics).getAllByText('Unavailable', { exact: true })).toHaveLength(8)
+    expect(metrics).not.toHaveTextContent(/ready|conformant|converging|in progress|critical|management plane/i)
+  })
+
+
   it('keeps protected platform content behind federated-first sign-in', async () => {
     render(<App />)
     expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
@@ -595,8 +604,8 @@ it('shows unavailable observed metrics and no invented management plane for a te
   const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot)
   try {
     await renderSignedIn()
-    expect(await screen.findAllByText('Unavailable')).toHaveLength(3)
-    expect(screen.getByText(/0 management plane/)).toBeInTheDocument()
+    expect(await screen.findAllByText('Unavailable')).toHaveLength(8)
+    expect(screen.queryByText(/0 management plane/)).not.toBeInTheDocument()
     expect(document.querySelector('.management-ribbon')).toBeNull()
     window.location.hash = '#/clusters'
     fireEvent(window, new Event('hashchange'))

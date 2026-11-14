@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FixtureObservedStateAdapter } from './adapters/fixtureObservedState.mjs'
+import { createObservedStateSource } from './source.mjs'
 import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 
 let server: Server | undefined
@@ -15,10 +16,10 @@ afterEach(async () => {
   }
 })
 
-it('judges recorded fixture observations using the real clock, including HTTP projections', async () => {
+it.each([{}, { OK_CONSOLE_OBSERVED_STATE_MODE: 'fixture' }])('judges factory fixture observations using the real clock, including HTTP projections: %j', async environment => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-11-14T12:00:00Z'))
-  const source = new FixtureObservedStateAdapter()
+  const source = createObservedStateSource(environment)
   const snapshot = await source.readSnapshot()
   expect(snapshot.sourceHealth).toMatchObject({ freshness: 'Stale', warnings: expect.arrayContaining([expect.objectContaining({ code: 'SOURCE_STALE' })]) })
   expect(snapshot.evidence.length).toBeGreaterThan(0)
@@ -58,4 +59,15 @@ it('lets the shared verdict decide Current when the injected clock matches the r
   expect(snapshot.sourceHealth.warnings).not.toContainEqual(expect.objectContaining({ code: 'SOURCE_STALE' }))
   expect(snapshot.clusters[0].readiness).toBe('Ready')
   expect(snapshot.evidence.find((item: { id: string }) => item.id === snapshot.clusters[0].evidenceId).freshness).toBe('Current')
+})
+
+
+it.each([{}, { OK_CONSOLE_OBSERVED_STATE_MODE: 'fixture' }])('forwards the factory clock to the fixture adapter: %j', async environment => {
+  const recorded = JSON.parse(await readFile(new URL('./fixtures/observed-state.json', import.meta.url), 'utf8'))
+  const now = vi.fn(() => new Date(recorded.observedAt))
+  const source = createObservedStateSource(environment, { now })
+  expect((await source.readSnapshot()).sourceHealth.freshness).toBe('Current')
+  expect(now).toHaveBeenCalled()
+  now.mockReturnValue(new Date('2026-11-14T12:00:00Z'))
+  expect((await source.readSnapshot()).sourceHealth.freshness).toBe('Stale')
 })

@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react'
+import { useBrandTerms } from './branding/BrandingContext'
 import type { EvidenceRef, PlatformSnapshot } from './domain/contracts'
 import { clusterPresentation, evidencePresentation, overviewPresentation, observedText } from './observationPresentation'
 
@@ -37,6 +38,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
 
 export default function DiagnosticWidget({ data, generation = 0, openEvidence }: { data: PlatformSnapshot; generation?: number; openEvidence: (item: EvidenceRef) => void }) {
   const summary = overviewPresentation(data)
+  const { assistantName } = useBrandTerms()
   const [previous, setPrevious] = useState({ generation, current: summary.current })
   const nextId = useRef(1)
   const [isOpen, setIsOpen] = useState(false)
@@ -44,7 +46,7 @@ export default function DiagnosticWidget({ data, generation = 0, openEvidence }:
   const [messages, setMessages] = useState<Message[]>([{
     id: 0,
     role: 'assistant',
-    text: 'Hi, I’m the OK AI Diagnostic preview. I can summarize the cluster observations and evidence shown in this Console. I’m read-only; no live AI service or cluster actions are connected.',
+    text: `Hi, I’m the ${assistantName} Diagnostic preview. I can summarize the cluster observations and evidence shown in this Console. I’m read-only; no live AI service or cluster actions are connected.`,
   }])
 
   if (generation !== previous.generation || summary.current !== previous.current) {
@@ -72,8 +74,8 @@ export default function DiagnosticWidget({ data, generation = 0, openEvidence }:
   }
 
   return <div className="diagnostic-widget">
-    {isOpen && <section className="diagnostic-panel" role="dialog" aria-label="OK AI Diagnostic preview">
-      <header className="diagnostic-header"><span className="diagnostic-spark" aria-hidden="true">✦</span><span><strong>OK AI</strong><small>Diagnostic · Demo Preview</small></span><button type="button" aria-label="Close OK AI Diagnostic" onClick={() => setIsOpen(false)}>×</button></header>
+    {isOpen && <section className="diagnostic-panel" role="dialog" aria-label={`${assistantName} Diagnostic preview`}>
+      <header className="diagnostic-header"><span className="diagnostic-spark" aria-hidden="true">✦</span><span><strong>{assistantName}</strong><small>Diagnostic · Demo Preview</small></span><button type="button" aria-label={`Close ${assistantName} Diagnostic`} onClick={() => setIsOpen(false)}>×</button></header>
       <div className="diagnostic-messages" aria-live="polite">
         {messages.map((message) => <div className={`diagnostic-message ${message.role}`} key={message.id}>
           {(message.historical || message.qualified) && <small>{message.historical ? 'Earlier answer, based on data observed at' : 'Answer based on data observed at'} {new Date(message.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>}
@@ -82,9 +84,9 @@ export default function DiagnosticWidget({ data, generation = 0, openEvidence }:
         </div>)}
       </div>
       <div className="diagnostic-prompts"><button onClick={() => ask('Platform status')}>Platform status</button><button onClick={() => ask('ok-shared status')}>ok-shared status</button></div>
-      <form className="diagnostic-form" onSubmit={submit}><label className="sr-only" htmlFor="diagnostic-question">Ask OK AI Diagnostic</label><input id="diagnostic-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about observed status…"/><button type="submit" disabled={!question.trim()}>Send</button></form>
+      <form className="diagnostic-form" onSubmit={submit}><label className="sr-only" htmlFor="diagnostic-question">Ask {assistantName} Diagnostic</label><input id="diagnostic-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about observed status…"/><button type="submit" disabled={!question.trim()}>Send</button></form>
       <p className="diagnostic-disclaimer">Read-only preview · No live AI · No cluster changes</p>
     </section>}
-    <button className={`diagnostic-launcher ${isOpen ? 'active' : ''}`} aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)}><span aria-hidden="true">✦</span> Ask OK AI <small>PREVIEW</small></button>
+    <button className={`diagnostic-launcher ${isOpen ? 'active' : ''}`} aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)}><span aria-hidden="true">✦</span> Ask {assistantName} <small>PREVIEW</small></button>
   </div>
 }

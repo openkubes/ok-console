@@ -8,6 +8,8 @@ import { createObservedStateSource } from './source.mjs'
 import { createSessionRuntime } from './security/runtime.mjs'
 import { createRuntimeHttpHandler } from './runtimeHttp.mjs'
 import { createClusterDryRunHttpAdapter } from './adapters/createClusterDryRun.mjs'
+import { loadBrandingDirectory } from './brandingRuntime.mjs'
+import { resolveDeploymentPolicy } from './deploymentPolicy.mjs'
 
 export const createConsoleServer = async ({
   env = process.env,
@@ -16,6 +18,7 @@ export const createConsoleServer = async ({
   sourceFactory = createObservedStateSource,
   runtimeHttpFactory = createRuntimeHttpHandler,
   dryRunFactory = createClusterDryRunHttpAdapter,
+  brandingLoader = loadBrandingDirectory,
   sourceFailureLog = (line) => console.log(line),
 } = {}) => {
   const host = env.OK_CONSOLE_BFF_HOST ?? '127.0.0.1'
@@ -24,6 +27,9 @@ export const createConsoleServer = async ({
     throw new Error('OK_CONSOLE_BFF_PORT must be an integer between 1 and 65535.')
   }
 
+  // Both fail closed before anything listens. They are independent: branding never decides permissions.
+  const deploymentPolicy = resolveDeploymentPolicy(env)
+  const branding = await brandingLoader(env.OK_CONSOLE_BRANDING_DIR)
   const sessionRuntime = await sessionRuntimeFactory({ env })
   const dryRunExecutor = env.OK_CONSOLE_DRY_RUN_URL
     ? dryRunFactory({ url: env.OK_CONSOLE_DRY_RUN_URL })
@@ -56,18 +62,20 @@ export const createConsoleServer = async ({
     const tls = { cert: await tlsFile('OK_CONSOLE_LOCAL_TLS_CERT_FILE'), key: await tlsFile('OK_CONSOLE_LOCAL_TLS_KEY_FILE'), minVersion: 'TLSv1.2' }
     factory = serverFactory ?? ((handler) => createHttpsServer(tls, handler))
   }
-  const server = factory(runtimeHttpFactory({ apiHandler, readiness: sessionRuntime.ready }))
-  return { server, sessionRuntime, host, port, sourceMode: env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture' }
+  const server = factory(runtimeHttpFactory({ apiHandler, readiness: sessionRuntime.ready, brandingAssets: branding?.assets ?? null, brandingDocument: branding?.branding ?? null, deploymentPolicy }))
+  return { server, sessionRuntime, host, port, branding: branding?.branding ?? null, deploymentPolicy, sourceMode: env.OK_CONSOLE_OBSERVED_STATE_MODE ?? 'fixture' }
 }
 
 const startConsoleServer = async () => {
   const runtime = await createConsoleServer()
-  const { server, sessionRuntime, host, port, sourceMode } = runtime
+  const { server, sessionRuntime, host, port, sourceMode, branding, deploymentPolicy } = runtime
   server.listen(port, host, () => {
     console.log(`OpenKubes Console runtime listening on ${process.env.OK_CONSOLE_LOCAL_IDENTITY_ENABLED === 'true' ? 'https' : 'http'}://${host}:${port}`)
     console.log(`Observed-state source: ${sourceMode}`)
     console.log(`Failure injection: ${process.env.OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION === 'true' ? 'enabled' : 'disabled'}`)
     console.log(`Session store: ${sessionRuntime.mode}`)
+    console.log(`Deployment policy: ${deploymentPolicy?.name ?? 'default'}`)
+    console.log(`Branding: ${branding ? `${branding.productName} (OK_CONSOLE_BRANDING_DIR)` : 'built-in default'}`)
   })
 
   let shuttingDown = false

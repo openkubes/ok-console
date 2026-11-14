@@ -261,7 +261,7 @@ describe('OpenKubes Console', () => {
     shell.run('why is this cluster ready?')
     expect(shellEntries(shell.log)).toEqual([
       entry('command', 'why is this cluster ready?'),
-      entry('ai', 'This shell session holds readiness Ready and 4 lifecycle stage(s), all reporting Ready.'),
+      entry('ai', 'This shell session holds readiness Unknown for ok-mgmt.\nDeclared: Unknown — Historical fixture · Contract accepted · generation 14\nInfrastructure: Unknown — Historical fixture · 3 control-plane nodes healthy\nControl plane: Unknown — Historical fixture · API and controllers observed\nCapabilities: Unknown — Historical fixture · 4 of 4 required contracts conformant'),
       proposal,
     ])
   })
@@ -549,7 +549,7 @@ describe('OpenKubes Console', () => {
     expect(screen.getByRole('dialog', { name: 'OK AI Diagnostic preview' })).toBeInTheDocument()
     expect(screen.getByText(/no live AI service or cluster actions are connected/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
-    expect(await screen.findByText(/ok-shared: Fixture snapshot.*Last observed: Pending/i)).toBeInTheDocument()
+    expect(await screen.findByText(/ok-shared: Fixture snapshot.*Last observed: Unknown/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /View evidence · Shared services convergence/i }))
     expect(await screen.findByRole('heading', { name: 'Shared services convergence' })).toBeInTheDocument()
   })
@@ -600,8 +600,8 @@ it('shows unavailable observed metrics and no invented management plane for a te
     expect(document.querySelector('.management-ribbon')).toBeNull()
     window.location.hash = '#/clusters'
     fireEvent(window, new Event('hashchange'))
-    expect(await screen.findByRole('button', { name: 'Ready · 1' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Attention · 0' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Ready · 0' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Attention · 1' })).toBeInTheDocument()
     expect(document.querySelector('.management-row')).toBeNull()
   } finally {
     observation.mockRestore()

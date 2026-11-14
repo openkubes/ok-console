@@ -56,7 +56,7 @@ beforeAll(async () => {
       issueTestCertificate({ root, name, issuer: name, privateKey: 'nc.key', selfSigned: true, extensions: `basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nnameConstraints=critical,permitted;DNS:${permitted}\n` })
     }
     issueTestCertificate({ root, name: 'ncleaf', csr: 'server.csr', issuer: 'nc', extensions: 'extendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n' })
-    const fixture = await new FixtureObservedStateAdapter().readSnapshot()
+    const fixture = await new FixtureObservedStateAdapter(undefined, { now: () => new Date('2026-08-21T18:00:00Z') }).readSnapshot()
     body = JSON.stringify({ apiVersion: 'observed.openkubes.io/v0alpha2', kind: 'ConsoleObservedState', metadata: { observedAt: fixture.observedAt, sourceRevision: fixture.sourceRevision }, data: fixture })
   } catch (error) {
     rmSync(root, { recursive: true, force: true })
@@ -308,7 +308,7 @@ server.serve_forever()
     } finally { log.mockRestore() }
   })
   it('keeps projection failures outside upstream classification', async () => {
-    const result = await request(environment(1), 'overview', { sourceFactory: () => ({ readSnapshot: async () => { const snapshot = await new FixtureObservedStateAdapter().readSnapshot(); return { ...snapshot, get clusters() { throw Object.assign(new Error(canary), { code: 'CERT_HAS_EXPIRED' }) } } } }) })
+    const result = await request(environment(1), 'overview', { sourceFactory: () => ({ readSnapshot: async () => { const snapshot = await new FixtureObservedStateAdapter(undefined, { now: () => new Date('2026-08-21T18:00:00Z') }).readSnapshot(); return { ...snapshot, get clusters() { throw Object.assign(new Error(canary), { code: 'CERT_HAS_EXPIRED' }) } } } }) })
     expect(result.status).toBe(503)
     expect(result.lines).toEqual([])
     expect(result.payload.error.reason).toBeUndefined()

@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test'
 import { injectBffFailure, signInPrototype } from './support'
 
+test('default recorded fixtures show Unknown without failure injection', async ({ page }) => {
+  await signInPrototype(page)
+  const clusters = page.locator('.cluster-card')
+  await expect(clusters).toHaveCount(4)
+  await expect(clusters.getByText('Unknown', { exact: true })).toHaveCount(4)
+  await expect(clusters.getByText('Ready', { exact: true })).toHaveCount(0)
+  await expect(clusters.locator('.live-dot')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Platform metrics' })).toContainText('Unavailable')
+  await page.goto('/#/clusters')
+  const management = page.locator('.table-row.cluster-columns').filter({ hasText: 'ok-mgmt' })
+  await expect(management).toContainText('Unknown')
+  await management.getByRole('button', { name: 'Open ok-mgmt' }).click()
+  await expect(page.locator('.title-actions .status')).toHaveText('Unknown')
+  await expect(page.locator('.lifecycle-step .status')).toHaveCount(4)
+  for (const stage of await page.locator('.lifecycle-step .status').all()) await expect(stage).toHaveText('Unknown')
+})
+
 for (const failure of ['stale', 'degraded'] as const) {
   test(`${failure} observations remain usable and visibly qualified`, async ({ page }) => {
     await injectBffFailure(page, failure)

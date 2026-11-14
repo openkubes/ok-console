@@ -25,7 +25,7 @@ describe('observationPresentation', () => {
   it('placement rejects absent and foreign Evidence independently of readiness', () => {
     const data = structuredClone(platformFixture)
     data.source = 'bff'; data.freshness = 'Current'
-    const claim = data.claims[0]
+    const claim = { ...data.claims[0], readiness: 'Ready' as const }
     const evidence = data.evidence.find(item => item.id === claim.evidenceId)!
     Object.assign(evidence, { freshness: 'Current', immutable: false, outcome: 'Ready', cluster: claim.targetCluster })
     expect(placementPresentation(claim, data).current).toBe(true)

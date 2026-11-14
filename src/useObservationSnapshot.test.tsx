@@ -39,6 +39,9 @@ it('R3 snapshot failure demotes detail independently; detail recovery alone cann
   vi.useFakeTimers()
   const data = snapshot()
   data.clusters.forEach(c => { c.freshness = 'Current' })
+  // This scenario starts with a current detail before the snapshot request fails.
+  data.clusters[0].readiness = 'Ready'
+  data.evidence[0].outcome = 'Ready'
   const cluster = data.clusters[0]
   const fetch = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
   vi.spyOn(consoleData, 'getCluster').mockResolvedValue(cluster)

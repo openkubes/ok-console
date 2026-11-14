@@ -123,14 +123,17 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   // Wait on the effect, not a host-clock interval: under CPU contention or a host
   // clock step a fixed sleep can end before PostgreSQL's clock passes the deadline.
-  // The deadline query must return exactly one non-null timestamp; anything else fails
-  // the test instead of polling forever.
+  // The deadline query must return exactly one non-null timestamp, and the deadline must
+  // pass within 3 s (seeded deadlines are at most 400 ms away); otherwise this throws so
+  // the caller's cleanup releases its locks instead of polling past the test timeout.
   const waitForDatabaseTimePast = async (sql: string, params: unknown[] = [], client: Pick<pg.PoolClient, 'query'> = pool) => {
+    const giveUpAt = performance.now() + 3000
     for (;;) {
       const { rows } = await client.query(`SELECT clock_timestamp() > deadline AS past FROM (${sql}) AS seeded(deadline)`, params)
       expect(rows).toHaveLength(1)
       expect(typeof rows[0].past).toBe('boolean')
       if (rows[0].past) return
+      if (performance.now() > giveUpAt) throw new Error('Database clock did not pass the seeded deadline within 3 s.')
       await new Promise(resolve => setTimeout(resolve, 10))
     }
   }

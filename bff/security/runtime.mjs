@@ -404,7 +404,7 @@ export const createSessionRuntime = async ({
           await authenticationAudit.record(event)
         },
       })
-      localAccessHandler = createLocalAccessHttpHandler({ verifier, expectedOrigin })
+      localAccessHandler = createLocalAccessHttpHandler({ method, verifier, expectedOrigin, audit: (event) => authenticationAudit.record(event) })
     } catch (error) {
       await pool.end().catch(() => {})
       throw error

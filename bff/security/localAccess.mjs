@@ -1,5 +1,6 @@
 import { createHmac, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
+import { bounded, safeReason } from './authenticationAudit.mjs'
 import { classifyPgError, pgConnect, pgQuery } from './pgFailure.mjs'
 
 const scrypt = promisify(nodeScrypt)
@@ -12,7 +13,9 @@ const DUMMY_VERIFIER = Buffer.alloc(32, 173)
 const normalize = (value) => typeof value === 'string' ? value.normalize('NFKC').trim().toLowerCase() : ''
 const validInput = ({ username, password, reason }) => username.length >= 1 && username.length <= 128
   && typeof password === 'string' && password.length >= 1 && password.length <= 1024
-  && typeof reason === 'string' && reason.trim().length >= 12 && reason.length <= 512
+  && typeof reason === 'string' && [...reason.trim()].length >= 12 && reason.length <= 512
+  // normalize() already trims and the 128 limit is enforced above; bounded adds the control-character rule.
+  && bounded(username, 256) && safeReason(reason.trim())
 
 export class LocalAccessError extends Error {
   constructor(code = 'LOCAL_ACCESS_REJECTED', { cause, step } = {}) {
@@ -190,7 +193,7 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
   const mapped = new Map(accounts.map((account) => [normalize(account.username), account]))
   return async (input) => {
     const username = normalize(input?.username)
-    if (!validInput({ username, password: input?.password, reason: input?.reason })) throw new LocalAccessError()
+    if (!validInput({ username, password: input?.password, reason: input?.reason })) throw new LocalAccessError('INVALID_REQUEST')
     const run = async (step, operation) => {
       try { return await operation() } catch (cause) {
         throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE', { cause, step })

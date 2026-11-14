@@ -18,6 +18,19 @@ afterEach(async () => {
 })
 
 describe('Console server prototype startup', () => {
+  it('rejects PostgreSQL sessions without an explicit observed-state mode before creating the HTTP server', async () => {
+    const sourceFactory = vi.fn()
+    const serverFactory = vi.fn((handler) => createServer(handler))
+
+    await expect(createConsoleServer({
+      env: { OK_CONSOLE_SESSION_STORE_MODE: 'postgres' },
+      sourceFactory,
+      serverFactory,
+    })).rejects.toThrow('OK_CONSOLE_OBSERVED_STATE_MODE must be explicitly set to fixture or openkubes for the PostgreSQL session runtime.')
+    expect(sourceFactory).not.toHaveBeenCalled()
+    expect(serverFactory).not.toHaveBeenCalled()
+  })
+
   it.each(['0.0.0.0', '::', '10.0.0.5', 'console.example'])('rejects unsafe prototype bind %s before creating the HTTP server', async (host) => {
     const serverFactory = vi.fn((handler) => createServer(handler))
 

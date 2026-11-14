@@ -5,6 +5,7 @@ import { createSessionRuntime } from '../security/runtime.mjs'
 export const createDiagnosticRuntime = (port, options = {}) => createSessionRuntime({
   env: {
     OK_CONSOLE_SESSION_STORE_MODE: 'postgres', OK_CONSOLE_ORIGIN: 'https://console.invalid',
+    OK_CONSOLE_OBSERVED_STATE_MODE: 'fixture',
     OK_CONSOLE_ENVIRONMENT_ID: 'community-preview', OK_CONSOLE_TENANT_ID: 'platform',
     OK_CONSOLE_SESSION_EPOCH: 'epoch-test', OK_CONSOLE_AUTHORIZATION_REVISION: 'revision',
     OK_CONSOLE_POSTGRES_URL_FILE: '/fixture/database', OK_CONSOLE_POSTGRES_ALLOW_INSECURE_LOOPBACK: 'true',

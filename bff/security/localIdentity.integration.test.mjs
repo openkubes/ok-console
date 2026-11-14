@@ -66,6 +66,7 @@ suite('OK-214 real PostgreSQL local identity', () => {
     env = {
       OK_CONSOLE_LOCAL_IDENTITY_ENABLED:'true', OK_CONSOLE_PROFILE:'ok-local', NODE_ENV:'development',
       OK_CONSOLE_SESSION_STORE_MODE:'postgres', OK_CONSOLE_BFF_HOST:'127.0.0.1', OK_CONSOLE_BFF_PORT:String(port), OK_CONSOLE_ORIGIN:origin,
+      OK_CONSOLE_OBSERVED_STATE_MODE:'fixture',
       OK_CONSOLE_ENVIRONMENT_ID:scope.environmentId, OK_CONSOLE_TENANT_ID:'platform', OK_CONSOLE_SESSION_EPOCH:'test-epoch', OK_CONSOLE_AUTHORIZATION_REVISION:'mapping-1',
       OK_CONSOLE_SESSION_ENVELOPE_PRIMARY_KEY_ID:'test-key',
       OK_CONSOLE_SESSION_ENVELOPE_KEYS_FILE:await put('keys.json',JSON.stringify({ 'test-key':Buffer.alloc(32,1).toString('base64') })),

@@ -104,6 +104,9 @@ describe('OK-173 deployable overlay authorization invariants', () => {
           expect(sessionMode, `${context} must select PostgreSQL sessions explicitly`).toEqual([
             { name: 'OK_CONSOLE_SESSION_STORE_MODE', value: 'postgres' },
           ])
+          const sourceMode = (container.env ?? []).filter((item) => item.name === 'OK_CONSOLE_OBSERVED_STATE_MODE')
+          expect(sourceMode, `${context} must select exactly one observed-state source explicitly`).toHaveLength(1)
+          expect(['fixture', 'openkubes'], `${context} must select a supported observed-state source`).toContain(sourceMode[0]?.value)
           expect((container.env ?? []).filter((item) => item.name === 'OK_CONSOLE_DEV_PROTOTYPE_ENABLED'), `${context} cannot enable prototype mode`).toHaveLength(0)
           expect((container.env ?? []).filter((item) => item.name === 'OK_CONSOLE_DISPOSABLE_LOCAL_CLUSTER_ACKNOWLEDGED'), `${context} cannot acknowledge a disposable cluster`).toHaveLength(0)
         }

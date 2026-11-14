@@ -106,6 +106,7 @@ it.each(['statement', 'client'])('enabled-check real runtime pg %s timeout retai
     env: {
       OK_CONSOLE_LOCAL_IDENTITY_ENABLED: 'true', OK_CONSOLE_PROFILE: 'ok-local', NODE_ENV: 'development',
       OK_CONSOLE_SESSION_STORE_MODE: 'postgres', OK_CONSOLE_BFF_HOST: '127.0.0.1', OK_CONSOLE_ORIGIN: origin,
+      OK_CONSOLE_OBSERVED_STATE_MODE: 'fixture',
       OK_CONSOLE_ENVIRONMENT_ID: 'env', OK_CONSOLE_TENANT_ID: 'platform',
       OK_CONSOLE_SESSION_EPOCH: 'epoch-123', OK_CONSOLE_AUTHORIZATION_REVISION: 'mapping-1',
       OK_CONSOLE_POSTGRES_URL_FILE: '/test/postgres-url', OK_CONSOLE_POSTGRES_ALLOW_INSECURE_LOOPBACK: 'true',

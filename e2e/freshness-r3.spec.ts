@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { normalizeOpenKubesObservedState } from '../bff/adapters/openKubesObservedState.mjs'
 import { createConsoleBffHandler, prototypeAuthorizer } from '../bff/app.mjs'
-import { assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
+import { assertUnavailableMetrics, assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
 
 const serve = async (page: Page, kind: 'item' | 'envelope' | 'deployment' | 'fresh') => {
   const golden = JSON.parse((await readFile(new URL('../bff/openKubesObservedState.fixtures.json', import.meta.url), 'utf8')).replaceAll('openkubes-management', 'community-preview'))
@@ -41,6 +41,7 @@ for (const kind of ['item', 'envelope', 'injection'] as const) {
           await injectBffFailure(page, 'stale')
           await signInPrototype(page)
         } else await signInPrototype(page)
+        if (kind === 'injection') await assertUnavailableMetrics(page)
         const clusterName = fixture?.cluster.name ?? 'ok-mgmt'
         await page.locator('.cluster-card').filter({ hasText: clusterName }).locator('button.card-main').click()
         await page.getByRole('tab', { name: 'Evidence', exact: true }).click()

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
+import { assertUnavailableMetrics, assertCurrentFixture, injectBffFailure, signInPrototype } from './support'
 
 test('default recorded fixtures show Unknown without failure injection', async ({ page }) => {
   await signInPrototype(page)
@@ -25,6 +25,7 @@ for (const failure of ['stale', 'degraded'] as const) {
       await assertCurrentFixture(page)
       await injectBffFailure(page, failure)
       await signInPrototype(page)
+      if (failure === 'stale') await assertUnavailableMetrics(page)
       const status = page.getByRole('status')
       await expect(status).toBeVisible()
       await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')

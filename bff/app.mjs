@@ -20,6 +20,7 @@ import { handleSessionHttp } from './security/httpSession.mjs'
 import { ObservedStateContractError, observedStateDiagnostics } from './adapters/openKubesObservedState.mjs'
 
 import { authorizedSnapshot } from './authorizedSnapshot.mjs'
+import { handleInvestigationHttp, isInvestigationPath } from './investigations/http.mjs'
 
 const ROUTE_PREFIX = '/api/console/v0'
 const ROUTE_PATTERN_PREFIX = ROUTE_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -227,6 +228,7 @@ export const createConsoleBffHandler = ({
   localIdentityHandler = null,
   authenticationAudit = null,
   dryRunExecutor = null,
+  investigationService = null,
 }) => {
   if (typeof authorizer !== 'function') {
     throw new TypeError('createConsoleBffHandler requires an explicit callable authorizer.')
@@ -253,6 +255,20 @@ export const createConsoleBffHandler = ({
         expectedOrigin,
         audit: authenticationAudit ? (event) => authenticationAudit.record(event) : undefined,
       })) return
+
+      if (investigationService && isInvestigationPath(url.pathname)) {
+        await handleInvestigationHttp({
+          request,
+          pathname: url.pathname,
+          correlationId: requestCorrelationId,
+          service: investigationService,
+          authorizer,
+          expectedOrigin,
+          markAuthorized: () => lifecycle.mark('AUTHZ_CHECKED'),
+          send: (status, payload) => sendJson(response, status, payload, requestCorrelationId),
+        })
+        return
+      }
 
       const dryRunPath = `${ROUTE_PREFIX}/operations/create-cluster/dry-run`
       if (request.method === 'POST' && url.pathname === dryRunPath) {

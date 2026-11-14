@@ -1,0 +1,540 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openkubes.io/contracts/console/investigation/v1alpha1/investigation-result.schema.json",
+  "title": "Fixture investigation result (data of the InvestigationResult envelope)",
+  "description": "Result of a deterministic fixture investigation. Status values follow the approved six-level verification vocabulary (claim, hypothesis, evidence chain, basis, assessment, outcome). Recommendations are never executed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "investigationId",
+    "correlationId",
+    "startedAt",
+    "completedAt",
+    "scenario",
+    "target",
+    "source",
+    "analysis",
+    "evidence",
+    "hypotheses",
+    "verification",
+    "recommendations",
+    "outcome",
+    "reproducibility"
+  ],
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "assertion": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "properties": {
+    "investigationId": {
+      "type": "string",
+      "pattern": "^inv-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "startedAt": {
+      "$ref": "#/$defs/time",
+      "description": "Evaluation start by this Console (response creation). Not an observation time."
+    },
+    "completedAt": {
+      "$ref": "#/$defs/time",
+      "description": "Evaluation end by this Console (response creation). Not an observation time."
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "description",
+        "fixture",
+        "synthetic"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "fixture": {
+          "type": "string"
+        },
+        "synthetic": {
+          "const": true
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster",
+        "namespace",
+        "workload"
+      ],
+      "properties": {
+        "cluster": {
+          "$ref": "#/$defs/slug"
+        },
+        "namespace": {
+          "$ref": "#/$defs/slug"
+        },
+        "workload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "$ref": "#/$defs/slug"
+            }
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "liveClusterAccess",
+        "packDigest",
+        "observedAt",
+        "freshness"
+      ],
+      "properties": {
+        "kind": {
+          "const": "fixture"
+        },
+        "liveClusterAccess": {
+          "const": false
+        },
+        "packDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/time",
+          "description": "Latest collectedAt recorded in the fixture pack. Fixture data, never a live observation by this Console."
+        },
+        "freshness": {
+          "const": "Unknown",
+          "description": "Observation freshness in the presentation-contract vocabulary (Current | Stale | Unknown). Always Unknown: a fixture is not observed live, so its freshness cannot be established."
+        }
+      }
+    },
+    "analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "producer",
+        "liveModel"
+      ],
+      "properties": {
+        "kind": {
+          "const": "recorded"
+        },
+        "producer": {
+          "type": "string"
+        },
+        "liveModel": {
+          "const": false
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "source",
+          "uri",
+          "collectedAt",
+          "digest",
+          "integrity",
+          "clusterBinding",
+          "href"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/slug"
+          },
+          "type": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string",
+            "pattern": "^k8s://"
+          },
+          "collectedAt": {
+            "$ref": "#/$defs/time",
+            "description": "Collection time recorded in the fixture, not observed by this Console."
+          },
+          "digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "integrity": {
+            "enum": [
+              "verified",
+              "rejected"
+            ]
+          },
+          "clusterBinding": {
+            "enum": [
+              "bound",
+              "mismatch"
+            ]
+          },
+          "href": {
+            "type": "string",
+            "pattern": "^/api/console/v0/investigations/inv-[0-9a-f-]{36}/evidence/[a-z0-9-]+$"
+          }
+        }
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "rank",
+          "statement",
+          "evidenceRefs",
+          "status",
+          "claims"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/slug"
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "statement": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/slug"
+            }
+          },
+          "status": {
+            "enum": [
+              "consistent",
+              "inconsistent",
+              "not_assessed"
+            ]
+          },
+          "claims": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "statement",
+                "factRef",
+                "assertion",
+                "status",
+                "reason"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/slug"
+                },
+                "statement": {
+                  "type": "string"
+                },
+                "factRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "assertion": {
+                  "$ref": "#/$defs/assertion"
+                },
+                "status": {
+                  "enum": [
+                    "supported",
+                    "contradicted",
+                    "unverifiable",
+                    "invalid"
+                  ]
+                },
+                "reason": {
+                  "enum": [
+                    "assertion_holds",
+                    "assertion_refuted",
+                    "fact_ref_malformed",
+                    "assertion_malformed",
+                    "evidence_missing",
+                    "evidence_not_cited",
+                    "evidence_integrity_failed",
+                    "evidence_cluster_mismatch",
+                    "fact_not_found",
+                    "assertion_not_applicable"
+                  ]
+                },
+                "observed": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceChain",
+        "basis",
+        "assessment",
+        "leadingHypothesis",
+        "checks",
+        "summary"
+      ],
+      "properties": {
+        "evidenceChain": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "method",
+            "signatures"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "verified",
+                "rejected",
+                "insufficient_evidence"
+              ]
+            },
+            "method": {
+              "const": "fixture-digest"
+            },
+            "signatures": {
+              "const": "not_applicable"
+            }
+          }
+        },
+        "basis": {
+          "enum": [
+            "established",
+            "blocked"
+          ]
+        },
+        "assessment": {
+          "enum": [
+            "fully_supported",
+            "partially_supported",
+            "unsupported",
+            "check_failed",
+            "withheld"
+          ]
+        },
+        "leadingHypothesis": {
+          "$ref": "#/$defs/slug"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checkId",
+              "class",
+              "name",
+              "status"
+            ],
+            "properties": {
+              "checkId": {
+                "type": "string",
+                "pattern": "^CHK-0[1-9]$"
+              },
+              "class": {
+                "enum": [
+                  "critical",
+                  "required",
+                  "optional"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not_run",
+                  "not_available"
+                ]
+              }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claims",
+            "hypotheses"
+          ],
+          "properties": {
+            "claims": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "supported",
+                "contradicted",
+                "unverifiable",
+                "invalid"
+              ],
+              "properties": {
+                "supported": {
+                  "type": "integer"
+                },
+                "contradicted": {
+                  "type": "integer"
+                },
+                "unverifiable": {
+                  "type": "integer"
+                },
+                "invalid": {
+                  "type": "integer"
+                }
+              }
+            },
+            "hypotheses": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "consistent",
+                "inconsistent",
+                "not_assessed"
+              ],
+              "properties": {
+                "consistent": {
+                  "type": "integer"
+                },
+                "inconsistent": {
+                  "type": "integer"
+                },
+                "not_assessed": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "actionClass",
+          "basedOn",
+          "executionStatus",
+          "eligible"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/slug"
+          },
+          "text": {
+            "type": "string"
+          },
+          "actionClass": {
+            "enum": [
+              "configuration_change",
+              "read_only_check",
+              "escalation"
+            ]
+          },
+          "basedOn": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/slug"
+            }
+          },
+          "executionStatus": {
+            "const": "not_executed",
+            "description": "Recommendations are never executed by the Console or this API."
+          },
+          "eligible": {
+            "type": "boolean",
+            "description": "true only means: evidence-based and suitable for human review (outcome completed, every hypothesis it is based on consistent). It is never an execution authorization and does not change executionStatus."
+          }
+        }
+      }
+    },
+    "outcome": {
+      "enum": [
+        "completed",
+        "inconclusive",
+        "aborted_budget",
+        "aborted_error"
+      ],
+      "description": "completed only with an established basis, a fully or partially supported assessment and a consistent leading hypothesis; otherwise inconclusive."
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resultDigest"
+      ],
+      "properties": {
+        "resultDigest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

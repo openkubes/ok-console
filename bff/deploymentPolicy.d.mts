@@ -2,6 +2,7 @@ export type DeploymentPolicy = Readonly<{ name: 'fixture-read-only'; clusterLife
 export type DeploymentPolicyDocument = { schema: 'openkubes.console.deployment-policy/v1'; policy: 'default' | 'fixture-read-only'; clusterLifecycle: boolean }
 
 export declare const DEPLOYMENT_POLICY_FIXTURE_READ_ONLY: 'fixture-read-only'
+export declare const FIXTURE_EVALUATION_WRITES: ReadonlyArray<Readonly<{ method: 'POST'; path: string }>>
 export declare const AUTHENTICATION_WRITES: ReadonlyArray<Readonly<{ method: 'POST' | 'DELETE'; path: string }>>
 export declare class DeploymentPolicyError extends Error {
   problems: string[]

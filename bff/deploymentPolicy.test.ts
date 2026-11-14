@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { describe, expect, it, vi } from 'vitest'
-import { AUTHENTICATION_WRITES, DeploymentPolicyError, deploymentPolicyAllows, deploymentPolicyDocument, resolveDeploymentPolicy } from './deploymentPolicy.mjs'
+import { AUTHENTICATION_WRITES, DeploymentPolicyError, FIXTURE_EVALUATION_WRITES, deploymentPolicyAllows, deploymentPolicyDocument, resolveDeploymentPolicy } from './deploymentPolicy.mjs'
 import { createConsoleServer } from './server.mjs'
 import { createObservedStateSource } from './source.mjs'
 
@@ -89,6 +89,19 @@ describe('deployment policy enforcement', () => {
     ['POST', '/api/console/v0/%6Fperations/create-cluster/dry-run', false],
     ['POST', '/api/console/v0/OPERATIONS/create-cluster/dry-run', false],
     ['GET', '/api/console/v0/clusters/x/operations/register', false],
+    // Fixture investigations: exactly one start route, reads by GET
+    ['POST', '/api/console/v0/investigations', true],
+    ['GET', '/api/console/v0/investigations/scenarios', true],
+    ['GET', '/api/console/v0/investigations/inv-00000000-0000-4000-8000-000000000000', true],
+    ['PUT', '/api/console/v0/investigations', false],
+    ['DELETE', '/api/console/v0/investigations', false],
+    ['POST', '/api/console/v0/investigations/', false],
+    ['POST', '/api/console/v0/investigations/scenarios', false],
+    ['POST', '/api/console/v0/investigations/inv-00000000-0000-4000-8000-000000000000', false],
+    ['POST', '/api/console/v0/investigations/inv-00000000-0000-4000-8000-000000000000/evidence/ev-status', false],
+    ['POST', '/api/console/v0/%69nvestigations', false],
+    ['POST', '/api/console/v0/INVESTIGATIONS', false],
+    ['POST', '/api/console/v0/investigations/operations', false],
     // Other writes
     ['PUT', '/api/console/v0/clusters', false],
     ['PATCH', '/api/console/v0/clusters/ok-mgmt', false],
@@ -102,6 +115,14 @@ describe('deployment policy enforcement', () => {
   it('allows everything without a policy, as before', () => {
     expect(deploymentPolicyAllows(null, 'POST', '/api/console/v0/operations/create-cluster/dry-run')).toBe(true)
     expect(deploymentPolicyAllows(null, 'POST', '/api/console/v0/local-identity/create')).toBe(true)
+  })
+
+  it('allows exactly one fixture evaluation write, routed by the investigation handler', () => {
+    expect(FIXTURE_EVALUATION_WRITES.map(({ method, path }) => `${method} ${path}`)).toEqual(['POST /api/console/v0/investigations'])
+    const http = readFileSync(new URL('./investigations/http.mjs', import.meta.url), 'utf8')
+    expect(http).toContain("export const INVESTIGATIONS_PATH = '/api/console/v0/investigations'")
+    expect(http).toContain("if (request.method !== 'POST') throw new ConsoleBffError(405")
+    expect(Object.isFrozen(FIXTURE_EVALUATION_WRITES)).toBe(true)
   })
 
   it('lists only routes that really exist, with the method they are routed for', () => {

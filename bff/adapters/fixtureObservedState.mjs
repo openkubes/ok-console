@@ -8,8 +8,9 @@ import {
 const defaultFixtureUrl = new URL('../fixtures/observed-state.json', import.meta.url)
 
 export class FixtureObservedStateAdapter {
-  constructor(fixtureUrl = defaultFixtureUrl) {
+  constructor(fixtureUrl = defaultFixtureUrl, { now = () => new Date() } = {}) {
     this.fixtureUrl = fixtureUrl
+    this.now = now
   }
 
   async readSnapshot() {
@@ -30,7 +31,7 @@ export class FixtureObservedStateAdapter {
           placements: fixture.placements,
           evidence: fixture.evidence,
         },
-      }, { now: () => new Date(fixture.observedAt) })
+      }, { now: this.now })
     } catch (error) {
       if (error instanceof ObservedStateContractError) throw error
       throw new ObservedStateContractError('Observed-state fixture failed structural or semantic contract validation.')

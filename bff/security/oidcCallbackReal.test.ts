@@ -3,28 +3,40 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { beforeAll, expect, it, vi } from 'vitest'
 
+import { execBudgetMs, hookBudgetMs } from '../test-fixtures/oidcCallbackIssuer.mjs'
+
 const exec = promisify(execFile)
 type Result = {
   cookieStrings: string[]; status: number; error: string | null; cookieNames: string[]; onlyClearTransaction: boolean
   sessions: number; transactions: number; audit: { method: string; outcome: string; cause: string }[]
   leaks: string[]; tokenRequests: number; redemptions: number; signedTokens: number; jwks: number
 }
-type Flow = { mode: string; rejected: string[]; start: { status: number; method: string; challengeMatches: boolean; stateMatches: boolean; nonceMatches: boolean; redirectMatches: boolean }; first: Result; replay?: Result }
+type Flow = { elapsedMs: number; fixtureError?: string; mode: string; rejected: string[]; start: { status: number; method: string; challengeMatches: boolean; stateMatches: boolean; nonceMatches: boolean; redirectMatches: boolean }; first: Result; replay?: Result }
 const knownModes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub', 'untrusted-tls']
 let flows: Flow[]
 let childStderr: string
 beforeAll(async () => {
-  const { stdout, stderr } = await exec(process.execPath, ['bff/test-fixtures/oidcCallbackIssuer.mjs'], { timeout: 110000, env: Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+  const { stdout, stderr } = await exec(process.execPath, ['bff/test-fixtures/oidcCallbackIssuer.mjs'], { timeout: execBudgetMs, env: Object.fromEntries(Object.entries(process.env).filter(([name]) =>
     !/^(NODE_TLS_REJECT_UNAUTHORIZED|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|OIDC_CALLBACK_TLS_DIR|OIDC_CALLBACK_UNTRUSTED)$/i.test(name))) })
   childStderr = stderr
   flows = stdout.trim().split('\n').map(line => JSON.parse(line))
   expect(flows.map(flow => flow.mode).sort()).toEqual([...knownModes].sort())
-}, 120000)
+  console.info('OIDC_SCENARIO_TIMINGS ' + JSON.stringify(flows.map(({ mode, elapsedMs }) => ({ mode, elapsedMs }))))
+}, hookBudgetMs)
 
-const get = (mode: string) => {
+const scenario = (mode: string) => {
   const flow = flows.find(value => value.mode === mode)!
   expect(flow).toBeDefined()
+  if (flow.fixtureError) throw new Error(mode + ': ' + flow.fixtureError)
+  return flow
+}
+const get = (mode: string) => {
+  const flow = scenario(mode)
   expect(flow.start).toEqual({ status: 302, method: 'S256', challengeMatches: true, stateMatches: true, nonceMatches: true, redirectMatches: true })
+  // Current library behaviour (characterization), NOT the intended product
+  // policy: signature not verified; TLS-based token-endpoint trust. Enabling
+  // signature verification is a separate, explicitly reviewed hardening decision.
+  // A library change must fail these assertions so it receives review.
   expect(flow.first.jwks).toBe(0)
   if (flow.replay) expect(flow.replay.jwks).toBe(0)
   return flow
@@ -63,24 +75,25 @@ it('replay rejects the consumed transaction before a second code redemption', ()
   expect(replay!.audit).toEqual(auditEvent('Denied', 'TRANSACTION_INVALID'))
 })
 
-it('records single-audience foreign azp behavior for the PR scope', () => {
-  const { first } = get('single-aud-foreign-azp')
-  expect(first).toMatchObject({ tokenRequests: 1, redemptions: 1, signedTokens: 1, transactions: 0, leaks: [] })
-  expect([303, 401]).toContain(first.status)
-  console.info(`OIDC_SINGLE_AUDIENCE_FOREIGN_AZP accepted=${first.status === 303} status=${first.status}`)
+// Current library behaviour (characterization), NOT the intended product policy;
+// stricter azp validation is a separate, explicitly reviewed hardening decision.
+it('current library behaviour (characterization): openid-client 6.8.7 accepts single-audience foreign azp and issues a session', () => {
+  granted(get('single-aud-foreign-azp').first)
 })
 
 it('untrusted-tls rejects discovery with a certificate verification cause before any HTTP request', () => {
-  const flow = flows.find(flow => flow.mode === 'untrusted-tls')
+  const flow = scenario('untrusted-tls')
   expect(flow).toMatchObject({ mode: 'untrusted-tls', discoveryRejected: true, discoveryRequests: 0 })
   expect(['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'SELF_SIGNED_CERT_IN_CHAIN']).toContain((flow as unknown as { causeCode: string }).causeCode)
 })
 
 it('http-issuer is rejected by the protocol client factory', () => {
-  expect(flows.find(flow => flow.mode === 'http-issuer')).toMatchObject({ discoveryRejected: true, discoveryRequests: 0 })
+  expect(scenario('http-issuer')).toMatchObject({ discoveryRejected: true, discoveryRequests: 0 })
 })
 
-it('records that openid-client 6.8.7 accepts future iat (nbf is checked separately)', () => {
+// Current library behaviour (characterization), NOT the intended product policy;
+// stricter iat validation is a separate, explicitly reviewed hardening decision.
+it('current library behaviour (characterization): openid-client 6.8.7 accepts future iat (nbf is checked separately)', () => {
   granted(get('future-iat').first)
 })
 

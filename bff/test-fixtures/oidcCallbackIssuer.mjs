@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { format } from 'node:util'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { issueTestCertificate } from './certificates.mjs'
 import { createOidcHttpHandler, createOidcProtocolClient, createStaticOidcIdentityMapper } from '../security/oidc.mjs'
 import { oidcTransactionCookie } from '../security/oidcTransactionStore.mjs'
@@ -20,7 +20,83 @@ const redirectUri = 'https://console.invalid' + callbackPath
 const clearedTransaction = '__Host-ok_console_oidc=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0'
 const opaque = () => randomBytes(32).toString('base64url')
 const challenge = value => createHash('sha256').update(value).digest('base64url')
-const modes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub']
+export const modes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub']
+
+// Sizing measurements: 2026-11-16, node22-kubectl1.34.1, Docker --cpus=0.5
+// plus seven busy worker threads: worst child times from four focused runs
+// and eight extra replay samples below. Deadlines are ceil(3 * observed ms /
+// 1000) seconds, minimum 30s for the shared RSA-generation tail. Replay hit
+// its initial 15s cap once (only its own test failed), so allow 60s there;
+// expanded-cap replay samples completed without timeout. Setup is bounded
+// separately at 120s. Enclosing budgets sum all stages plus cleanup margins.
+export const scenarioBudgetsMs = {
+  'positive': 30000, // observed 5712ms
+  'wrong-iss': 30000, // observed 7492ms
+  'wrong-aud': 30000, // observed 7000ms
+  'multi-aud-no-azp': 30000, // observed 7013ms
+  'multi-aud-foreign-azp': 30000, // observed 8688ms
+  'nonce': 30000, // observed 4891ms
+  'state': 30000, // observed 4904ms
+  'pkce': 30000, // observed 8308ms
+  'redirect': 30000, // observed 6408ms
+  'expired': 30000, // observed 6104ms
+  'future-iat': 30000, // observed 6214ms
+  'future-nbf': 30000, // observed 5787ms
+  'token-untrusted-tls': 30000, // observed 5515ms
+  'token-wrong-name': 30000, // observed 9789ms
+  'http-issuer': 30000, // observed 4517ms
+  'replay': 60000, // observed 15197ms (initial capped sample)
+  'single-aud-foreign-azp': 30000, // observed 5705ms
+  'missing-id-token': 30000, // observed 8391ms
+  'nonstring-sub': 30000, // observed 7014ms
+  'untrusted-tls': 30000, // observed 6988ms
+}
+export const setupBudgetMs = 120000
+export const fixtureBudgetMs = setupBudgetMs + Object.values(scenarioBudgetsMs).reduce((sum, budget) => sum + budget, 0)
+export const execBudgetMs = fixtureBudgetMs + 5000
+export const hookBudgetMs = execBudgetMs + 5000
+
+const runChild = (root, mode, env) => new Promise((resolve, reject) => {
+  const started = performance.now()
+  const budgetMs = mode === 'setup' ? setupBudgetMs : scenarioBudgetsMs[mode]
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), mode], {
+    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    env: { ...env, OIDC_CALLBACK_TLS_DIR: root, ...(mode === 'setup' ? {} : mode === 'untrusted-tls' ? { OIDC_CALLBACK_UNTRUSTED: '1' } : { NODE_EXTRA_CA_CERTS: join(root, 'ca.crt') }) },
+  })
+  const chunks = [[], [], []]
+  for (const [index, stream] of [child.stdout, child.stderr, child.stdio[3]].entries()) stream.on('data', chunk => chunks[index].push(chunk))
+  let timedOut = false
+  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, budgetMs)
+  child.on('error', error => { clearTimeout(timer); reject(error) })
+  child.on('close', code => {
+    clearTimeout(timer)
+    try {
+      const [stdout, stderr, material] = chunks.map(parts => Buffer.concat(parts).toString())
+      const candidates = material.trim().split('\n').filter(Boolean).flatMap(line => JSON.parse(line))
+      const rawLeaks = scanLeaks(stdout + stderr, candidates)
+      if (rawLeaks.length) throw new Error('Child raw output disclosed: ' + rawLeaks.join(', '))
+      process.stderr.write(stderr)
+      if (timedOut) {
+        if (mode === 'setup') throw new Error('Fixture setup exceeded ' + budgetMs + 'ms')
+        // Keep the mode so only the test consuming this scenario fails. Other
+        // child failures are infrastructure errors and reject beforeAll.
+        process.stdout.write(JSON.stringify({ mode, fixtureError: 'Scenario exceeded ' + budgetMs + 'ms', elapsedMs: Math.ceil(performance.now() - started) }) + '\n')
+      } else {
+        if (code !== 0) throw new Error('Scenario process failed: ' + mode + ' exit=' + code)
+        if (mode === 'setup') {
+          process.stdout.write(stdout)
+          resolve()
+          return
+        }
+        for (const line of stdout.trim().split('\n')) {
+          const result = JSON.parse(line)
+          process.stdout.write(JSON.stringify({ ...result, elapsedMs: Math.ceil(performance.now() - started) }) + '\n')
+        }
+      }
+      resolve()
+    } catch (error) { reject(error) }
+  })
+})
 
 // Secret material travels only over the private pipe, never stdout or evidence logs.
 const leakCandidates = material => Object.entries(material).flatMap(([label, values]) => values.flatMap(value => {
@@ -198,27 +274,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!process.env.OIDC_CALLBACK_TLS_DIR) {
     const root = mkdtempSync(join(tmpdir(), 'ok-oidc-callback-'))
     try {
+      // Node TLS and proxy settings must not silently change the trust boundary.
+      const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+        !/^(NODE_TLS_REJECT_UNAUTHORIZED|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|OIDC_CALLBACK_TLS_DIR|OIDC_CALLBACK_UNTRUSTED)$/i.test(name)))
+      await runChild(root, 'setup', env)
+      for (const mode of [...modes, 'untrusted-tls']) await runChild(root, mode, env)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  } else {
+    const mode = process.argv[2]
+    if (mode === 'setup') {
+      const root = process.env.OIDC_CALLBACK_TLS_DIR
       for (const name of ['ca', 'untrusted-ca', 'server', 'untrusted-server', 'wrong-name']) {
         execFileSync('openssl', ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', name + '.key', '-out', name + '.csr', '-subj', '/CN=' + (name.endsWith('ca') ? name : 'localhost')], { cwd: root, stdio: 'ignore' })
         issueTestCertificate({ root, name, issuer: name === 'untrusted-server' ? 'untrusted-ca' : name.endsWith('ca') ? name : 'ca', selfSigned: name.endsWith('ca'), extensions: name.endsWith('ca') ? 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' : `basicConstraints=CA:FALSE\nsubjectAltName=${name === 'wrong-name' ? 'DNS:localhost' : 'IP:127.0.0.1'}\nextendedKeyUsage=serverAuth\n` })
       }
-      // Node TLS and proxy settings must not silently change the trust boundary.
-      const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
-        !/^(NODE_TLS_REJECT_UNAUTHORIZED|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|OIDC_CALLBACK_TLS_DIR|OIDC_CALLBACK_UNTRUSTED)$/i.test(name)))
-      for (const untrusted of [false, true]) {
-        const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-          encoding: 'utf8', timeout: 25000, stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-          env: { ...env, OIDC_CALLBACK_TLS_DIR: root, ...(untrusted ? { OIDC_CALLBACK_UNTRUSTED: '1' } : { NODE_EXTRA_CA_CERTS: join(root, 'ca.crt') }) },
-        })
-        const candidates = (child.output[3] ?? '').trim().split('\n').filter(Boolean).flatMap(line => JSON.parse(line))
-        const rawLeaks = scanLeaks((child.stdout ?? '') + (child.stderr ?? ''), candidates)
-        if (rawLeaks.length) throw new Error('Child raw output disclosed: ' + rawLeaks.join(', '))
-        process.stdout.write(child.stdout ?? ''); process.stderr.write(child.stderr ?? '')
-        if (child.error) throw child.error
-        if (child.status !== 0) { process.exitCode = child.status ?? 1; break }
-      }
-    } finally { rmSync(root, { recursive: true, force: true }) }
-  } else {
-    for (const mode of (process.env.OIDC_CALLBACK_UNTRUSTED ? ['untrusted-tls'] : modes)) console.log(JSON.stringify(await flow(process.env.OIDC_CALLBACK_TLS_DIR, mode)))
+    } else {
+      if (![...modes, 'untrusted-tls'].includes(mode)) throw new Error('Unknown scenario')
+      console.log(JSON.stringify(await flow(process.env.OIDC_CALLBACK_TLS_DIR, mode)))
+    }
   }
 }

@@ -44,36 +44,59 @@ const readJson = async (request) => {
   }
 }
 
-export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin }) => async ({ request, response, pathname, correlationId }) => {
-  if (pathname !== PATH) return false
-  if (request.method !== 'POST') {
-    send(response, 405, 'METHOD_NOT_ALLOWED', correlationId, { Allow: 'POST' })
-    return true
-  }
-  if (request.headers.origin !== expectedOrigin) {
-    send(response, 403, 'ORIGIN_REJECTED', correlationId)
-    return true
-  }
-  if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
-    send(response, 415, 'CONTENT_TYPE_REJECTED', correlationId)
-    return true
-  }
-  const started = performance.now()
-  try {
-    const body = await readJson(request)
-    const issued = await verifier({
-      username: body.username, password: body.password, reason: body.reason, correlationId,
-    })
-    response.writeHead(200, headers(correlationId, { 'Set-Cookie': [issued.cookie, issued.csrfCookie] }))
-    response.end(JSON.stringify(issued.session))
-  } catch (error) {
-    const unavailable = error instanceof LocalAccessError && error.code === 'LOCAL_ACCESS_UNAVAILABLE'
-    if (unavailable) {
-      const log = (cause, failure) => console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'LOCAL_ACCESS_FAILED', cause, errorCode: startErrorCode(failure), elapsedMs: boundedMs(performance.now() - started) }))
-      log(STEPS.has(error.step) ? error.step : 'OTHER', error.cause)
-      if (Object.hasOwn(error, 'compensationError')) log('LOCAL_ACCESS_COMPENSATION', error.compensationError)
+export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit, method }) => {
+  if (typeof audit !== 'function' || !['Bootstrap', 'BreakGlass'].includes(method)) throw new LocalAccessError('INVALID_CONFIGURATION')
+  return async ({ request, response, pathname, correlationId }) => {
+    if (pathname !== PATH) return false
+    if (request.method !== 'POST') {
+      send(response, 405, 'METHOD_NOT_ALLOWED', correlationId, { Allow: 'POST' })
+      return true
     }
-    send(response, unavailable ? 503 : 401, unavailable ? 'LOCAL_ACCESS_UNAVAILABLE' : 'LOCAL_ACCESS_REJECTED', correlationId)
+    const started = performance.now()
+    const log = (cause, failure) => console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'LOCAL_ACCESS_FAILED', cause, errorCode: startErrorCode(failure), elapsedMs: boundedMs(performance.now() - started) }))
+    const reject = async (status, code, cause) => {
+      try {
+        await audit({ method, outcome: 'Denied', cause, correlationId, reason: 'Rejected before credential verification' })
+      } catch (error) {
+        log('PRE_VERIFIER_AUDIT', error)
+        send(response, 503, 'LOCAL_ACCESS_UNAVAILABLE', correlationId)
+        return
+      }
+      send(response, status, code, correlationId)
+    }
+    if (request.headers.origin !== expectedOrigin) {
+      await reject(403, 'ORIGIN_REJECTED', 'ORIGIN_REJECTED')
+      return true
+    }
+    if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+      await reject(415, 'CONTENT_TYPE_REJECTED', 'CONTENT_TYPE_REJECTED')
+      return true
+    }
+    let body
+    try {
+      body = await readJson(request)
+    } catch {
+      await reject(401, 'LOCAL_ACCESS_REJECTED', 'REQUEST_INVALID')
+      return true
+    }
+    try {
+      const issued = await verifier({
+        username: body.username, password: body.password, reason: body.reason, correlationId,
+      })
+      response.writeHead(200, headers(correlationId, { 'Set-Cookie': [issued.cookie, issued.csrfCookie] }))
+      response.end(JSON.stringify(issued.session))
+    } catch (error) {
+      if (error instanceof LocalAccessError && error.code === 'INVALID_REQUEST') {
+        await reject(401, 'LOCAL_ACCESS_REJECTED', 'REQUEST_INVALID')
+        return true
+      }
+      const unavailable = error instanceof LocalAccessError && error.code === 'LOCAL_ACCESS_UNAVAILABLE'
+      if (unavailable) {
+        log(STEPS.has(error.step) ? error.step : 'OTHER', error.cause)
+        if (Object.hasOwn(error, 'compensationError')) log('LOCAL_ACCESS_COMPENSATION', error.compensationError)
+      }
+      send(response, unavailable ? 503 : 401, unavailable ? 'LOCAL_ACCESS_UNAVAILABLE' : 'LOCAL_ACCESS_REJECTED', correlationId)
+    }
+    return true
   }
-  return true
 }

@@ -95,6 +95,32 @@ suite('OK-214 real PostgreSQL local identity', () => {
     if (directory) await rm(directory,{recursive:true,force:true})
   })
 
+  it('durably audits each pre-verifier rejection once through the HTTPS runtime', async () => {
+    const inputs = [
+      { cause: 'ORIGIN_REJECTED', status: 403, headers: { origin: 'https://other.invalid', 'content-type': 'application/json' }, body: '{}' },
+      { cause: 'CONTENT_TYPE_REJECTED', status: 415, headers: { origin, 'content-type': 'text/plain' }, body: '{}' },
+      { cause: 'REQUEST_INVALID', status: 401, headers: { origin, 'content-type': 'application/json' }, body: '{' },
+      { cause: 'REQUEST_INVALID', status: 401, headers: { origin, 'content-type': 'application/json' }, body: '{}' },
+    ]
+    const expected = []
+    for (const { cause, status, headers, body } of inputs) {
+      const response = await new Promise((resolve, reject) => {
+        const request = https.request(new URL('/api/console/v0/auth/local', origin), { method: 'POST', ca, headers }, response => {
+          response.resume()
+          response.on('end', () => resolve(response))
+        })
+        request.on('error', reject)
+        request.end(body)
+      })
+      expect(response.statusCode).toBe(status)
+      expected.push({ authentication_method: 'Bootstrap', outcome: 'Denied', cause, principal_digest: null })
+      const { rows } = await pool.query('SELECT authentication_method, outcome, cause, principal_digest FROM ok_console.authentication_audit ORDER BY event_id')
+      // Check after every response, including both REQUEST_INVALID cases: no missing or duplicate write.
+      expect(rows).toEqual(expected)
+      expect((await pool.query('SELECT * FROM ok_console.local_access_audit')).rows).toEqual([])
+    }
+  })
+
   const postLogin = (username, value = password) => new Promise((resolve,reject) => {
     const request = https.request(new URL('/api/console/v0/local-identity/login',origin), {
       method:'POST',ca,headers:{Origin:origin,'Content-Type':'application/json'},

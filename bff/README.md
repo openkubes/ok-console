@@ -420,10 +420,10 @@ change-timing confidentiality.
 
 ### Fixture mode
 
-Fixture mode contains static data recorded on 2026-08-21, presented as
-Stale/Unknown by the freshness verdict. It is for local development and tests
-only, never for a deployment serving users. Recovery from a source outage means
-restoring the producer, not switching the observed-state source to fixture data.
+Fixture mode is a static recording (2026-08-21), presented as Stale/Unknown, for
+local development, tests and deployments under
+`OK_CONSOLE_DEPLOYMENT_POLICY=fixture-read-only` ([server policy](deploymentPolicy.mjs)).
+It never replaces live observed state. For source failures, restore the producer.
 
 ## Verification
 

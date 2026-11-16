@@ -121,6 +121,23 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     if (rotated) expect(await store.resolve(rotated.cookie, { touch: false })).toBeNull()
   })
 
+  // Wait on the effect, not a host-clock interval: under CPU contention or a host
+  // clock step a fixed sleep can end before PostgreSQL's clock passes the deadline.
+  // The deadline query must return exactly one non-null timestamp, and the deadline must
+  // pass within 3 s (seeded deadlines are at most 400 ms away); otherwise this throws so
+  // the caller's cleanup releases its locks instead of polling past the test timeout.
+  const waitForDatabaseTimePast = async (sql: string, params: unknown[] = [], client: Pick<pg.PoolClient, 'query'> = pool) => {
+    const giveUpAt = performance.now() + 3000
+    for (;;) {
+      const { rows } = await client.query(`SELECT clock_timestamp() > deadline AS past FROM (${sql}) AS seeded(deadline)`, params)
+      expect(rows).toHaveLength(1)
+      expect(typeof rows[0].past).toBe('boolean')
+      if (rows[0].past) return
+      if (performance.now() > giveUpAt) throw new Error('Database clock did not pass the seeded deadline within 3 s.')
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
+
   it('uses database-time expiry and bounded terminal-row cleanup', async () => {
     const shortStore = new PostgresSessionStore({
       pool,
@@ -129,7 +146,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       lifetimesFor: () => ({ idleMs: 80, absoluteMs: 250 }),
     })
     const issued = await shortStore.create({ subject, scope, permissions, authorizationRevision: 'mapping-revision-7' })
-    await new Promise((resolve) => setTimeout(resolve, 120))
+    await waitForDatabaseTimePast('SELECT idle_expires_at FROM ok_console.sessions WHERE revoked_at IS NULL')
 
     expect(await shortStore.resolve(issued.cookie, { touch: false })).toBeNull()
     expect(await shortStore.purgeExpired(1)).toBe(1)
@@ -156,7 +173,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
   it('requires a current authorization revision and touches only allowed requests', async () => {
     const issued = await issue()
     const before = await pool.query('SELECT idle_expires_at FROM ok_console.sessions WHERE revoked_at IS NULL')
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    await waitForDatabaseTimePast('SELECT issued_at FROM ok_console.sessions WHERE revoked_at IS NULL')
 
     const unverified = await store.authorize(issued.cookie, {
       permission: 'platform.read',
@@ -246,8 +263,12 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     }) }
   }
 
+  // Four 300ms lock waits plus ~80 SQL round trips and cold HTTP startup
+  // exceeded 5s under load; a completed 0.04-CPU run took 10.6s. The 20s budget
+  // leaves 9.4s scheduling/cleanup margin. Use a lock cap so the idle cap stays
+  // at its normal 5s rather than the 299ms induced by statement_timeout=300.
   it.each(['__global__', 'recovery-admin'])('refuses both password verdicts while %s is row-locked and resumes exact limits', async (lockedPrincipal) => {
-    const limitedPool = new pg.Pool({ connectionString, options: '-c statement_timeout=300' })
+    const limitedPool = new pg.Pool({ connectionString, options: '-c lock_timeout=300' })
     const throttle = new PostgresLocalAccessThrottle({ pool: limitedPool, pepper: Buffer.alloc(32, 5) })
     const { verify, derive, create, audit } = localVerifier(throttle)
     const locker = await pool.connect()
@@ -303,7 +324,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       locker.release()
       await limitedPool.end()
     }
-  })
+  }, 20000)
 
   it('keeps the reservation and refuses a session when success release times out', async () => {
     const limitedPool = new pg.Pool({ connectionString, options: '-c statement_timeout=300' })
@@ -649,8 +670,12 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       await locker.query('BEGIN')
       await locker.query("UPDATE ok_console.local_access_throttle SET failures = 5, blocked_until = clock_timestamp() + interval '400 milliseconds' WHERE principal_digest = $1", [throttle.digest('recovery-admin')])
       pending = throttle.success('recovery-admin', reservation)
+      // Observed later by `await pending`; this only keeps an early lock timeout from
+      // surfacing as an unhandled rejection while the test is still waiting.
+      pending.catch(() => {})
       await waitForReserveLock()
-      await new Promise(resolve => setTimeout(resolve, 600))
+      // The seeded deadline is visible only inside the locker's open transaction.
+      await waitForDatabaseTimePast('SELECT blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')], locker)
       await locker.query('COMMIT')
       expect(await pending).toEqual({ refused: false })
       expect((await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')])).rows[0]).toEqual({ failures: 0, blocked_until: null })
@@ -667,8 +692,11 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       await locker.query('BEGIN')
       await locker.query('SELECT * FROM ok_console.local_access_throttle ORDER BY principal_digest FOR UPDATE')
       pending = throttle.reserve('recovery-admin')
+      // Observed later by `await pending`; this only keeps an early lock timeout from
+      // surfacing as an unhandled rejection while the test is still waiting.
+      pending.catch(() => {})
       await waitForReserveLock()
-      await new Promise(resolve => setTimeout(resolve, 600))
+      await waitForDatabaseTimePast("SELECT max(window_started_at) + interval '15 minutes' FROM ok_console.local_access_throttle", [], locker)
       await locker.query('COMMIT')
       await pending
       expect((await pool.query('SELECT failures FROM ok_console.local_access_throttle')).rows).toEqual([{ failures: 1 }, { failures: 1 }])

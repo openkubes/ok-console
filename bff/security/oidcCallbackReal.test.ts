@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { beforeAll, expect, it, vi } from 'vitest'
 
-import { execBudgetMs, hookBudgetMs } from '../test-fixtures/oidcCallbackIssuer.mjs'
+import { execBudgetMs, hookBudgetMs } from '../test-fixtures/oidcCallbackBudgets.mjs'
 
 const exec = promisify(execFile)
 type Result = {
@@ -33,9 +33,10 @@ const scenario = (mode: string) => {
 const get = (mode: string) => {
   const flow = scenario(mode)
   expect(flow.start).toEqual({ status: 302, method: 'S256', challengeMatches: true, stateMatches: true, nonceMatches: true, redirectMatches: true })
-  // Current library behaviour (characterization), NOT the intended product
-  // policy: signature not verified; TLS-based token-endpoint trust. Enabling
-  // signature verification is a separate, explicitly reviewed hardening decision.
+  // ADR-Platform-037 §1 is the intended policy: signature/algorithms, applicable
+  // azp, and iat/nbf constraints. Signature verification is a known gap pending
+  // follow-up: the DRI must decide whether OIDC Core 3.1.3.7 TLS-based trust
+  // satisfies the ADR. These assertions pin current library behaviour.
   // A library change must fail these assertions so it receives review.
   expect(flow.first.jwks).toBe(0)
   if (flow.replay) expect(flow.replay.jwks).toBe(0)
@@ -75,8 +76,8 @@ it('replay rejects the consumed transaction before a second code redemption', ()
   expect(replay!.audit).toEqual(auditEvent('Denied', 'TRANSACTION_INVALID'))
 })
 
-// Current library behaviour (characterization), NOT the intended product policy;
-// stricter azp validation is a separate, explicitly reviewed hardening decision.
+// Known gap against ADR-Platform-037 §1 pending follow-up: stricter azp validation.
+// This characterization continues to pin current library behaviour.
 it('current library behaviour (characterization): openid-client 6.8.7 accepts single-audience foreign azp and issues a session', () => {
   granted(get('single-aud-foreign-azp').first)
 })
@@ -91,8 +92,8 @@ it('http-issuer is rejected by the protocol client factory', () => {
   expect(scenario('http-issuer')).toMatchObject({ discoveryRejected: true, discoveryRequests: 0 })
 })
 
-// Current library behaviour (characterization), NOT the intended product policy;
-// stricter iat validation is a separate, explicitly reviewed hardening decision.
+// Known gap against ADR-Platform-037 §1 pending follow-up: stricter iat validation.
+// This characterization continues to pin current library behaviour.
 it('current library behaviour (characterization): openid-client 6.8.7 accepts future iat (nbf is checked separately)', () => {
   granted(get('future-iat').first)
 })

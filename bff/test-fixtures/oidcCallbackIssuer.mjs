@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { format } from 'node:util'
 import { execFileSync, spawn } from 'node:child_process'
+import { scenarioBudgetsMs, setupBudgetMs, fixtureBudgetMs } from './oidcCallbackBudgets.mjs'
 import { issueTestCertificate } from './certificates.mjs'
 import { createOidcHttpHandler, createOidcProtocolClient, createStaticOidcIdentityMapper } from '../security/oidc.mjs'
 import { oidcTransactionCookie } from '../security/oidcTransactionStore.mjs'
@@ -20,66 +21,57 @@ const redirectUri = 'https://console.invalid' + callbackPath
 const clearedTransaction = '__Host-ok_console_oidc=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0'
 const opaque = () => randomBytes(32).toString('base64url')
 const challenge = value => createHash('sha256').update(value).digest('base64url')
-export const modes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub']
+const modes = ['positive', 'wrong-iss', 'wrong-aud', 'multi-aud-no-azp', 'multi-aud-foreign-azp', 'nonce', 'state', 'pkce', 'redirect', 'expired', 'future-iat', 'future-nbf', 'token-untrusted-tls', 'token-wrong-name', 'http-issuer', 'replay', 'single-aud-foreign-azp', 'missing-id-token', 'nonstring-sub']
 
-// Sizing measurements: 2026-11-16, node22-kubectl1.34.1, Docker --cpus=0.5
-// plus seven busy worker threads: worst child times from four focused runs
-// and eight extra replay samples below. Deadlines are ceil(3 * observed ms /
-// 1000) seconds, minimum 30s for the shared RSA-generation tail. Replay hit
-// its initial 15s cap once (only its own test failed), so allow 60s there;
-// expanded-cap replay samples completed without timeout. Setup is bounded
-// separately at 120s. Enclosing budgets sum all stages plus cleanup margins.
-export const scenarioBudgetsMs = {
-  'positive': 30000, // observed 5712ms
-  'wrong-iss': 30000, // observed 7492ms
-  'wrong-aud': 30000, // observed 7000ms
-  'multi-aud-no-azp': 30000, // observed 7013ms
-  'multi-aud-foreign-azp': 30000, // observed 8688ms
-  'nonce': 30000, // observed 4891ms
-  'state': 30000, // observed 4904ms
-  'pkce': 30000, // observed 8308ms
-  'redirect': 30000, // observed 6408ms
-  'expired': 30000, // observed 6104ms
-  'future-iat': 30000, // observed 6214ms
-  'future-nbf': 30000, // observed 5787ms
-  'token-untrusted-tls': 30000, // observed 5515ms
-  'token-wrong-name': 30000, // observed 9789ms
-  'http-issuer': 30000, // observed 4517ms
-  'replay': 60000, // observed 15197ms (initial capped sample)
-  'single-aud-foreign-azp': 30000, // observed 5705ms
-  'missing-id-token': 30000, // observed 8391ms
-  'nonstring-sub': 30000, // observed 7014ms
-  'untrusted-tls': 30000, // observed 6988ms
+
+let activeChild
+const killGroup = child => {
+  if (!child?.pid) return
+  try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
 }
-export const setupBudgetMs = 120000
-export const fixtureBudgetMs = setupBudgetMs + Object.values(scenarioBudgetsMs).reduce((sum, budget) => sum + budget, 0)
-export const execBudgetMs = fixtureBudgetMs + 5000
-export const hookBudgetMs = execBudgetMs + 5000
 
 const runChild = (root, mode, env) => new Promise((resolve, reject) => {
   const started = performance.now()
-  const budgetMs = mode === 'setup' ? setupBudgetMs : scenarioBudgetsMs[mode]
+  const remainingMs = fixtureBudgetMs - performance.now()
+  const budgetMs = Math.max(0, Math.min(remainingMs, mode === 'setup' ? setupBudgetMs : scenarioBudgetsMs[mode]))
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), mode], {
+    detached: true, // Own a process group, including setup's openssl descendants.
     stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-    env: { ...env, OIDC_CALLBACK_TLS_DIR: root, ...(mode === 'setup' ? {} : mode === 'untrusted-tls' ? { OIDC_CALLBACK_UNTRUSTED: '1' } : { NODE_EXTRA_CA_CERTS: join(root, 'ca.crt') }) },
+    env: { ...env, OIDC_CALLBACK_TLS_DIR: root, ...(['setup', 'untrusted-tls'].includes(mode) ? {} : { NODE_EXTRA_CA_CERTS: join(root, 'ca.crt') }) },
   })
+  activeChild = child
   const chunks = [[], [], []]
   for (const [index, stream] of [child.stdout, child.stderr, child.stdio[3]].entries()) stream.on('data', chunk => chunks[index].push(chunk))
   let timedOut = false
-  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, budgetMs)
+  const timer = setTimeout(() => { timedOut = true; killGroup(child) }, budgetMs)
   child.on('error', error => { clearTimeout(timer); reject(error) })
   child.on('close', code => {
     clearTimeout(timer)
+    killGroup(child)
+    activeChild = undefined
     try {
       const [stdout, stderr, material] = chunks.map(parts => Buffer.concat(parts).toString())
-      const candidates = material.trim().split('\n').filter(Boolean).flatMap(line => JSON.parse(line))
+      // A killed writer can leave a partial fd-3 line; name its scenario without logging material.
+      let malformed = false
+      const candidates = material.trim().split('\n').filter(Boolean).flatMap(line => {
+        try { return JSON.parse(line) } catch { malformed = true; return [] }
+      })
       const rawLeaks = scanLeaks(stdout + stderr, candidates)
       if (rawLeaks.length) throw new Error('Child raw output disclosed: ' + rawLeaks.join(', '))
+      if (malformed) {
+        const reason = 'Malformed private material line from ' + mode
+        process.stdout.write(JSON.stringify({ mode, fixtureError: reason }) + '\n')
+        resolve(reason)
+        return
+      }
       process.stderr.write(stderr)
-      if (timedOut) {
-        if (mode === 'setup') throw new Error('Fixture setup exceeded ' + budgetMs + 'ms')
-        // Keep the mode so only the test consuming this scenario fails. Other
-        // child failures are infrastructure errors and reject beforeAll.
+      if (timedOut || child.fixtureStopReason) {
+        if (mode === 'setup') {
+          if (performance.now() >= fixtureBudgetMs) { resolve('total deadline during setup'); return }
+          throw new Error('Fixture setup exceeded ' + budgetMs + 'ms')
+        }
+        // Name the hung mode; the parent emits not-run records for remaining modes.
+        // Other child failures are infrastructure errors and reject beforeAll.
         process.stdout.write(JSON.stringify({ mode, fixtureError: 'Scenario exceeded ' + budgetMs + 'ms', elapsedMs: Math.ceil(performance.now() - started) }) + '\n')
       } else {
         if (code !== 0) throw new Error('Scenario process failed: ' + mode + ' exit=' + code)
@@ -93,7 +85,7 @@ const runChild = (root, mode, env) => new Promise((resolve, reject) => {
           process.stdout.write(JSON.stringify({ ...result, elapsedMs: Math.ceil(performance.now() - started) }) + '\n')
         }
       }
-      resolve()
+      resolve((timedOut || child.fixtureStopReason) ? mode + ' timed out after ' + budgetMs + 'ms' : undefined)
     } catch (error) { reject(error) }
   })
 })
@@ -273,13 +265,37 @@ const flow = async (root, mode) => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!process.env.OIDC_CALLBACK_TLS_DIR) {
     const root = mkdtempSync(join(tmpdir(), 'ok-oidc-callback-'))
+    let stopping
+    const stop = signal => {
+      stopping = signal
+      if (activeChild) activeChild.fixtureStopReason = signal
+      killGroup(activeChild)
+    }
+    const onTerm = () => stop('SIGTERM')
+    const onInt = () => stop('SIGINT')
+    process.on('SIGTERM', onTerm)
+    process.on('SIGINT', onInt)
+    // performance.now() measures from Node's own start, including static imports.
+    const deadline = setTimeout(() => stop('total deadline'), Math.max(0, fixtureBudgetMs - performance.now()))
     try {
       // Node TLS and proxy settings must not silently change the trust boundary.
       const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
         !/^(NODE_TLS_REJECT_UNAUTHORIZED|HTTP_PROXY|HTTPS_PROXY|NO_PROXY|NODE_USE_ENV_PROXY|NODE_OPTIONS|NODE_EXTRA_CA_CERTS|OIDC_CALLBACK_TLS_DIR|OIDC_CALLBACK_UNTRUSTED)$/i.test(name)))
-      await runChild(root, 'setup', env)
-      for (const mode of [...modes, 'untrusted-tls']) await runChild(root, mode, env)
-    } finally { rmSync(root, { recursive: true, force: true }) }
+      if (performance.now() >= fixtureBudgetMs) stopping = 'total deadline'
+      if (!stopping) stopping = await runChild(root, 'setup', env)
+      for (const mode of [...modes, 'untrusted-tls']) {
+        if (performance.now() >= fixtureBudgetMs) stopping ??= 'total deadline'
+        if (stopping) process.stdout.write(JSON.stringify({ mode, fixtureError: 'not run: ' + stopping }) + '\n')
+        else stopping = await runChild(root, mode, env)
+      }
+    } finally {
+      clearTimeout(deadline)
+      // runChild settles on close, after killing the whole group, before removing keys.
+      killGroup(activeChild)
+      rmSync(root, { recursive: true, force: true })
+      process.off('SIGTERM', onTerm)
+      process.off('SIGINT', onInt)
+    }
   } else {
     const mode = process.argv[2]
     if (mode === 'setup') {

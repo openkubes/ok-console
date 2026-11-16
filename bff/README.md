@@ -418,14 +418,12 @@ revision or count data derived from other tenants, (ii) `sourceRevision` becomes
 derivable into object identity/count, or (iii) a deployment requires tenant-level
 change-timing confidentiality.
 
-### Explicit rollback to fixtures
+### Fixture mode
 
-Stop the BFF, set `OK_CONSOLE_OBSERVED_STATE_MODE=fixture`, and restart it.
-Explicit fixture mode is allowed with PostgreSQL sessions as an operator choice,
-but serves static fixture data: it is never live producer evidence and must not
-be cited as such. A
-real-source outage produces a retryable, redaction-safe `SOURCE_UNAVAILABLE`
-response and does not silently show fixture data as if it were current reality.
+Fixture mode is a static recording (2026-08-21), presented as Stale/Unknown, for
+local development, tests and deployments under
+`OK_CONSOLE_DEPLOYMENT_POLICY=fixture-read-only` ([server policy](deploymentPolicy.mjs)).
+It never replaces live observed state. For source failures, restore the producer.
 
 ## Verification
 

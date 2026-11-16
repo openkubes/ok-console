@@ -10,7 +10,7 @@ import { createConsoleBffHandler, prototypeAuthorizer } from './app.mjs'
 
 type JsonRecord = Record<string, unknown>
 
-const fixtureSource = new FixtureObservedStateAdapter()
+const fixtureSource = new FixtureObservedStateAdapter(undefined, { now: () => new Date('2026-08-21T18:00:00Z') })
 let server: Server
 let baseUrl: string
 

@@ -38,8 +38,11 @@ pnpm preview
 
 ### Data adapter modes
 
-The Console defaults to deterministic fixture mode. Copy `.env.example` to
-`.env.local` and select the read-only BFF adapter for OK-159/OK-158 integration:
+The Console defaults to a static recording (2026-08-21), shown as Stale/Unknown,
+for local development, tests and deployments under
+`OK_CONSOLE_DEPLOYMENT_POLICY=fixture-read-only` ([server policy](bff/deploymentPolicy.mjs)).
+It never replaces live observed state; for source failures, restore the producer.
+Copy `.env.example` to `.env.local` and select the read-only BFF adapter:
 
 ```bash
 VITE_CONSOLE_DATA_MODE=bff

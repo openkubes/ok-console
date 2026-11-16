@@ -28,7 +28,7 @@ for (const failure of ['stale', 'degraded'] as const) {
       if (failure === 'stale') await assertUnavailableMetrics(page)
       const status = page.getByRole('status')
       await expect(status).toBeVisible()
-      await expect(status).toContainText(failure === 'stale' ? 'Observation unavailable - readiness Unknown' : 'The local failure injector omitted non-essential source data.')
+      await expect(status).toContainText(failure === 'stale' ? 'Some observations are stale' : 'The local failure injector omitted non-essential source data.')
       await expect(page.getByRole('heading', { name: 'Cluster posture' })).toBeVisible()
       if (failure === 'stale') {
         const clusters = page.locator('.cluster-card')

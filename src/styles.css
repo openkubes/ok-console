@@ -383,7 +383,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .snapshot { white-space: normal; flex-wrap: wrap; max-width: 100%; overflow-wrap: anywhere; }
 .page-title > div, .page-title > .snapshot { min-width: 0; }
 .evidence-link { min-width: 0; font-family: inherit; }
-.evidence-link-label { white-space: normal; text-align: left; overflow-wrap: normal; }
+.evidence-link-label { white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .evidence-link > svg { flex-shrink: 0; }
 .evidence-card > div { flex-wrap: wrap; gap: 8px; }
 .evidence-card > div > span { min-width: 0; }
@@ -393,3 +393,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .activity-copy > .observation-label { display: block; margin-top: 4px; }
 .activity-copy { min-width: 0; overflow-wrap: anywhere; }
 
+
+@media (max-width: 820px) {
+  .diagnostic-widget { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .sidebar.open ~ .diagnostic-widget { visibility: hidden; }
+}

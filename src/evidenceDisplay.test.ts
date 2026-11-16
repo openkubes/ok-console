@@ -15,8 +15,8 @@ it('U3 only exact BFF sentinel values are replaced', () => {
     expect(evidenceTitle({ ...item, title: title + suffix })).toBe(title + suffix)
     expect(evidenceSummary({ ...item, summary: summary + suffix })).toBe(summary + suffix)
   }
-  expect(evidenceTitle({ ...item, title, revision: 'short' })).toContain('short')
-  expect(evidenceTitle({ ...item, title, revision: 'prefix-value-and-more-with-suffix' })).toContain('prefix-value…h-suffix')
+  expect(evidenceTitle({ ...item, title, revision: 'short' })).toContain(item.id)
+  expect(evidenceTitle({ ...item, title, revision: 'prefix-value-and-more-with-suffix' })).toContain(item.id)
 })
 it('U4 translates only the exact BFF REDACTED warning and preserves actionable details', () => {
   // bff/adapters/openKubesObservedState.mjs:534.

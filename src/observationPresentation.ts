@@ -81,3 +81,15 @@ export function capabilityPresentation(capability: { readiness: string; evidence
     hasEvidence: Boolean(evidence), fixture: data.source !== 'bff',
   })
 }
+
+/** Banner copy describes the cause independently of conservative readiness verdicts. */
+export function observationWarningTitle(data: PlatformSnapshot): string | undefined {
+  if (data.source !== 'bff') return 'Observation unavailable - readiness Unknown'
+  if (data.freshness === 'Stale' || data.clusterListFreshness === 'Stale'
+    || data.clusters.some(item => item.freshness === 'Stale')
+    || data.evidence.some(item => item.freshness === 'Stale')) return 'Some observations are stale'
+  const presentation = overviewPresentation(data)
+  if (presentation.verdict === 'Unknown' || data.source !== 'bff') return 'Observation unavailable - readiness Unknown'
+  if (!presentation.current) return 'Some readiness is based on retained receipts'
+  return undefined
+}

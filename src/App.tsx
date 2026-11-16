@@ -1,8 +1,9 @@
+import { displayValues } from './displayValues'
 import { evidenceTitle, evidenceSummary } from './evidenceDisplay'
 import { operatorWarnings } from './operatorWarnings'
 import { formatObservedAt } from './formatObservedAt'
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { capabilityPresentation, clusterPresentation, conservativeVerdict, evidencePresentation, observationPresentation, observedText, overviewPresentation, placementPresentation } from './observationPresentation'
+import { capabilityPresentation, clusterPresentation, conservativeVerdict, evidencePresentation, observationPresentation, observedText, observationWarningTitle, overviewPresentation, placementPresentation } from './observationPresentation'
 import { useObservationSnapshot } from './useObservationSnapshot'
 import AuthEntry, { type PrototypeSession } from './auth/AuthEntry'
 import DiagnosticWidget from './DiagnosticWidget'
@@ -91,14 +92,14 @@ function EvidenceOutcome({ item, fixture = false }: { item: EvidenceRef; fixture
     : <StatusBadge status={presentation.verdict === 'Unknown' ? 'Unknown' : item.outcome}/>}</span>
 }
 
-function FreshnessWarning({ data, freshness }: { data: PlatformSnapshot; freshness?: PlatformSnapshot['freshness'] }) {
-  if (freshness === 'Current' && !(data.warnings?.length)) return null
-  return <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{freshness === 'Stale' ? 'Some observations are stale' : freshness !== 'Current' ? 'Observation unavailable - readiness Unknown' : 'Platform data is partially degraded'}</strong><span>{operatorWarnings(data.warnings) || 'Readiness is limited to available observations.'}</span></div></div>
+function FreshnessWarning({ data, freshness, title }: { data: PlatformSnapshot; freshness?: PlatformSnapshot['freshness']; title?: string }) {
+  if (!title && freshness === 'Current' && !(data.warnings?.length)) return null
+  return <div className="data-warning" role="status"><Icon name="clock"/><div><strong>{title ?? (freshness === 'Stale' ? 'Some observations are stale' : freshness !== 'Current' ? 'Observation unavailable - readiness Unknown' : 'Platform data is partially degraded')}</strong><span>{operatorWarnings(data.warnings) || 'Readiness is limited to available observations.'}</span></div></div>
 }
 
 function ObservationWarning({ data }: { data: PlatformSnapshot }) {
   const presentation = overviewPresentation(data)
-  return <FreshnessWarning data={data} freshness={!presentation.current && presentation.verdict === 'Current' ? 'Unknown' : presentation.verdict}/>
+  return <FreshnessWarning data={data} freshness={presentation.verdict} title={observationWarningTitle(data)}/>
 }
 
 function Metric({ label, value, note, tone = 'blue' }: { label: string; value: string | number; note: string; tone?: string }) {
@@ -191,7 +192,7 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready' && (data.source !== 'bff' || clusterPresentation(cluster, data).current)).length
   return <>
     <PageTitle eyebrow="Contract inventory" title="Clusters" description="Lifecycle posture without the Kubernetes object noise." action={clusterLifecycleAvailable ? <div className="title-actions"><button className="secondary-button" onClick={() => window.location.hash = '#/register'}><Icon name="register"/>Register Existing Cluster</button><button className="primary-button" onClick={() => window.location.hash = '#/create'}><Icon name="create"/>Create Cluster</button></div> : <span className="lifecycle-unavailable-badge" role="note">Read-only installation · cluster lifecycle unavailable</span>}/>
-    <FreshnessWarning data={data} freshness={data.clusterListFreshness}/>
+    <ObservationWarning data={data}/>
     {wjaxLocalPreviewEnabled && (
       <section aria-label="W-JAX local kind lab" style={{ padding: '18px 20px', marginBottom: 18, border: '1px solid #65a5d255', borderRadius: 12, background: '#e8f5ff' }}>
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -262,7 +263,7 @@ function Workloads({ claims, data, openEvidence }: { claims: WorkloadClaim[]; da
         <div className="claim-head"><span className="claim-kind">{claim.kind}</span><StatusBadge status={data.source === 'bff' && !placementPresentation(claim, data).current ? 'Unknown' : claim.readiness}/></div>
         <h2>{claim.name}</h2><p>{claim.intent}</p>
         <div className="placement-flow"><div><span>Owner</span><strong>{claim.owner}</strong></div><Icon name="arrow"/><div><span>Placed on</span><strong>{claim.targetCluster}</strong></div></div>
-        <div className={`cap-tags ${placementPresentation(claim, data).current ? 'current' : ''}`}>{claim.requiredCapabilities.map((item) => <span key={item}>{placementPresentation(claim, data).current && <Icon name="check" size={12}/>} {item}</span>)}</div>
+        <div className={`cap-tags ${placementPresentation(claim, data).current && claim.readiness === 'Ready' ? 'current' : ''}`}>{claim.requiredCapabilities.map((item) => <span key={item}>{placementPresentation(claim, data).current && claim.readiness === 'Ready' && <Icon name="check" size={12}/>} {item}</span>)}</div>
         <div className="decision"><Icon name="shield"/><div><span>{observed ? (presentation?.current || data.source !== 'bff' ? 'Available / desired replicas' : presentation?.stale ? 'Last observed' : 'Observation unavailable - readiness Unknown') : 'Placement decision'}</span><strong>{observed ? (data.source !== 'bff' || presentation?.current || presentation?.stale ? replicas ?? 'Unknown' : 'Unknown') : claim.decision}</strong></div></div>
         <EvidenceLink id={claim.evidenceId} evidence={data.evidence} onSelect={openEvidence}/>
       </article>
@@ -344,7 +345,7 @@ function Evidence({ data, openEvidence }: { data: PlatformSnapshot; openEvidence
   const [filter, setFilter] = useState<'All' | EvidenceRef['type']>('All')
   const items = filter === 'All' ? data.evidence : data.evidence.filter((item) => item.type === filter)
   return <><PageTitle eyebrow="Trust & provenance" title="Evidence & Audit" description="Freshness-bound observations, immutable outcomes, and authority decisions remain distinct."/>
-    <FreshnessWarning data={data} freshness={data.evidence.some(item => item.freshness === 'Stale') ? 'Stale' : data.evidence.some(item => !item.immutable && item.freshness !== 'Current') ? 'Unknown' : data.freshness}/>
+    <ObservationWarning data={data}/>
     <section className="framework-preview" aria-labelledby="framework-preview-title">
       <div className="framework-preview-heading"><div><span className="eyebrow">Roadmap preview</span><h2 id="framework-preview-title">Framework views</h2></div><span>Scope in definition</span></div>
       <div className="framework-preview-grid">
@@ -689,13 +690,16 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   }
   const observation = useObservationSnapshot(Boolean(session), selectedCluster, endSession)
   const clusterDetailError = observation.detailError
-  const effectiveDetail = observation.detail
-  const data = observation.data && {
+  const rawDetail = observation.detail
+  const effectiveDetail = displayValues(rawDetail)
+  const data = observation.data && displayValues({
     ...observation.data,
-    evidence: observation.data.evidence.map(item => effectiveDetail &&
-      (item.cluster === effectiveDetail.id || item.cluster === effectiveDetail.name)
-      ? { ...item, freshness: conservativeVerdict(item.freshness, effectiveDetail.freshness, effectiveDetail.readiness === 'Unknown' ? 'Unknown' : 'Current') } : item),
-  }
+    evidence: observation.data.evidence.map(item => ({
+      ...(rawDetail && (item.cluster === rawDetail.id || item.cluster === rawDetail.name)
+        ? { ...item, freshness: conservativeVerdict(item.freshness, rawDetail.freshness, rawDetail.readiness === 'Unknown' ? 'Unknown' : 'Current') } : item),
+      title: evidenceTitle(item),
+    })),
+  })
   const openCluster = (cluster: Cluster) => setSelectedCluster(cluster)
   useEffect(() => {
     const onHash = () => {
@@ -755,8 +759,8 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open navigation"><Icon name="menu"/></button><div className="breadcrumbs"><span>{branding.productShortName}</span><Icon name="chevron" size={13}/><strong>{title}</strong></div><div className="top-actions"><label className="global-search"><Icon name="search"/><span className="sr-only">Search platform</span><input placeholder="Search contracts, clusters, evidence…"/><kbd>⌘ K</kbd></label><button className="icon-button notification" aria-label="Notifications"><Icon name="bell"/><span/></button><div className="environment"><span><small>Environment</small><strong>Community preview</strong></span></div></div></header>
       <main id="main-content" className="content" tabIndex={-1}>{publicDemo && <div role="note" aria-label="Simulated demo" style={{ padding: "12px 16px", marginBottom: 18, border: "1px solid #65a5d255", borderRadius: 10, background: "#e8f5ff", color: "#15375b", fontSize: 14 }}><strong>SIMULATED DEMO</strong> · Sample cluster data only. No live infrastructure or AI service is connected.</div>}{observation.error && <div className="data-warning" role="alert"><Icon name="clock"/><div><strong>Observation refresh failed</strong><span>{observation.error.message.slice(0, 240)}{observation.error.correlationId ? ` · Correlation ID ${observation.error.correlationId.slice(0, 128)}` : ''}</span><button className="secondary-button" disabled={observation.loading} onClick={observation.retry}>Retry safely</button></div></div>}{view}<footer className="product-footer"><span>{terms.whiteLabel ? `${branding.productName} Prototype · Built on OpenKubes Console` : `${branding.productName} Prototype`}</span><span>{page === 'wjax' && wjaxLocalPreviewEnabled ? 'W-JAX local Reader · read-only Kubernetes observation' : <>{data.presentationVersion} · {consoleDataMode === 'bff' ? 'Console BFF' : 'deterministic fixtures'}</>}</span></footer></main>
-    {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget generation={observation.generation} data={data} openEvidence={setSelectedEvidence}/>}
     </div>
+    {!(page === 'wjax' && wjaxLocalPreviewEnabled) && <DiagnosticWidget generation={observation.generation} data={data} openEvidence={setSelectedEvidence}/>}
     {selectedEvidence && <EvidenceDrawer observedStale={observation.originalEvidence?.some(item => item.id === selectedEvidence.id && item.freshness === 'Stale')} fixture={data.source !== 'bff'} item={data.evidence.find(item => item.id === selectedEvidence.id) ?? { ...selectedEvidence, freshness: 'Unknown' }} close={() => setSelectedEvidence(undefined)}/>}
     {latestShellCluster && <ClusterShell generation={observation.generation} observedAt={data.generatedAt} cluster={latestShellCluster} source={data.source} presentation={consoleDataMode === 'bff' ? clusterPresentation(latestShellCluster, data) : undefined} close={() => setShellCluster(undefined)}/>}
   </div>

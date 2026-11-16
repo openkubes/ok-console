@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import App from './App'
+import DiagnosticWidget from './DiagnosticWidget'
 import { consoleData } from './data/consoleData'
 import { platformFixture } from './data/fixtures'
 import type { ConsoleAuthClient } from './auth/authClient'
@@ -323,6 +324,100 @@ it.each(['immutable basis', 'null metric', 'Current fixture'])('U7 suppression a
   vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
   render(<App auth={auth}/> )
   await screen.findByRole('heading', { name: 'Hello UX' })
-  expect(document.querySelector('.data-warning strong')).toHaveTextContent(cause === 'immutable basis' ? 'Some observations are stale' : 'Observation unavailable - readiness Unknown')
+  expect(document.querySelector('.data-warning strong')).toHaveTextContent(cause === 'immutable basis' ? 'Some readiness is based on retained receipts' : 'Observation unavailable - readiness Unknown')
   document.querySelectorAll('.metric > strong').forEach(el => expect(el).toHaveTextContent(/^Unavailable$/))
+})
+
+
+it.each(['current', 'stale', 'stale-item', 'stale-cluster', 'stale-list', 'unknown', 'unknown-snapshot', 'historical-only'] as const)('B1 %s cause has one accurate title on all six pages', async cause => {
+  const data = structuredClone(platformFixture)
+  data.source = 'bff'; data.freshness = cause === 'stale' ? 'Stale' : cause === 'unknown-snapshot' ? 'Unknown' : 'Current'
+  data.clusterListFreshness = 'Current'; data.warnings = []; data.claims = []
+  data.clusters.forEach(c => { c.freshness = 'Current'; c.readiness = 'Ready' })
+  data.evidence.forEach(e => { e.freshness = 'Current'; e.outcome = 'Ready'; e.immutable = false })
+  if (cause === 'unknown' || cause === 'stale') data.clusters[0].readiness = 'Unknown'
+  if (cause === 'stale-item') data.evidence[0].freshness = 'Stale'
+  if (cause === 'stale-cluster') data.clusters[0].freshness = 'Stale'
+  if (cause === 'stale-list') data.clusterListFreshness = 'Stale'
+  if (cause === 'historical-only') data.evidence[0].immutable = true
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
+  window.history.replaceState(null, '', '#/overview')
+  render(<App auth={auth}/>)
+  await screen.findByRole('button', { name: 'Sign out of OpenKubes Console' })
+  for (const page of ['overview', 'clusters', 'workloads', 'capabilities', 'agents', 'evidence']) {
+    if (page !== 'overview') {
+      fireEvent.click(document.querySelector<HTMLAnchorElement>(`nav a[href="#/${page}"]`)!)
+      await screen.findByRole('heading', { name: page === 'agents' ? 'AI Agents' : page === 'evidence' ? 'Evidence & Audit' : page[0].toUpperCase() + page.slice(1) })
+    }
+    const title = document.querySelector('.data-warning strong')
+    if (cause === 'current') expect(title).toBeNull()
+    else expect(title?.textContent).toBe(cause.startsWith('stale') ? 'Some observations are stale' : cause.startsWith('unknown') ? 'Observation unavailable - readiness Unknown' : 'Some readiness is based on retained receipts')
+  }
+})
+
+it.each(['Ready', 'Pending', 'Failed', 'Unknown'] as const)('B6 current placement %s requirements only confirm Ready', async readiness => {
+  const data = structuredClone(platformFixture)
+  data.source = 'bff'; data.freshness = 'Current'
+  data.claims.forEach(c => { c.readiness = readiness })
+  data.evidence.forEach(e => { e.freshness = 'Current'; e.outcome = 'Ready'; e.immutable = false })
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
+  window.history.replaceState(null, '', '#/workloads')
+  render(<App auth={auth}/>)
+  await screen.findByRole('heading', { name: 'Workloads' })
+  const tags = document.querySelectorAll('.cap-tags')
+  expect(tags.length).toBeGreaterThan(0)
+  tags.forEach(tag => {
+    expect(tag.classList.contains('current')).toBe(readiness === 'Ready')
+    expect(Boolean(tag.querySelector('svg'))).toBe(readiness === 'Ready')
+  })
+})
+
+it('B3 all producer display sentinels are neutral in text and attributes including loaded detail', async () => {
+  const data = structuredClone(platformFixture)
+  const withheld = 'Value withheld by the Console redaction boundary.'
+  Object.assign(data, { sourceRevision: withheld, displayName: withheld })
+  data.clusters.forEach(c => {
+    c.name = withheld; c.provider = withheld; c.profile = withheld; c.region = withheld
+    c.contractVersion = withheld; c.revision = withheld
+    c.lifecycle.forEach(step => { step.label = withheld; step.detail = withheld })
+  })
+  data.claims.forEach(c => { c.name = withheld; c.targetCluster = withheld })
+  data.evidence.forEach(e => { e.title = withheld; e.revision = withheld; e.contract = withheld; e.source = withheld; e.summary = 'Evidence summary withheld by the Console redaction boundary.' })
+  vi.spyOn(consoleData, 'getSnapshot').mockResolvedValue(data)
+  vi.spyOn(consoleData, 'getCluster').mockResolvedValue(data.clusters[0])
+  window.history.replaceState(null, '', '#/overview')
+  render(<App auth={auth}/>)
+  await screen.findByRole('button', { name: 'Sign out of OpenKubes Console' })
+  const neutral = () => {
+    expect(document.documentElement.textContent).not.toContain('redaction boundary')
+    for (const el of document.querySelectorAll('*')) for (const attr of el.attributes) expect(attr.value).not.toContain('redaction boundary')
+  }
+  for (const page of ['overview', 'clusters', 'workloads', 'capabilities', 'agents', 'evidence']) {
+    if (page !== 'overview') {
+      fireEvent.click(document.querySelector<HTMLAnchorElement>(`nav a[href="#/${page}"]`)!)
+      await screen.findByRole('heading', { name: page === 'agents' ? 'AI Agents' : page === 'evidence' ? 'Evidence & Audit' : page[0].toUpperCase() + page.slice(1) })
+    }
+    neutral()
+    const evidence = document.querySelector<HTMLButtonElement>('.evidence-link, .evidence-row')
+    if (evidence) { fireEvent.click(evidence); neutral(); fireEvent.click(screen.getByRole('button', { name: 'Close evidence' })) }
+    if (page === 'clusters') {
+      fireEvent.click(screen.getAllByRole('button', { name: 'Open Withheld' })[0])
+      await screen.findByRole('heading', { name: 'Readiness basis' })
+      neutral()
+      fireEvent.click(screen.getByRole('tab', { name: 'Lifecycle' })); neutral()
+      fireEvent.click(screen.getByRole('button', { name: '← All clusters' }))
+    }
+  }
+})
+
+
+it('U3 exact BFF diagnostic input uses evidence labels in answer and links', () => {
+  const data = structuredClone(platformFixture)
+  data.evidence.forEach(item => { item.title = 'Value withheld by the Console redaction boundary.' })
+  render(<DiagnosticWidget generation={1} data={data} openEvidence={vi.fn()}/>)
+  fireEvent.click(screen.getByRole('button', { name: /Ask OK AI/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'ok-shared status' }))
+  expect(document.querySelector('.diagnostic-message.assistant:last-child p')).not.toHaveTextContent('redaction boundary')
+  expect(document.querySelector('.diagnostic-evidence')).not.toHaveTextContent('redaction boundary')
+  expect(document.querySelector('.diagnostic-evidence')).toHaveTextContent('evidence ·')
 })

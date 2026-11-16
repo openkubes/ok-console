@@ -61,7 +61,7 @@ for (const mechanism of ['server ageing', 'browser ceiling'] as const) {
       await expect(shared.locator('.live-dot')).toHaveCount(1)
       await page.getByRole('button', { name: /Ask OK AI/ }).click()
       await page.getByRole('button', { name: 'Platform status', exact: true }).click()
-      await page.clock.pauseAt(new Date(Date.now() + 1000))
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
       if (mechanism === 'server ageing') {
         const before = bff.requests()
         bff.advance()

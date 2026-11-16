@@ -1,3 +1,6 @@
+import { evidenceTitle } from './evidenceDisplay'
+import { operatorWarnings } from './operatorWarnings'
+import { formatObservedAt } from './formatObservedAt'
 import { useRef, useState, type FormEvent } from 'react'
 import { useBrandTerms } from './branding/BrandingContext'
 import type { EvidenceRef, PlatformSnapshot } from './domain/contracts'
@@ -24,7 +27,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
     const presentation = clusterPresentation(cluster, data)
     const basis = evidence && evidencePresentation(evidence, data.source !== 'bff')
     return {
-      text: `${cluster.name}: ${presentation.current && !summary.current ? 'Last observed' : presentation.label}. ${presentation.current && summary.current ? cluster.readiness : `Last observed: ${cluster.readiness}` }. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidence.title} (${basis?.current && summary.current ? evidence.outcome : `${basis?.current ? 'Last observed' : basis?.label}; last observed outcome: ${evidence.outcome}`}).` : ''}`,
+      text: `${cluster.name}: ${presentation.current && !summary.current ? 'Last observed' : presentation.label}. ${presentation.current && summary.current ? cluster.readiness : `Last observed: ${cluster.readiness}` }. ${cluster.profile}; provider ${cluster.provider}; Kubernetes ${cluster.version}. This is a read-only summary of the Console's displayed observation.${evidence ? ` Evidence: ${evidenceTitle(evidence)} (${basis?.current && summary.current ? evidence.outcome : `${basis?.current ? 'Last observed' : basis?.label}; last observed outcome: ${evidence.outcome}`}).` : ''}`,
       evidence,
     }
   }
@@ -32,7 +35,7 @@ function answerDiagnosticQuestion(question: string, data: PlatformSnapshot): Omi
   const ready = data.clusters.filter((item) => item.readiness === 'Ready' && clusterPresentation(item, data).current).length
   const nonReady = data.clusters.length - ready
   return {
-    text: `The Console displays ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${summary.current ? 'current' : summary.label.replace(/\.$/, '')}.${data.warnings?.length ? ` Note: ${data.warnings.join(' ')}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
+    text: `The Console displays ${data.clusters.length} cluster${data.clusters.length === 1 ? '' : 's'}: ${ready} Ready and ${nonReady} needing attention or with unknown readiness. Observation freshness is ${summary.current ? 'current' : summary.label.replace(/\.$/, '')}.${data.warnings?.length ? ` Note: ${operatorWarnings(data.warnings)}` : ''} Ask about a named cluster (for example, ok-shared) for its observed status and evidence.`,
   }
 }
 
@@ -78,9 +81,9 @@ export default function DiagnosticWidget({ data, generation = 0, openEvidence }:
       <header className="diagnostic-header"><span className="diagnostic-spark" aria-hidden="true">✦</span><span><strong>{assistantName}</strong><small>Diagnostic · Demo Preview</small></span><button type="button" aria-label={`Close ${assistantName} Diagnostic`} onClick={() => setIsOpen(false)}>×</button></header>
       <div className="diagnostic-messages" aria-live="polite">
         {messages.map((message) => <div className={`diagnostic-message ${message.role}`} key={message.id}>
-          {(message.historical || message.qualified) && <small>{message.historical ? 'Earlier answer, based on data observed at' : 'Answer based on data observed at'} {new Date(message.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>}
+          {(message.historical || message.qualified) && <small>{message.historical ? 'Earlier answer, based on data observed at' : 'Answer based on data observed at'} {formatObservedAt(message.observedAt!)}</small>}
           <p>{observedText(message.text, !message.historical && !message.qualified)}</p>
-          {message.evidence && <button className="diagnostic-evidence" onClick={() => openEvidence(message.evidence!)}>View evidence · {observedText(message.evidence.title, !message.historical && !message.qualified)}</button>}
+          {message.evidence && <button className="diagnostic-evidence" onClick={() => openEvidence(message.evidence!)}>View evidence · {observedText(evidenceTitle(message.evidence), !message.historical && !message.qualified)}</button>}
         </div>)}
       </div>
       <div className="diagnostic-prompts"><button onClick={() => ask('Platform status')}>Platform status</button><button onClick={() => ask('ok-shared status')}>ok-shared status</button></div>

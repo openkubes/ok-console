@@ -54,7 +54,7 @@ for (const kind of ['item', 'envelope', 'injection'] as const) {
         await page.goto('/#/overview')
         const findings = page.locator('.metric').filter({ hasText: 'Open findings' })
         await expect(findings.locator('strong')).toHaveText('Unavailable')
-        await expect(findings.locator('small')).toHaveText('Unavailable')
+        await expect(findings.locator('small')).toHaveText('Not available while observations are incomplete')
         await expect(findings).not.toContainText('0 critical')
       } finally { await fixture?.close() }
     })

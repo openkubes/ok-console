@@ -1,3 +1,4 @@
+import { formatObservedAt } from './formatObservedAt'
 import type { Cluster, EvidenceRef, PlatformSnapshot, WorkloadClaim } from './domain/contracts'
 import type { Freshness } from './domain/presentationContract'
 
@@ -13,7 +14,7 @@ export function observationPresentation({ freshness, state, hasEvidence = true, 
   const verdict = conservativeVerdict(freshness, state === undefined || state === 'Unknown' || !hasEvidence ? 'Unknown' : 'Current')
   if (fixture) return { current: false, stale: false, verdict, label: 'Fixture snapshot' }
   if (verdict === 'Unknown') return { current: false, stale: false, verdict, label: 'Observation unavailable - readiness Unknown' }
-  if (immutable) return { current: false, stale: verdict === 'Stale', verdict, label: `Immutable receipt${observedAt ? ` · ${new Date(observedAt).toLocaleString()}` : ''}` }
+  if (immutable) return { current: false, stale: verdict === 'Stale', verdict, label: `Immutable receipt${observedAt ? ` · ${formatObservedAt(observedAt)}` : ''}` }
   if (verdict === 'Stale') return { current: false, stale: true, verdict, label: 'Last observed' }
   return { current: true, stale: false, verdict, label: 'Current observation' }
 }

@@ -49,7 +49,7 @@ function BrandedLoginShell({ authMode, children }: { authMode: AuthMode; childre
       <div className="auth-brand"><img src={branding.logoUrl} alt={branding.logoAlt}/><span><strong>{branding.productShortName}</strong><small>{branding.productTagline}</small></span></div>
       <div className="auth-story-copy"><span className="auth-kicker">{branding.login.kicker}</span><h2>{headline.map((line, index) => index === headline.length - 1 ? <em key={index}>{line}</em> : <span key={index}>{line}<br/></span>)}</h2><p>{branding.login.text}</p></div>
       <div className="auth-principles"><span><AuthIcon name="shield"/>{authMode === 'local' ? 'Local development' : 'Federated by default'}</span><span><AuthIcon name="lock"/>Least authority</span><span><AuthIcon name="check"/>Evidence-backed</span></div>
-      <p className="auth-story-foot">{live ? `${branding.productName} · Secure entry` : `${branding.productName} Prototype · OK-154`}</p>
+      <p className="auth-story-foot">{live ? `${branding.productName} · Secure entry` : `${branding.productName} Prototype`}</p>
     </section>
     <section className="auth-panel" aria-label={`Sign in to ${branding.productShortName}`}>
       <div className="auth-card">

@@ -153,7 +153,7 @@ test('U5 item-only stale producer observation is explained by the SOURCE_STALE b
   const fixture = await serve(page, 'item')
   try {
     await signInPrototype(page)
-    await expect(page.locator('.data-warning')).toContainText('Some observations are stale')
+    await expect(page.locator('.data-warning')).toContainText('Observation unavailable - readiness Unknown')
     await expect(page.locator('.data-warning')).toContainText('An authorized observation is outside its configured freshness window.')
     await expect(page.locator('.snapshot .live-dot')).toHaveCount(0)
   } finally { await fixture.close() }

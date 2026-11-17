@@ -29,14 +29,17 @@ test('fresh producer changes content while Detail and widget remain open', async
   try {
     await page.clock.install()
     await signInPrototype(page)
-    await page.clock.pauseAt(new Date(Date.now() + 1000))
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
     await expect(page.locator('.snapshot')).toContainText('Current observation')
     await page.locator('.cluster-card').filter({ hasText: 'ok-shared' }).locator('.card-main').click()
     await expect(page.locator('.lifecycle-step').first()).toBeVisible()
     await page.getByRole('button', { name: /Ask OK AI/ }).click()
     await page.getByRole('button', { name: 'ok-shared status', exact: true }).click()
     await expect(page.locator('.diagnostic-message.assistant').last()).toContainText('Current observation. Ready.')
-    await page.getByRole('button', { name: 'Open Shell' }).click()
+    const shell = page.getByRole('button', { name: 'Open Shell' })
+    // Keep this page control above the open floating panel on compact screens.
+    await shell.evaluate(el => window.scrollBy(0, el.getBoundingClientRect().top - 100))
+    await shell.click()
     await page.getByRole('button', { name: 'kubectl get clusterconditions -o wide', exact: true }).click()
     const originalOutput = page.locator('.terminal-entry.terminal-output').first()
     now += 3_600_000

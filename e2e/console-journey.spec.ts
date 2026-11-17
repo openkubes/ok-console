@@ -16,7 +16,7 @@ test('sign-in to Overview, Clusters, Detail, and Evidence uses the same-origin B
   await openPrimaryNavigation(page)
   await page.getByRole('link', { name: /Clusters Lifecycle contracts/ }).click()
   await expect(page.getByRole('heading', { name: 'Clusters' })).toBeVisible()
-  await page.getByRole('button', { name: /^ok-mgmt/ }).click()
+  await page.getByRole('button', { name: 'Open ok-mgmt', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'ok-mgmt' })).toBeVisible()
   await expect(page.getByText('Lifecycle posture')).toBeVisible()
 

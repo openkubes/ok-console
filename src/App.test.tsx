@@ -56,8 +56,8 @@ describe('OpenKubes Console', () => {
   it('suppresses all Platform metrics values and notes in browser fixture mode', async () => {
     await renderSignedIn()
     const metrics = await screen.findByRole('region', { name: 'Platform metrics' })
-    expect(metrics).toHaveTextContent('ClustersUnavailableUnavailableCapabilitiesUnavailableUnavailableWorkload claimsUnavailableUnavailableOpen findingsUnavailableUnavailable')
-    expect(within(metrics).getAllByText('Unavailable', { exact: true })).toHaveLength(8)
+    expect(metrics).toHaveTextContent('ClustersUnavailableNot available while observations are incompleteCapabilitiesUnavailableNot available while observations are incompleteWorkload claimsUnavailableNot available while observations are incompleteOpen findingsUnavailableNot available while observations are incomplete')
+    expect(within(metrics).getAllByText('Unavailable', { exact: true })).toHaveLength(4)
     expect(metrics).not.toHaveTextContent(/ready|conformant|converging|in progress|critical|management plane/i)
   })
 
@@ -609,10 +609,10 @@ it('shows unavailable observed metrics and no invented management plane for a te
   const observation = vi.spyOn(consoleData, 'getSnapshot').mockResolvedValueOnce(snapshot)
   try {
     await renderSignedIn()
-    expect(await screen.findAllByText('Unavailable')).toHaveLength(8)
+    expect(await screen.findAllByText('Unavailable')).toHaveLength(4)
     for (const card of document.querySelectorAll('.metric')) {
       expect(card.querySelector('strong')).toHaveTextContent('Unavailable')
-      expect(card.querySelector('small')).toHaveTextContent('Unavailable')
+      expect(card.querySelector('small')).toHaveTextContent('Not available while observations are incomplete')
     }
     expect(document.querySelector('.management-ribbon')).toBeNull()
     window.location.hash = '#/clusters'

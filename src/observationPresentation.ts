@@ -1,3 +1,4 @@
+import { formatObservedAt } from './formatObservedAt'
 import type { Cluster, EvidenceRef, PlatformSnapshot, WorkloadClaim } from './domain/contracts'
 import type { Freshness } from './domain/presentationContract'
 
@@ -13,7 +14,7 @@ export function observationPresentation({ freshness, state, hasEvidence = true, 
   const verdict = conservativeVerdict(freshness, state === undefined || state === 'Unknown' || !hasEvidence ? 'Unknown' : 'Current')
   if (fixture) return { current: false, stale: false, verdict, label: 'Fixture snapshot' }
   if (verdict === 'Unknown') return { current: false, stale: false, verdict, label: 'Observation unavailable - readiness Unknown' }
-  if (immutable) return { current: false, stale: verdict === 'Stale', verdict, label: `Immutable receipt${observedAt ? ` · ${new Date(observedAt).toLocaleString()}` : ''}` }
+  if (immutable) return { current: false, stale: verdict === 'Stale', verdict, label: `Immutable receipt${observedAt ? ` · ${formatObservedAt(observedAt)}` : ''}` }
   if (verdict === 'Stale') return { current: false, stale: true, verdict, label: 'Last observed' }
   return { current: true, stale: false, verdict, label: 'Current observation' }
 }
@@ -79,4 +80,16 @@ export function capabilityPresentation(capability: { readiness: string; evidence
     state: evidence?.outcome === 'Unknown' ? 'Unknown' : capability.readiness,
     hasEvidence: Boolean(evidence), fixture: data.source !== 'bff',
   })
+}
+
+/** Banner copy describes the cause independently of conservative readiness verdicts. */
+export function observationWarningTitle(data: PlatformSnapshot): string | undefined {
+  if (data.source !== 'bff') return 'Observation unavailable - readiness Unknown'
+  if (data.freshness === 'Stale' || data.clusterListFreshness === 'Stale'
+    || data.clusters.some(item => item.freshness === 'Stale')
+    || data.evidence.some(item => item.freshness === 'Stale')) return 'Some observations are stale'
+  const presentation = overviewPresentation(data)
+  if (presentation.verdict === 'Unknown' || data.source !== 'bff') return 'Observation unavailable - readiness Unknown'
+  if (!presentation.current) return 'Some readiness is based on retained receipts'
+  return undefined
 }

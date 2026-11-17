@@ -437,7 +437,7 @@ it('R3 ceiling suppresses every numeric metric and note', async () => {
   await advance(60_000)
   for (const card of document.querySelectorAll('.metric')) {
     expect(card.querySelector('strong')).toHaveTextContent(/^Unavailable$/)
-    expect(card.querySelector('small')).toHaveTextContent(/^Unavailable$/)
+    expect(card.querySelector('small')).toHaveTextContent(/^Not available while observations are incomplete$/)
   }
 })
 it.each(['focus', 'online', 'visibilitychange'])('R3 %s demotes on a wall-clock gap even while monotonic time is frozen', async event => {
@@ -625,7 +625,7 @@ it('R2 RT1 new shell commands use refreshed lifecycle and revision; earlier outp
   expect(document.querySelector('.terminal-ai')).toHaveTextContent('Nodes: Failed — New producer node failure')
   expect(previous.length).toBeGreaterThan(0)
   for (const entry of previous) {
-    expect(entry).toHaveTextContent('Earlier output, based on data observed at')
+    expect(entry).toHaveTextContent(/Earlier output, based on data observed at \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/)
     noCurrency(entry)
     expect(entry).not.toHaveTextContent('producer-revision-r2')
   }

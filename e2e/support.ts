@@ -55,5 +55,5 @@ export const assertCurrentFixture = async (page: Page) => {
 export const assertUnavailableMetrics = async (page: Page) => {
   const metrics = page.getByRole('region', { name: 'Platform metrics' })
   await expect(metrics.locator('.metric > strong')).toHaveText(Array(4).fill('Unavailable'))
-  await expect(metrics.locator('.metric > small')).toHaveText(Array(4).fill('Unavailable'))
+  await expect(metrics.locator('.metric > small')).toHaveText(Array(4).fill('Not available while observations are incomplete'))
 }

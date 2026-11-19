@@ -24,7 +24,10 @@ export async function immutableEvidenceWorld(page: Page) {
     await route.fulfill({ status: response.status, contentType: 'application/json', body: await response.text() })
   })
   return async () => {
-    server.closeAllConnections()
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    try { if (!page.isClosed()) await page.unrouteAll({ behavior: 'ignoreErrors' }) }
+    finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
   }
 }

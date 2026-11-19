@@ -263,6 +263,23 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     }) }
   }
 
+  it('releasing one reservation lifts a block only when the remaining failures fall below the limit, once', async () => {
+    const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 7) })
+    const principal = async () => (await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('race-admin')])).rows[0]
+    for (let i = 0; i < 3; i++) await throttle.reserve('race-admin')
+    const first = await throttle.reserve('race-admin')
+    const second = await throttle.reserve('race-admin')
+    expect((await principal()).blocked_until).not.toBeNull()
+    // The fifth attempt set the block; returning the never-evaluated fourth leaves four failures.
+    await throttle.release('race-admin', first)
+    expect(await principal()).toEqual({ failures: 4, blocked_until: null })
+    await expect(throttle.release('race-admin', first)).resolves.toEqual({ released: false })
+    expect((await principal()).failures).toBe(4)
+    expect((await throttle.reserve('race-admin')).blocked).toBe(false)
+    expect((await principal()).blocked_until).not.toBeNull()
+    expect(second.blocked).toBe(false)
+  })
+
   it('returns timed-out KDF attempts without forgiving real failures, so a correct password still works', async () => {
     const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 6) })
     const derive = vi.fn(async (password: string) => {

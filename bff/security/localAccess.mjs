@@ -138,8 +138,11 @@ export class PostgresLocalAccessThrottle {
 
   // Give back exactly one reservation whose credential was never evaluated (for example a key
   // derivation that missed its deadline). Only this reservation's own attempt and window are
-  // touched: other failures stay counted, and a block is cleared only if this reservation set it.
+  // touched and other failures stay counted. A block stays only while the remaining failures
+  // still reach its limit. A reservation is returned at most once.
   async release(username, reservation) {
+    if (reservation.released) return { released: false }
+    reservation.released = true
     const principalDigest = this.digest(username)
     const globalDigest = this.globalDigest()
     const digests = [principalDigest, globalDigest].sort()
@@ -152,10 +155,10 @@ export class PostgresLocalAccessThrottle {
       await pgQuery(client, `
         UPDATE ok_console.local_access_throttle SET
           failures = GREATEST(failures - 1, 0),
-          blocked_until = CASE WHEN floor(extract(epoch FROM blocked_until) * 1e6)::bigint = $3::bigint THEN NULL ELSE blocked_until END,
-          updated_at = to_timestamp($4::numeric / 1e6)
+          blocked_until = CASE WHEN failures - 1 < 5 THEN NULL ELSE blocked_until END,
+          updated_at = to_timestamp($3::numeric / 1e6)
         WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
-      [principalDigest, reservation.principalWindow, reservation.principalBlock ?? null, now])
+      [principalDigest, reservation.principalWindow, now])
       await pgQuery(client, `
         UPDATE ok_console.local_access_throttle SET
           failures = GREATEST(failures - 1, 0),

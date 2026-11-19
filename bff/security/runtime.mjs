@@ -11,6 +11,7 @@ import { SessionEnvelopeCodec } from './envelope.mjs'
 import { createLocalAccessVerifier, PostgresLocalAccessAudit, PostgresLocalAccessThrottle } from './localAccess.mjs'
 import { PostgresAuthenticationAudit } from './authenticationAudit.mjs'
 import { createLocalAccessHttpHandler } from './localAccessHttp.mjs'
+import { createKdf } from './kdf.mjs'
 import { createOidcHttpHandler, createOidcProtocolClient, createStaticOidcIdentityMapper } from './oidc.mjs'
 import { PostgresOidcTransactionStore } from './oidcTransactionStore.mjs'
 import { PostgresSessionStore } from './postgresSessionStore.mjs'
@@ -237,6 +238,7 @@ export const createSessionRuntime = async ({
 } = {}) => {
   const ordinaryLocal = validateLocalIdentityProfile(env)
   let identity
+  const kdfs = []
   const mode = env.OK_CONSOLE_SESSION_STORE_MODE ?? 'disabled'
   if (mode === 'disabled') {
     if ((env.OK_CONSOLE_LOCAL_ACCESS_MODE ?? 'disabled') !== 'disabled') {
@@ -393,8 +395,10 @@ export const createSessionRuntime = async ({
       const throttle = throttleFactory({ pool, pepper })
       const auditStore = auditFactory({ pool, pepper })
       if (!authenticationAudit) authenticationAudit = authenticationAuditFactory({ pool, pepper })
+      const accessKdf = createKdf({ slots: 2 })
+      kdfs.push(accessKdf)
       const verifier = createLocalAccessVerifier({
-        mode: method, accounts, throttle, sessionStore, authorizationRevision,
+        mode: method, accounts, throttle, sessionStore, authorizationRevision, kdf: accessKdf,
         isEnabled: ordinaryLocal && method === 'Bootstrap' ? async () => {
           const result = await pgQuery(pool, 'SELECT initialized FROM ok_identity.state WHERE singleton=true')
           return result.rowCount === 1 && (result.rows[0].initialized === false || env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true')
@@ -404,7 +408,7 @@ export const createSessionRuntime = async ({
           await authenticationAudit.record(event)
         },
       })
-      localAccessHandler = createLocalAccessHttpHandler({ method, verifier, expectedOrigin, audit: (event) => authenticationAudit.record(event) })
+      localAccessHandler = createLocalAccessHttpHandler({ method, verifier, expectedOrigin, audit: (event) => authenticationAudit.record(event), revoke: (cookie, reason) => sessionStore.revoke(cookie, reason) })
     } catch (error) {
       await pool.end().catch(() => {})
       throw error
@@ -414,11 +418,13 @@ export const createSessionRuntime = async ({
   if (ordinaryLocal) {
     const pepperValue = await secretFile(required(env, 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE'), 'OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE', fileReader)
     if (!BASE64_32_BYTE_KEY_PATTERN.test(pepperValue)) throw new SessionRuntimeConfigurationError('Invalid local throttle configuration.')
-    identity = new LocalIdentity({ pool, sessions: sessionStore,
+    const identityKdf = createKdf({ slots: 2 })
+    kdfs.push(identityKdf)
+    identity = new LocalIdentity({ pool, sessions: sessionStore, kdf: identityKdf,
       throttle: throttleFactory({ pool: ordinaryThrottlePool(pool), pepper: Buffer.from(pepperValue, 'base64') }),
       recoveryEnabled: env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true',
       scope: { environmentId, tenantIds: [tenantId] }, authorizationRevision })
-    localIdentityHandler = createLocalIdentityHttp({ identity, sessions: sessionStore, expectedOrigin })
+    localIdentityHandler = createLocalIdentityHttp({ identity, sessions: sessionStore, expectedOrigin, audit: (event) => authenticationAudit.record(event) })
     if (!authenticationAudit) authenticationAudit = authenticationAuditFactory({ pool, pepper: Buffer.from(pepperValue, 'base64') })
   }
   let closed = false
@@ -454,6 +460,7 @@ export const createSessionRuntime = async ({
     close: async () => {
       if (closed) return
       closed = true
+      await Promise.all(kdfs.map((kdf) => kdf.close()))
       await pool.end()
     },
   }

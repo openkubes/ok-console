@@ -1,8 +1,12 @@
 import { IdentityError } from './localIdentity.mjs'
 import { validateCsrf } from './session.mjs'
+import { boundedCorrelation, startErrorCode } from '../diagnostics.mjs'
+import { deliverIssuedSession, RESPONSE_FAILED, WITHDRAWN_REASON } from './issuedSession.mjs'
 
 const ROOT = '/api/console/v0/local-identity'
-export const createLocalIdentityHttp = ({ identity, sessions, expectedOrigin }) => async ({ request, response, pathname, correlationId }) => {
+const REJECTION = JSON.stringify({ error: { code: 'LOCAL_IDENTITY_REJECTED', message: 'Local identity request could not be completed.' } })
+
+export const createLocalIdentityHttp = ({ identity, sessions, expectedOrigin, audit = async () => {} }) => async ({ request, response, pathname, correlationId }) => {
   if (pathname !== ROOT && !pathname.startsWith(`${ROOT}/`)) return false
   const operation = pathname.slice(ROOT.length + 1)
   const method = operation === 'list' ? 'GET' : 'POST'
@@ -32,16 +36,34 @@ export const createLocalIdentityHttp = ({ identity, sessions, expectedOrigin }) 
     }
     if (operation === 'login') {
       const issued = await identity.login(input, correlationId)
-      response.writeHead(200, { ...headers, 'Set-Cookie': [issued.cookie, issued.csrfCookie] })
-      response.end(JSON.stringify(issued.session))
+      // Past this point the credential was verified and the session audited LoginGranted.
+      await deliverIssuedSession({
+        response,
+        write: () => {
+          response.writeHead(200, { ...headers, 'Set-Cookie': [issued.cookie, issued.csrfCookie] })
+          response.end(JSON.stringify(issued.session))
+        },
+        revoke: () => sessions.revoke(issued.cookie, RESPONSE_FAILED),
+        audit: () => audit({ method: 'Local', outcome: 'Revoked', cause: RESPONSE_FAILED, correlationId, reason: WITHDRAWN_REASON }),
+        unavailable: () => {
+          response.writeHead(503, headers)
+          response.end(REJECTION)
+        },
+        log: (cause, error) => console.error(JSON.stringify({ correlationId: boundedCorrelation(correlationId), event: 'LOCAL_IDENTITY_FAILED', cause, errorCode: startErrorCode(error) })),
+      })
     } else {
       const result = await identity.manage(operation, context, input, correlationId)
       response.writeHead(200, headers)
       response.end(JSON.stringify(result))
     }
   } catch (error) {
+    // A status line that already went out cannot be replaced; drop the connection instead.
+    if (response.headersSent) {
+      response.destroy?.()
+      return true
+    }
     response.writeHead(error instanceof IdentityError ? error.status : 503, headers)
-    response.end(JSON.stringify({ error: { code: 'LOCAL_IDENTITY_REJECTED', message: 'Local identity request could not be completed.' } }))
+    response.end(REJECTION)
   }
   return true
 }

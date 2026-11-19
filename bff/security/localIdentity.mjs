@@ -1,8 +1,7 @@
-import { randomBytes, randomUUID, scrypt as derive, timingSafeEqual } from 'node:crypto'
-import { promisify } from 'node:util'
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { classifyPgError } from './pgFailure.mjs'
+import { createKdf } from './kdf.mjs'
 
-const scrypt = promisify(derive)
 const HASH = { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }
 const READER = ['platform.read', 'clusters.read', 'evidence.read']
 const ADMIN = 'local.users.admin'
@@ -18,18 +17,16 @@ const revisionFor = (row) => `local:${row.id}:${row.revision}`
 const publicAccount = (row) => ({ id: row.id, username: row.username, enabled: row.enabled, administrator: row.administrator })
 
 export class LocalIdentity {
-  constructor({ pool, sessions, throttle, scope, authorizationRevision, recoveryEnabled = false }) {
-    Object.assign(this, { pool, sessions, throttle, scope, authorizationRevision, recoveryEnabled })
-    this.hashing = 0
+  constructor({ pool, sessions, throttle, scope, authorizationRevision, recoveryEnabled = false, kdf = createKdf({ slots: 2 }) }) {
+    Object.assign(this, { pool, sessions, throttle, scope, authorizationRevision, recoveryEnabled, kdf })
   }
+  // Slots held by derivations, including timed-out ones whose worker has not exited yet.
+  get hashing() { return this.kdf.held }
   hashSlot() {
-    if (this.hashing >= 2) throw new IdentityError()
-    this.hashing++
-    let held = true
-    return () => { if (held) { held = false; this.hashing-- } }
+    try { return this.kdf.acquire() } catch { throw new IdentityError() }
   }
-  async hash(password, salt, release = this.hashSlot()) {
-    try { return await scrypt(password, salt, 32, HASH) } finally { release() }
+  async hash(password, salt, lease = this.hashSlot()) {
+    try { return await lease.derive(password, salt, 32, HASH) } catch { throw new IdentityError() } finally { lease.release() }
   }
   async audit(db, actor, target, action, correlationId) {
     await db.query('INSERT INTO ok_identity.audit(actor_id,target_id,action,correlation_id) VALUES($1,$2,$3,$4)', [actor, target, action, correlationId])
@@ -137,7 +134,7 @@ export class LocalIdentity {
       throw new IdentityError(401)
     }
     // Capacity refusals must not consume a principal or global attempt.
-    const releaseHash = this.hashSlot()
+    const hashLease = this.hashSlot()
     let reservation, row, expected, actual
     try {
       try { reservation = await this.throttle.reserve(`ordinary:${username}`) } catch { throw new IdentityError() }
@@ -149,8 +146,12 @@ export class LocalIdentity {
       row = selected.rows[0]
       const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
       expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)
-      actual = await this.hash(input.password, salt, releaseHash)
-    } finally { releaseHash() }
+      try { actual = await this.hash(input.password, salt, hashLease) } catch (error) {
+        // The credential was never evaluated: return this attempt (see PostgresLocalAccessThrottle.release).
+        try { await this.throttle.release(`ordinary:${username}`, reservation) } catch { /* stays counted: fail closed */ }
+        throw error
+      }
+    } finally { hashLease.release() }
     if (!row?.enabled || row.hash_profile !== 'scrypt-v1' || expected.length !== 32 || !timingSafeEqual(actual, expected)) {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)
       throw new IdentityError(401)

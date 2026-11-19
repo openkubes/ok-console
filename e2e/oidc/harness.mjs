@@ -314,11 +314,20 @@ export const startHarness = async () => {
   return { state, proxies, dispose }
 }
 
-export const stopHarness = async (state, proxies = []) => {
+// One cleanup per run, whichever of teardown, SIGINT or SIGTERM asks first: a second pass could
+// otherwise delete the dist/ the first one restored.
+const stopping = new Map()
+export const stopHarness = (state, proxies = []) => {
+  if (!stopping.has(state.stateFile)) stopping.set(state.stateFile, cleanup(state, proxies))
+  return stopping.get(state.stateFile)
+}
+
+const cleanup = async (state, proxies) => {
   const current = existsSync(state.stateFile) ? loadState(state.stateFile) : state
   await stopBff(current).catch(() => {})
   await Promise.all(proxies.map((server) => new Promise((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()) })))
-  try { compose(current, ['down', '-v', '--remove-orphans', '--timeout', '5']) } catch (error) { console.error(`compose down failed: ${error.message}`) }
+  let composeFailure
+  try { compose(current, ['down', '-v', '--remove-orphans', '--timeout', '5']) } catch (error) { composeFailure = error }
   if (current.distBackup && existsSync(current.distBackup)) {
     await rm(`${ROOT}dist`, { recursive: true, force: true })
     await rename(current.distBackup, `${ROOT}dist`)
@@ -327,5 +336,9 @@ export const stopHarness = async (state, proxies = []) => {
   }
   const evidence = `${ROOT}test-results/e2e-oidc`
   await mkdir(evidence, { recursive: true }).then(() => cp(current.bffLog, `${evidence}/bff.log`)).catch(() => {})
+  if (composeFailure) {
+    // Keep the run directory: it holds the compose project name and inputs needed to clean up.
+    throw new Error(`docker compose down failed for project ${current.composeProject}; run directory kept at ${current.dir}: ${composeFailure.message}`)
+  }
   if (process.env.OK_OIDC_E2E_KEEP !== 'true') await rm(current.dir, { recursive: true, force: true })
 }

@@ -89,7 +89,23 @@ export const browserStorageDump = async (page: Page) => JSON.stringify({
     local: Object.entries(localStorage),
     session: Object.entries(sessionStorage),
     cookie: document.cookie,
-    indexedDb: 'databases' in indexedDB ? await indexedDB.databases() : [],
+    indexedDb: await (async () => {
+      // Names and every record (keys and values) of every object store in every database.
+      const databases = 'databases' in indexedDB ? await indexedDB.databases() : []
+      const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+      const dump = []
+      for (const info of databases) {
+        if (!info.name) continue
+        const opened = indexedDB.open(info.name)
+        const db = await request(opened)
+        for (const store of [...db.objectStoreNames]) {
+          const tx = db.transaction(store, 'readonly').objectStore(store)
+          dump.push({ db: info.name, store, keys: await request(tx.getAllKeys()), values: await request(tx.getAll()) })
+        }
+        db.close()
+      }
+      return dump
+    })(),
     href: location.href,
     html: document.documentElement.outerHTML,
   })),
@@ -100,16 +116,29 @@ export const browserStorageDump = async (page: Page) => JSON.stringify({
 /** Records status, headers and (where readable) bodies of every Console-origin response. */
 export const recordConsoleResponses = (page: Page) => {
   const pending: Promise<string>[] = []
+  const unreadable: string[] = []
+  const exchangesAtStart = tokenExchanges()
   page.on('response', (response) => {
     if (!response.url().startsWith(harness().origin)) return
+    const exchangesAtResponse = tokenExchanges()
     pending.push((async () => {
-      const within = <T>(work: Promise<T>, fallback: T) => Promise.race([work.catch(() => fallback), new Promise<T>((resolve) => setTimeout(() => resolve(fallback), 5_000))])
-      const body = response.status() >= 300 && response.status() < 400 ? '' : await within(response.text(), '')
-      const headers = await within(response.headersArray(), [] as { name: string, value: string }[])
+      const UNREAD = Symbol('unread')
+      const within = <T>(work: Promise<T>) => Promise.race([work.catch(() => UNREAD), new Promise<typeof UNREAD>((resolve) => setTimeout(() => resolve(UNREAD), 5_000))])
+      // Redirect bodies are not retained by the browser; every other body and all headers must be read.
+      const redirect = response.status() >= 300 && response.status() < 400
+      const body = redirect ? '' : await within(response.text())
+      const headers = await within(response.headersArray())
+      // A response the browser discarded (it navigated away) before any token exchange in this flow
+      // cannot carry a token value; any later unreadable response fails the capture.
+      if ((body === UNREAD || headers === UNREAD) && exchangesAtResponse > exchangesAtStart) unreadable.push(`${response.status()} ${response.url().split('?')[0]}`)
       return JSON.stringify({ url: response.url().split('?')[0], status: response.status(), headers, body })
     })())
   })
-  return async () => (await Promise.all(pending)).join('\n')
+  return async () => {
+    const captured = (await Promise.all(pending)).join('\n')
+    expect(unreadable, 'Console responses that could not be captured').toEqual([])
+    return captured
+  }
 }
 
 /** Raw Set-Cookie values of a response (the cookie API reports SameSite=Lax by default). */

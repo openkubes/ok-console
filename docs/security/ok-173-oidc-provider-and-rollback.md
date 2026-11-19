@@ -34,8 +34,8 @@ not approve any live change: applying it to a shared environment is a separate, 
 | SPA build | `VITE_CONSOLE_DATA_MODE=bff`, `VITE_CONSOLE_AUTH_MODE=breakglass` |
 
 Secrets stay in Kubernetes Secrets mounted as files; none of them is passed as an environment
-value or command-line argument. The mapping's `environmentId` scope must equal the environment the
-observed-state source serves, otherwise every projection is denied.
+value or command-line argument. Sessions are scoped to `OK_CONSOLE_ENVIRONMENT_ID`, which must
+equal the environment the observed-state source serves, otherwise every projection is denied.
 
 ## Rollback to bootstrap-only
 

@@ -103,7 +103,9 @@ it.each(['TOKEN_EXCHANGE', 'SUBJECT_MAP', 'OTHER'])('H3 callback identifies %s a
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     let first = true
     await handler({ pathname: path + 'callback', correlationId: id, request: { method: 'GET', url: '/callback', headers: {} }, response: { writeHead() { if (first) { first = false; fail() } }, end() {} } })
-    expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ event: 'OIDC_CALLBACK_FAILED', cause: step, errorCode: 'ECONNRESET' })
+    // The failing write comes after the session was issued, so it is reported as a response-write
+    // failure (and the session withdrawn), not as a generic callback rejection.
+    expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({ event: 'OIDC_CALLBACK_FAILED', cause: 'RESPONSE_WRITE', errorCode: 'ECONNRESET' })
     log.mockRestore()
   } else expect((await invoke(handler)).lines[0]).toMatchObject({ event: 'OIDC_CALLBACK_FAILED', cause: step, errorCode: 'ECONNRESET' })
 })

@@ -408,7 +408,7 @@ export const createSessionRuntime = async ({
           await authenticationAudit.record(event)
         },
       })
-      localAccessHandler = createLocalAccessHttpHandler({ method, verifier, expectedOrigin, audit: (event) => authenticationAudit.record(event) })
+      localAccessHandler = createLocalAccessHttpHandler({ method, verifier, expectedOrigin, audit: (event) => authenticationAudit.record(event), revoke: (cookie, reason) => sessionStore.revoke(cookie, reason) })
     } catch (error) {
       await pool.end().catch(() => {})
       throw error
@@ -424,7 +424,7 @@ export const createSessionRuntime = async ({
       throttle: throttleFactory({ pool: ordinaryThrottlePool(pool), pepper: Buffer.from(pepperValue, 'base64') }),
       recoveryEnabled: env.OK_CONSOLE_LOCAL_IDENTITY_RECOVERY_ENABLED === 'true',
       scope: { environmentId, tenantIds: [tenantId] }, authorizationRevision })
-    localIdentityHandler = createLocalIdentityHttp({ identity, sessions: sessionStore, expectedOrigin })
+    localIdentityHandler = createLocalIdentityHttp({ identity, sessions: sessionStore, expectedOrigin, audit: (event) => authenticationAudit.record(event) })
     if (!authenticationAudit) authenticationAudit = authenticationAuditFactory({ pool, pepper: Buffer.from(pepperValue, 'base64') })
   }
   let closed = false

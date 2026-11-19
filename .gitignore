@@ -27,3 +27,5 @@ demos/wjax-2026/*.bak
 
 # W-JAX source/runtime separation
 .wjax-local-runtime/
+dist-e2e-oidc/
+playwright-report-oidc/

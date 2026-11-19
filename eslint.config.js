@@ -5,14 +5,14 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  { ignores: ['dist', 'dist-e2e-oidc', 'playwright-report-oidc'] },
   {
     ...js.configs.recommended,
-    files: ['bff/**/*.mjs'],
+    files: ['bff/**/*.mjs', 'e2e/oidc/**/*.mjs'],
     languageOptions: { ecmaVersion: 2023, globals: globals.node },
   },
   {
-    files: ['playwright.config.ts'],
+    files: ['playwright.config.ts', 'playwright.oidc.config.ts', 'e2e/oidc/**/*.ts'],
     languageOptions: { ecmaVersion: 2022, globals: globals.node },
   },
   {

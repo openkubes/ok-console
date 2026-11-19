@@ -1,0 +1,45 @@
+{
+  "realm": "ok-e2e",
+  "enabled": true,
+  "sslRequired": "none",
+  "loginWithEmailAllowed": false,
+  "clients": [
+    {
+      "clientId": "ok-console-e2e",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "__CLIENT_SECRET__",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["__REDIRECT_URI__"],
+      "webOrigins": ["__CONSOLE_ORIGIN__"],
+      "attributes": { "pkce.code.challenge.method": "S256" }
+    }
+  ],
+  "users": [
+    {
+      "id": "6d3c1f3e-5f0a-4c55-9a52-173000000001",
+      "username": "mapped-operator",
+      "enabled": true,
+      "email": "mapped-operator@example.invalid",
+      "emailVerified": true,
+      "firstName": "Mapped",
+      "lastName": "Operator",
+      "credentials": [{ "type": "password", "value": "__MAPPED_PASSWORD__", "temporary": false }]
+    },
+    {
+      "id": "6d3c1f3e-5f0a-4c55-9a52-173000000002",
+      "username": "unmapped-user",
+      "enabled": true,
+      "email": "unmapped-user@example.invalid",
+      "emailVerified": true,
+      "firstName": "Unmapped",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "__UNMAPPED_PASSWORD__", "temporary": false }]
+    }
+  ]
+}

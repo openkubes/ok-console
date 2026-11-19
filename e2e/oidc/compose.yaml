@@ -1,0 +1,23 @@
+# Disposable OIDC proof stack (OK-173). Started and removed by e2e/oidc/harness.mjs only.
+# Images are pinned by digest; ports bind to loopback only.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.4@sha256:0aae0de7fca85525f727d3354df17896092de8bb26ae4c12d89c77e5df8cbce4
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_HOSTNAME: ${OK_OIDC_E2E_ISSUER_ORIGIN:?}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ${OK_OIDC_E2E_REALM_FILE:?}:/opt/keycloak/data/import/realm-ok-e2e.json:ro
+    ports:
+      - "127.0.0.1:${OK_OIDC_E2E_KC_PORT:?}:8080"
+  postgres:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    environment:
+      POSTGRES_PASSWORD: ${OK_OIDC_E2E_PG_PASSWORD:?}
+      POSTGRES_DB: ok_console
+    ports:
+      - "127.0.0.1:${OK_OIDC_E2E_PG_PORT:?}:5432"

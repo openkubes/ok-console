@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { createServer, request as httpRequest } from 'node:http'
 import { Readable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { validateAuthenticationAuditEvent } from './authenticationAudit.mjs'
@@ -188,5 +189,60 @@ describe('a session issued as Granted is never answered as a rejected credential
     expect(audit.mock.calls.map(([event]) => `${event.outcome}/${event.cause}`)).toEqual(['Rotated/VERIFIED', 'Revoked/RESPONSE_FAILED'])
     expect(response.writes.map((write) => write.status)).toEqual([503])
     expect(sessions.resolve(requestCookie(rotated!.cookie))).toBeNull()
+  })
+
+  it('a client that disconnects during verification: session revoked, revocation audited, nothing written', async () => {
+    const sessions = new InMemorySessionStore()
+    let issued: { cookie: string } | undefined
+    let releaseVerifier!: () => void
+    const verifierGate = new Promise<void>((resolve) => { releaseVerifier = resolve })
+    const verifier = async () => {
+      await verifierGate
+      issued = sessions.create(sessionInput('BreakGlass'))
+      return issued
+    }
+    const audit = vi.fn(async () => {})
+    const revoke = vi.fn(async (cookie: string) => sessions.revoke(cookie))
+    const handler = createLocalAccessHttpHandler({ method: 'BreakGlass', verifier, expectedOrigin: ORIGIN, audit, revoke })
+    let handled!: Promise<unknown>
+    let closed!: () => void
+    const serverSawClose = new Promise<void>((resolve) => { closed = resolve })
+    const server = createServer((request, response) => {
+      response.once('close', () => closed())
+      handled = handler({ request, response, pathname: '/api/console/v0/auth/local', correlationId })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as { port: number }
+      const body = JSON.stringify({ username: 'recovery-admin', password: 'secret', reason: 'OIDC provider recovery' })
+      const client = httpRequest({ host: '127.0.0.1', port, method: 'POST', path: '/api/console/v0/auth/local', headers: { origin: ORIGIN, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } })
+      client.on('error', () => {})
+      client.end(body)
+      await vi.waitFor(() => expect(handled).toBeDefined())
+      client.destroy()
+      await serverSawClose
+      releaseVerifier()
+      await handled
+    } finally { server.close() }
+    expect(revoke).toHaveBeenCalledWith(issued!.cookie, 'RESPONSE_FAILED')
+    expect(sessions.resolve(requestCookie(issued!.cookie))).toBeNull()
+    expect(audit).toHaveBeenCalledExactlyOnceWith({ method: 'BreakGlass', outcome: 'Revoked', cause: 'RESPONSE_FAILED', correlationId, reason: 'Issued session withdrawn after a response failure' })
+  })
+
+  it('a delivered response over a real socket is not withdrawn', async () => {
+    const sessions = new InMemorySessionStore()
+    const revoke = vi.fn(async () => true)
+    const audit = vi.fn(async () => {})
+    const handler = createLocalAccessHttpHandler({ method: 'BreakGlass', verifier: async () => sessions.create(sessionInput('BreakGlass')), expectedOrigin: ORIGIN, audit, revoke })
+    const server = createServer((request, response) => { void handler({ request, response, pathname: '/api/console/v0/auth/local', correlationId }) })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const { port } = server.address() as { port: number }
+      const response = await fetch(`http://127.0.0.1:${port}/api/console/v0/auth/local`, { method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'recovery-admin', password: 'secret', reason: 'OIDC provider recovery' }) })
+      expect(response.status).toBe(200)
+      await response.text()
+    } finally { server.close() }
+    expect(revoke).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
   })
 })

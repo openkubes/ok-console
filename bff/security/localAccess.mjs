@@ -1,9 +1,8 @@
-import { createHmac, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
-import { promisify } from 'node:util'
+import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createKdf } from './kdf.mjs'
 import { bounded, safeReason } from './authenticationAudit.mjs'
 import { classifyPgError, pgConnect, pgQuery } from './pgFailure.mjs'
 
-const scrypt = promisify(nodeScrypt)
 const KDF = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1_024 * 1_024 }
 const LOCK_TIMEOUT_MS = 1000
 const IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000
@@ -186,10 +185,13 @@ export class PostgresLocalAccessAudit {
   }
 }
 
-export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionStore, authorizationRevision, audit = async () => {}, derive = scrypt, isEnabled = async () => true }) => {
-  if (!['Bootstrap', 'BreakGlass'].includes(mode) || !Array.isArray(accounts) || !throttle || !sessionStore?.create) {
+// `derive` is a test seam that bypasses the bounded KDF; runtime configuration never supplies it.
+export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionStore, authorizationRevision, audit = async () => {}, derive, kdf, isEnabled = async () => true }) => {
+  if (!['Bootstrap', 'BreakGlass'].includes(mode) || !Array.isArray(accounts) || !throttle || !sessionStore?.create
+    || (derive !== undefined && typeof derive !== 'function')) {
     throw new LocalAccessError('INVALID_CONFIGURATION')
   }
+  const boundedKdf = derive ? null : (kdf ?? createKdf({ slots: 2 }))
   const mapped = new Map(accounts.map((account) => [normalize(account.username), account]))
   return async (input) => {
     const username = normalize(input?.username)
@@ -203,15 +205,20 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
       await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
       throw new LocalAccessError()
     }
-    const reservation = await run('THROTTLE_RESERVE', () => throttle.reserve(username))
-    if (reservation.blocked) {
-      await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
-      throw new LocalAccessError()
-    }
+    // Take the KDF slot before reserving: a capacity refusal must not consume an attempt.
+    const lease = boundedKdf ? await run('KDF', () => boundedKdf.acquire()) : null
     const account = mapped.get(username)
     const salt = account ? Buffer.from(account.salt, 'base64') : DUMMY_SALT
     const expected = account ? Buffer.from(account.verifier, 'base64') : DUMMY_VERIFIER
-    const actual = await run('KDF', () => derive(input.password, salt, 32, KDF))
+    let reservation, actual
+    try {
+      reservation = await run('THROTTLE_RESERVE', () => throttle.reserve(username))
+      if (reservation.blocked) {
+        await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
+        throw new LocalAccessError()
+      }
+      actual = await run('KDF', () => lease ? lease.derive(input.password, salt, 32, KDF) : derive(input.password, salt, 32, KDF))
+    } finally { lease?.release() }
     const accepted = account?.enabled === true && expected.length === 32 && actual.length === 32 && timingSafeEqual(actual, expected)
     if (!accepted) {
       await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'INVALID_CREDENTIAL', correlationId: input.correlationId }))

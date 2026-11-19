@@ -1,9 +1,8 @@
-import { createHmac, scrypt as nodeScrypt, timingSafeEqual } from 'node:crypto'
-import { promisify } from 'node:util'
+import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createKdf } from './kdf.mjs'
 import { bounded, safeReason } from './authenticationAudit.mjs'
 import { classifyPgError, pgConnect, pgQuery } from './pgFailure.mjs'
 
-const scrypt = promisify(nodeScrypt)
 const KDF = { N: 32_768, r: 8, p: 1, maxmem: 64 * 1_024 * 1_024 }
 const LOCK_TIMEOUT_MS = 1000
 const IDLE_IN_TRANSACTION_TIMEOUT_MS = 5000
@@ -131,8 +130,43 @@ export class PostgresLocalAccessThrottle {
         RETURNING principal_digest, floor(extract(epoch FROM window_started_at) * 1e6)::bigint AS window,
           floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token`, [lockedDigests, globalDigest, now])
       if (reserved.rowCount !== 2 || !holdsBoth(reserved, lockedDigests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      const principal = reserved.rows.find(row => row.principal_digest !== globalDigest)
       return { blocked: false, globalWindow: reserved.rows.find((row) => row.principal_digest === globalDigest)?.window,
-        principalBlock: reserved.rows.find(row => row.principal_digest !== globalDigest).block_token }
+        principalWindow: principal.window, principalBlock: principal.block_token }
+    })
+  }
+
+  // Give back exactly one reservation whose credential was never evaluated (for example a key
+  // derivation that missed its deadline). Only this reservation's own attempt and window are
+  // touched and other failures stay counted. A block stays only while the remaining failures
+  // still reach its limit. A reservation is returned at most once.
+  async release(username, reservation) {
+    if (reservation.released) return { released: false }
+    reservation.released = true
+    const principalDigest = this.digest(username)
+    const globalDigest = this.globalDigest()
+    const digests = [principalDigest, globalDigest].sort()
+    return this.transaction(async (client) => {
+      const locked = await pgQuery(client, `
+        SELECT principal_digest FROM ok_console.local_access_throttle
+        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
+      if (!holdsBoth(locked, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      const now = await this.instant(client)
+      await pgQuery(client, `
+        UPDATE ok_console.local_access_throttle SET
+          failures = GREATEST(failures - 1, 0),
+          blocked_until = CASE WHEN failures - 1 < 5 THEN NULL ELSE blocked_until END,
+          updated_at = to_timestamp($3::numeric / 1e6)
+        WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
+      [principalDigest, reservation.principalWindow, now])
+      await pgQuery(client, `
+        UPDATE ok_console.local_access_throttle SET
+          failures = GREATEST(failures - 1, 0),
+          blocked_until = CASE WHEN failures - 1 < 50 THEN NULL ELSE blocked_until END,
+          updated_at = to_timestamp($3::numeric / 1e6)
+        WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
+      [globalDigest, reservation.globalWindow, now])
+      return { released: true }
     })
   }
 
@@ -186,10 +220,13 @@ export class PostgresLocalAccessAudit {
   }
 }
 
-export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionStore, authorizationRevision, audit = async () => {}, derive = scrypt, isEnabled = async () => true }) => {
-  if (!['Bootstrap', 'BreakGlass'].includes(mode) || !Array.isArray(accounts) || !throttle || !sessionStore?.create) {
+// `derive` is a test seam that bypasses the bounded KDF; runtime configuration never supplies it.
+export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionStore, authorizationRevision, audit = async () => {}, derive, kdf, isEnabled = async () => true }) => {
+  if (!['Bootstrap', 'BreakGlass'].includes(mode) || !Array.isArray(accounts) || !throttle || !sessionStore?.create
+    || (derive !== undefined && typeof derive !== 'function')) {
     throw new LocalAccessError('INVALID_CONFIGURATION')
   }
+  const boundedKdf = derive ? null : (kdf ?? createKdf({ slots: 2 }))
   const mapped = new Map(accounts.map((account) => [normalize(account.username), account]))
   return async (input) => {
     const username = normalize(input?.username)
@@ -203,15 +240,27 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
       await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
       throw new LocalAccessError()
     }
-    const reservation = await run('THROTTLE_RESERVE', () => throttle.reserve(username))
-    if (reservation.blocked) {
-      await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
-      throw new LocalAccessError()
-    }
+    // Take the KDF slot before reserving: a capacity refusal must not consume an attempt.
+    const lease = boundedKdf ? await run('KDF', () => boundedKdf.acquire()) : null
     const account = mapped.get(username)
     const salt = account ? Buffer.from(account.salt, 'base64') : DUMMY_SALT
     const expected = account ? Buffer.from(account.verifier, 'base64') : DUMMY_VERIFIER
-    const actual = await run('KDF', () => derive(input.password, salt, 32, KDF))
+    let reservation, actual
+    try {
+      reservation = await run('THROTTLE_RESERVE', () => throttle.reserve(username))
+      if (reservation.blocked) {
+        await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'THROTTLED', correlationId: input.correlationId }))
+        throw new LocalAccessError()
+      }
+      actual = await run('KDF', () => lease ? lease.derive(input.password, salt, 32, KDF) : derive(input.password, salt, 32, KDF))
+    } catch (error) {
+      // An unfinished derivation never evaluated the credential: return its attempt so
+      // timeouts under load cannot lock out a correct password. Fail closed if that fails.
+      if (error?.step === 'KDF' && reservation && !reservation.blocked) {
+        try { await throttle.release(username, reservation) } catch (releaseError) { error.compensationError = releaseError }
+      }
+      throw error
+    } finally { lease?.release() }
     const accepted = account?.enabled === true && expected.length === 32 && actual.length === 32 && timingSafeEqual(actual, expected)
     if (!accepted) {
       await run('AUDIT', () => audit({ outcome: 'Denied', method: mode, reason: input.reason.trim(), principal: username, cause: 'INVALID_CREDENTIAL', correlationId: input.correlationId }))

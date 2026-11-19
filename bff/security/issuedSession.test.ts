@@ -158,7 +158,7 @@ describe('a session issued as Granted is never answered as a rejected credential
     const handler = createOidcHttpHandler({
       protocol: { exchange: async () => ({ sub: 'provider-subject-1' }) },
       transactionStore: { consume: async () => ({ codeVerifier: 'v', state: 'state-123', nonce: 'n' }) },
-      sessionStore: { create: (input: never) => { issued = sessions.create(input); return issued }, revoke: async (cookie: string, _reason: string) => sessions.revoke(requestCookie(cookie)) },
+      sessionStore: { create: (input: never) => { issued = sessions.create(input); return issued }, revoke: async (cookie: string) => sessions.revoke(requestCookie(cookie)) },
       identityMapper: async () => sessionInput('OIDC'),
       redirectUri: `${ORIGIN}/api/console/v0/auth/oidc/callback`, audit,
     })

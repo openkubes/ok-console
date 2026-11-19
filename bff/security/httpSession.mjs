@@ -6,6 +6,7 @@ import {
   consoleSessionProjection,
   validateCsrf,
 } from './session.mjs'
+import { deliverIssuedSession, RESPONSE_FAILED, WITHDRAWN_REASON } from './issuedSession.mjs'
 
 const SESSION_PATH = '/api/console/v0/auth/session'
 const ROTATE_PATH = `${SESSION_PATH}/rotate`
@@ -118,7 +119,15 @@ export const handleSessionHttp = async ({
       sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId)
       return true
     }
-    sendJson(response, 200, rotated.session, correlationId, { 'Set-Cookie': [rotated.cookie, rotated.csrfCookie] })
+    // Past this point the rotated session was issued and audited Rotated.
+    await deliverIssuedSession({
+      response,
+      write: () => sendJson(response, 200, rotated.session, correlationId, { 'Set-Cookie': [rotated.cookie, rotated.csrfCookie] }),
+      revoke: () => sessionStore.revoke(rotated.cookie, RESPONSE_FAILED),
+      audit: () => audit({ method: context.subject?.method ?? 'OIDC', outcome: 'Revoked', cause: RESPONSE_FAILED, correlationId, reason: WITHDRAWN_REASON }),
+      unavailable: () => sendJson(response, 503, securityError('SESSION_UNAVAILABLE', 'The Console session service is not configured.', correlationId), correlationId),
+      log: (cause, error) => console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'SESSION_FAILED', cause, errorCode: startErrorCode(error), elapsedMs: boundedMs(performance.now() - started) })),
+    })
     return true
   }
 

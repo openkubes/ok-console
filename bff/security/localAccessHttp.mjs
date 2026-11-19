@@ -1,9 +1,10 @@
 import { currentLifecycle, boundedCorrelation, boundedMs, startErrorCode } from '../diagnostics.mjs'
 import { LocalAccessError } from './localAccess.mjs'
+import { deliverIssuedSession, RESPONSE_FAILED, WITHDRAWN_REASON } from './issuedSession.mjs'
 
 const PATH = '/api/console/v0/auth/local'
 const MAX_BODY_BYTES = 16 * 1_024
-const STEPS = new Set(['ENABLED_CHECK', 'THROTTLE_RESERVE', 'THROTTLE_RESET', 'KDF', 'SESSION_STORE', 'AUDIT'])
+const STEPS = new Set(['ENABLED_CHECK', 'THROTTLE_RESERVE', 'THROTTLE_RESET', 'KDF', 'SESSION_STORE', 'AUDIT', 'RESPONSE_WRITE', 'RESPONSE_WRITE_REVOKE', 'RESPONSE_WRITE_AUDIT'])
 
 const headers = (correlationId, extra = {}) => ({
   'Cache-Control': 'no-store',
@@ -44,7 +45,9 @@ const readJson = async (request) => {
   }
 }
 
-export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit, method }) => {
+const unconfiguredRevoke = async () => { throw new LocalAccessError('INVALID_CONFIGURATION') }
+
+export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit, method, revoke = unconfiguredRevoke }) => {
   if (typeof audit !== 'function' || !['Bootstrap', 'BreakGlass'].includes(method)) throw new LocalAccessError('INVALID_CONFIGURATION')
   return async ({ request, response, pathname, correlationId }) => {
     if (pathname !== PATH) return false
@@ -79,12 +82,11 @@ export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit, 
       await reject(401, 'LOCAL_ACCESS_REJECTED', 'REQUEST_INVALID')
       return true
     }
+    let issued
     try {
-      const issued = await verifier({
+      issued = await verifier({
         username: body.username, password: body.password, reason: body.reason, correlationId,
       })
-      response.writeHead(200, headers(correlationId, { 'Set-Cookie': [issued.cookie, issued.csrfCookie] }))
-      response.end(JSON.stringify(issued.session))
     } catch (error) {
       if (error instanceof LocalAccessError && error.code === 'INVALID_REQUEST') {
         await reject(401, 'LOCAL_ACCESS_REJECTED', 'REQUEST_INVALID')
@@ -96,7 +98,20 @@ export const createLocalAccessHttpHandler = ({ verifier, expectedOrigin, audit, 
         if (Object.hasOwn(error, 'compensationError')) log('LOCAL_ACCESS_COMPENSATION', error.compensationError)
       }
       send(response, unavailable ? 503 : 401, unavailable ? 'LOCAL_ACCESS_UNAVAILABLE' : 'LOCAL_ACCESS_REJECTED', correlationId)
+      return true
     }
+    // Past this point the credential was verified and the session audited Granted.
+    await deliverIssuedSession({
+      response,
+      write: () => {
+        response.writeHead(200, headers(correlationId, { 'Set-Cookie': [issued.cookie, issued.csrfCookie] }))
+        response.end(JSON.stringify(issued.session))
+      },
+      revoke: () => revoke(issued.cookie, RESPONSE_FAILED),
+      audit: () => audit({ method, outcome: 'Revoked', cause: RESPONSE_FAILED, correlationId, reason: WITHDRAWN_REASON }),
+      unavailable: () => send(response, 503, 'LOCAL_ACCESS_UNAVAILABLE', correlationId),
+      log,
+    })
     return true
   }
 }

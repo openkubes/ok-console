@@ -1,4 +1,5 @@
 import { currentLifecycle, boundedCorrelation, startErrorCode } from '../diagnostics.mjs'
+import { deliverIssuedSession, RESPONSE_FAILED, WITHDRAWN_REASON } from './issuedSession.mjs'
 import * as client from 'openid-client'
 import { clearOidcTransactionCookie } from './oidcTransactionStore.mjs'
 
@@ -165,11 +166,21 @@ export const createOidcHttpHandler = ({
     step = 'AUDIT'
     await audit({ method: 'OIDC', outcome: 'Granted', cause: 'VERIFIED', correlationId, reason: 'OIDC session established' })
     step = 'OTHER'
-    response.writeHead(303, headers({
-      Location: successRedirect,
-      'Set-Cookie': [clearOidcTransactionCookie(), issued.cookie, issued.csrfCookie],
-    }))
-    response.end()
+    // Past this point the subject was verified and the session audited Granted.
+    await deliverIssuedSession({
+      response,
+      write: () => {
+        response.writeHead(303, headers({
+          Location: successRedirect,
+          'Set-Cookie': [clearOidcTransactionCookie(), issued.cookie, issued.csrfCookie],
+        }))
+        response.end()
+      },
+      revoke: () => sessionStore.revoke(issued.cookie, RESPONSE_FAILED),
+      audit: () => audit({ method: 'OIDC', outcome: 'Revoked', cause: RESPONSE_FAILED, correlationId, reason: WITHDRAWN_REASON }),
+      unavailable: () => boundedError(response, 503, 'OIDC_UNAVAILABLE'),
+      log: (cause, error) => console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'OIDC_CALLBACK_FAILED', cause, errorCode: startErrorCode(error) })),
+    })
   } catch (error) {
     console.error(JSON.stringify({ stage: currentLifecycle()?.stages.at(-1)?.stage ?? 'REQUEST_RECEIVED', correlationId: boundedCorrelation(correlationId), event: 'OIDC_CALLBACK_FAILED', cause: CALLBACK_STEPS.has(step) ? step : 'OTHER', errorCode: startErrorCode(error) }))
     try {

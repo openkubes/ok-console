@@ -5,7 +5,7 @@
 // through NODE_EXTRA_CA_CERTS, i.e. its normal TLS verification path. Nothing touches a cluster.
 import { execFileSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import http from 'node:http'
 import https from 'node:https'
@@ -171,6 +171,7 @@ export const stopBff = async (state) => {
     await waitFor('BFF shutdown', () => !processAlive(state.bffPid), 10_000, 100)
   } catch {
     try { process.kill(-state.bffPid, 'SIGKILL') } catch { /* already gone */ }
+    await waitFor('BFF kill', () => !processAlive(state.bffPid), 5_000, 100)
   }
 }
 
@@ -239,14 +240,20 @@ export const startBff = async (state, mode, { epoch = state.epoch } = {}) => {
 }
 
 export const startHarness = async () => {
-  const dir = await mkdtemp(`${tmpdir()}/ok173-oidc-`)
-  const ports = {
-    keycloak: await portFrom('OK_OIDC_E2E_KC_PORT'),
-    postgres: await portFrom('OK_OIDC_E2E_PG_PORT'),
-    bff: await portFrom('OK_OIDC_E2E_BFF_PORT'),
-    issuerProxy: await portFrom('OK_OIDC_E2E_ISSUER_PROXY_PORT'),
-    consoleProxy: await portFrom('OK_OIDC_E2E_PROXY_PORT'),
+  // Docker Desktop shares the host temp dir; Colima/Rancher Desktop may share only $HOME.
+  const dir = await mkdtemp(`${process.env.OK_OIDC_E2E_TMPDIR ?? tmpdir()}/ok173-oidc-`)
+  let ports
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    ports = {
+      keycloak: await portFrom('OK_OIDC_E2E_KC_PORT'),
+      postgres: await portFrom('OK_OIDC_E2E_PG_PORT'),
+      bff: await portFrom('OK_OIDC_E2E_BFF_PORT'),
+      issuerProxy: await portFrom('OK_OIDC_E2E_ISSUER_PROXY_PORT'),
+      consoleProxy: await portFrom('OK_OIDC_E2E_PROXY_PORT'),
+    }
+    if (new Set(Object.values(ports)).size === 5) break
   }
+  if (new Set(Object.values(ports)).size !== 5) throw new Error('The OIDC proof needs five distinct ports.')
   const issuerOrigin = `https://localhost:${ports.issuerProxy}`
   const origin = `https://localhost:${ports.consoleProxy}`
   const state = {
@@ -278,6 +285,19 @@ export const startHarness = async () => {
   saveState(state)
   process.env[STATE_ENV] = state.stateFile
   const proxies = []
+  // Installed before anything starts, so an interrupt during image pull or Keycloak boot still
+  // removes the compose project, its volumes, the temp dir and restores dist/.
+  const onSignal = (signal) => { stopHarness(state, proxies).finally(() => process.exit(signal === 'SIGINT' ? 130 : 143)) }
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, onSignal)
+  const dispose = () => { for (const signal of ['SIGINT', 'SIGTERM']) process.off(signal, onSignal) }
+  // The BFF serves the fixed dist/ directory; keep the developer's build and restore it on stop.
+  if (existsSync(`${ROOT}dist`)) {
+    state.distBackup = `${BUILD_ROOT}/.dist-backup-${process.pid}`
+    await rm(state.distBackup, { recursive: true, force: true })
+    await mkdir(BUILD_ROOT, { recursive: true })
+    await rename(`${ROOT}dist`, state.distBackup)
+    saveState(state)
+  }
   try {
     compose(state, ['up', '-d', '--quiet-pull'])
     proxies.push(await startProxy({ listenPort: ports.issuerProxy, targetPort: ports.keycloak, tls: state.tls, tapFile: state.tapFile }))
@@ -287,10 +307,11 @@ export const startHarness = async () => {
     await waitFor('Keycloak discovery', async () => (await httpsJson(`${state.issuer}/.well-known/openid-configuration`, ca)).issuer === state.issuer, 180_000, 2_000)
     await startBff(state, 'breakglass')
   } catch (error) {
+    dispose()
     await stopHarness(state, proxies)
     throw error
   }
-  return { state, proxies }
+  return { state, proxies, dispose }
 }
 
 export const stopHarness = async (state, proxies = []) => {
@@ -298,6 +319,12 @@ export const stopHarness = async (state, proxies = []) => {
   await stopBff(current).catch(() => {})
   await Promise.all(proxies.map((server) => new Promise((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()) })))
   try { compose(current, ['down', '-v', '--remove-orphans', '--timeout', '5']) } catch (error) { console.error(`compose down failed: ${error.message}`) }
+  if (current.distBackup && existsSync(current.distBackup)) {
+    await rm(`${ROOT}dist`, { recursive: true, force: true })
+    await rename(current.distBackup, `${ROOT}dist`)
+  } else {
+    await rm(`${ROOT}dist`, { recursive: true, force: true })
+  }
   const evidence = `${ROOT}test-results/e2e-oidc`
   await mkdir(evidence, { recursive: true }).then(() => cp(current.bffLog, `${evidence}/bff.log`)).catch(() => {})
   if (process.env.OK_OIDC_E2E_KEEP !== 'true') await rm(current.dir, { recursive: true, force: true })

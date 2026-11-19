@@ -52,13 +52,15 @@ test('AC6: local access without an operational reason, or from a foreign origin,
   const since = await databaseNow()
   const password = harness().passwords.local
   const missing = await localAccess(page, { username: 'breakglass-operator', password })
-  const short = await localAccess(page, { username: 'breakglass-operator', password, reason: 'too short' })
+  // Boundary: 11 characters is one short of the 12-character minimum.
+  const short = await localAccess(page, { username: 'breakglass-operator', password, reason: 'eleven char' })
   const foreign = await localAccess(page, { username: 'breakglass-operator', password, reason: REASON }, 'https://attacker.invalid')
   expect([missing.status(), short.status(), foreign.status()]).toEqual([401, 401, 403])
   expect(await foreign.json()).toMatchObject({ error: { code: 'ORIGIN_REJECTED' } })
   expect(await sessionsSince(since)).toHaveLength(0)
   expect((await authenticationAuditSince(since)).map((row) => [row.authentication_method, row.outcome, row.cause]))
     .toEqual([['BreakGlass', 'Denied', 'REQUEST_INVALID'], ['BreakGlass', 'Denied', 'REQUEST_INVALID'], ['BreakGlass', 'Denied', 'ORIGIN_REJECTED']])
+  expect([...'eleven char']).toHaveLength(11)
 })
 
 test('AC6: repeated failures throttle the account so even the correct password is refused, and each refusal is audited', async ({ page }) => {

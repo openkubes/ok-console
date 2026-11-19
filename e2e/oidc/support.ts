@@ -71,7 +71,9 @@ export const protectedValues = () => {
         const token = tokens[key]
         if (typeof token !== 'string') continue
         values.add(token)
-        for (const segment of token.split('.')) if (segment.length >= 16) values.add(segment)
+        // Payload and signature are token-specific; the header segment is shared by every token
+        // signed with the same key (including the provider's own session cookies), so it is no needle.
+        for (const segment of token.split('.').slice(1)) if (segment.length >= 16) values.add(segment)
       }
     } catch { /* non-JSON error body: nothing to protect */ }
   }
@@ -81,14 +83,53 @@ export const tokenExchanges = () => readFileSync(harness().tapFile, 'utf8').spli
 
 export const leaks = (haystack: string, needles: string[]) => needles.filter((needle) => haystack.includes(needle)).map((needle) => `${needle.slice(0, 6)}… (${needle.length} chars)`)
 
-export const browserStorageDump = (page: Page) => page.evaluate(async () => JSON.stringify({
-  local: Object.entries(localStorage),
-  session: Object.entries(sessionStorage),
-  cookie: document.cookie,
-  indexedDb: 'databases' in indexedDB ? await indexedDB.databases() : [],
-  href: location.href,
-  html: document.documentElement.outerHTML,
-}))
+/** Everything the browser keeps: JS-visible storage and DOM plus every cookie, HttpOnly included. */
+export const browserStorageDump = async (page: Page) => JSON.stringify({
+  page: await page.evaluate(async () => ({
+    local: Object.entries(localStorage),
+    session: Object.entries(sessionStorage),
+    cookie: document.cookie,
+    indexedDb: 'databases' in indexedDB ? await indexedDB.databases() : [],
+    href: location.href,
+    html: document.documentElement.outerHTML,
+  })),
+  // Console-origin cookies, HttpOnly included. The provider's own cookies live on its origin.
+  cookies: await page.context().cookies(harness().origin),
+})
+
+/** Records status, headers and (where readable) bodies of every Console-origin response. */
+export const recordConsoleResponses = (page: Page) => {
+  const pending: Promise<string>[] = []
+  page.on('response', (response) => {
+    if (!response.url().startsWith(harness().origin)) return
+    pending.push((async () => {
+      const within = <T>(work: Promise<T>, fallback: T) => Promise.race([work.catch(() => fallback), new Promise<T>((resolve) => setTimeout(() => resolve(fallback), 5_000))])
+      const body = response.status() >= 300 && response.status() < 400 ? '' : await within(response.text(), '')
+      const headers = await within(response.headersArray(), [] as { name: string, value: string }[])
+      return JSON.stringify({ url: response.url().split('?')[0], status: response.status(), headers, body })
+    })())
+  })
+  return async () => (await Promise.all(pending)).join('\n')
+}
+
+/** Raw Set-Cookie values of a response (the cookie API reports SameSite=Lax by default). */
+export const setCookies = async (response: { headersArray: () => Promise<{ name: string, value: string }[]> }) => (await response.headersArray())
+  .filter((header) => header.name.toLowerCase() === 'set-cookie').map((header) => header.value)
+export const expectCookieAttributes = (values: string[], name: string, attributes: string[]) => {
+  const value = values.find((item) => item.startsWith(`${name}=`))
+  expect(value, `Set-Cookie for ${name}`).toBeDefined()
+  const parts = value!.split(';').map((part) => part.trim().toLowerCase())
+  for (const attribute of attributes) expect(parts, `${name} ${attribute}`).toContain(attribute.toLowerCase())
+}
+
+/** Harness-generated secrets that must never appear in logs either. */
+export const harnessSecrets = () => {
+  const state = harness()
+  return [state.clientSecret, state.pgPassword, state.envelopeKey, state.pepper, ...Object.values(state.passwords) as string[]]
+}
+
+/** Guards the log scans against a capture that silently stopped: the log must show this request. */
+export const expectLogged = (marker: string) => expect(bffLog(), `BFF log should contain ${marker}`).toContain(marker)
 
 export const bffLog = () => readFileSync(harness().bffLog, 'utf8')
 

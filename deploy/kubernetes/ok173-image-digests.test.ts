@@ -11,7 +11,8 @@ const LOCAL_ONLY = new Set(['local-kind'])
 const overlaysDir = new URL('./overlays/', import.meta.url)
 const DIGEST_REFERENCE = /^[a-z0-9][a-z0-9._/:-]*@sha256:[a-f0-9]{64}$/
 
-export const mutableImageReferences = (rendered: string) => [...rendered.matchAll(/^\s*(?:-\s+)?image:\s*["']?([^"'\s]+)["']?\s*$/gm)]
+// image: (Pods), imageName: (CloudNativePG clusters), reference: (image volumes).
+export const mutableImageReferences = (rendered: string) => [...rendered.matchAll(/^\s*(?:-\s+)?(?:image|imageName|reference):\s*["']?([^"'\s{]+)["']?\s*$/gm)]
   .map((match) => match[1])
   .filter((reference) => !DIGEST_REFERENCE.test(reference))
 
@@ -29,6 +30,7 @@ describe('OK-173 immutable image references', () => {
   it.each(overlays)('renders %s with digest-pinned images only', (overlay) => {
     const rendered = render(overlay)
     expect(rendered).toMatch(/^\s*(?:-\s+)?image:/m)
+    if (overlay.startsWith('ok-shared')) expect(rendered).toMatch(/^\s*imageName:/m)
     expect(mutableImageReferences(rendered)).toEqual([])
   })
 
@@ -37,8 +39,10 @@ describe('OK-173 immutable image references', () => {
       'image: ghcr.io/openkubes/ok-console:v1.2.3',
       '- image: ghcr.io/openkubes/ok-console@sha256:705edc32',
       'image: "postgres"',
+      '  imageName: ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie',
+      '      reference: ghcr.io/openkubes/agent:1.0',
       'image: ghcr.io/openkubes/ok-console@sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc',
     ].join('\n')
-    expect(mutableImageReferences(rendered)).toEqual(['ghcr.io/openkubes/ok-console:v1.2.3', 'ghcr.io/openkubes/ok-console@sha256:705edc32', 'postgres'])
+    expect(mutableImageReferences(rendered)).toEqual(['ghcr.io/openkubes/ok-console:v1.2.3', 'ghcr.io/openkubes/ok-console@sha256:705edc32', 'postgres', 'ghcr.io/cloudnative-pg/postgresql:16.10-system-trixie', 'ghcr.io/openkubes/agent:1.0'])
   })
 })

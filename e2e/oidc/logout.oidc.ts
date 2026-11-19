@@ -16,7 +16,7 @@ test('AC8: sign-out revokes the server-side session and clears the session and C
   const signOut = page.waitForResponse((response) => response.url().endsWith(SESSION_PATH) && response.request().method() === 'DELETE')
   await page.getByRole('button', { name: /^Sign out of / }).click()
   const response = await signOut
-  expect(response.status()).toBeLessThan(300)
+  expect(response.status()).toBe(204)
   const cleared = (await response.headersArray()).filter((header) => header.name.toLowerCase() === 'set-cookie').map((header) => header.value)
   for (const name of [SESSION_COOKIE, CSRF_COOKIE]) {
     expect(cleared.some((value) => value.startsWith(`${name}=;`) && /Max-Age=0/i.test(value))).toBe(true)
@@ -26,6 +26,7 @@ test('AC8: sign-out revokes the server-side session and clears the session and C
   expect(await cookie(context, CSRF_COOKIE)).toBeUndefined()
 
   const rows = await query<{ revoked_at: Date | null }>('SELECT revoked_at FROM ok_console.sessions WHERE issued_at >= $1', [since])
-  expect(rows.every((row) => row.revoked_at !== null)).toBe(true)
+  expect(rows).toHaveLength(1)
+  expect(rows[0].revoked_at).not.toBeNull()
   expect((await sessionRequest(page, 'GET', { cookieHeader: oldCookies })).status()).toBe(401)
 })

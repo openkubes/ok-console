@@ -146,7 +146,11 @@ export class LocalIdentity {
       row = selected.rows[0]
       const salt = row ? Buffer.from(row.salt, 'base64') : Buffer.alloc(16, 23)
       expected = row ? Buffer.from(row.verifier, 'base64') : Buffer.alloc(32, 42)
-      actual = await this.hash(input.password, salt, hashLease)
+      try { actual = await this.hash(input.password, salt, hashLease) } catch (error) {
+        // The credential was never evaluated: return this attempt (see PostgresLocalAccessThrottle.release).
+        try { await this.throttle.release(`ordinary:${username}`, reservation) } catch { /* stays counted: fail closed */ }
+        throw error
+      }
     } finally { hashLease.release() }
     if (!row?.enabled || row.hash_profile !== 'scrypt-v1' || expected.length !== 32 || !timingSafeEqual(actual, expected)) {
       await this.audit(this.pool, 'anonymous', 'unresolved', 'LoginDenied', correlationId)

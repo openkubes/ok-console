@@ -263,6 +263,28 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     }) }
   }
 
+  it('returns timed-out KDF attempts without forgiving real failures, so a correct password still works', async () => {
+    const throttle = new PostgresLocalAccessThrottle({ pool, pepper: Buffer.alloc(32, 6) })
+    const derive = vi.fn(async (password: string) => {
+      if (password === 'slow') throw new Error('KDF deadline')
+      return Buffer.alloc(32, password === 'correct' ? 2 : 3)
+    })
+    const create = vi.fn(() => issue())
+    const verify = createLocalAccessVerifier({ mode: 'BreakGlass', accounts: [localAccount], throttle, sessionStore: { create }, derive, audit: async () => {}, authorizationRevision: 'revision' })
+    const principal = async () => (await pool.query('SELECT failures, blocked_until FROM ok_console.local_access_throttle WHERE principal_digest = $1', [throttle.digest('recovery-admin')])).rows[0]
+    for (let i = 0; i < 2; i++) await expect(verify(localInput('wrong'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' })
+    // More timeouts than the principal limit (5): none of them may count.
+    for (let i = 0; i < 6; i++) await expect(verify(localInput('slow'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'KDF' })
+    expect(await principal()).toEqual({ failures: 2, blocked_until: null })
+    // The two real failures still count toward a block: three more wrong passwords block.
+    for (let i = 0; i < 3; i++) await expect(verify(localInput('wrong'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_REJECTED' })
+    expect((await principal()).blocked_until).not.toBeNull()
+    await pool.query('UPDATE ok_console.local_access_throttle SET failures = 0, blocked_until = NULL')
+    await expect(verify(localInput('slow'))).rejects.toMatchObject({ step: 'KDF' })
+    await expect(verify(localInput('correct'))).resolves.toBeDefined()
+    expect(create).toHaveBeenCalledTimes(1)
+  })
+
   // Four 300ms lock waits plus ~80 SQL round trips and cold HTTP startup
   // exceeded 5s under load; a completed 0.04-CPU run took 10.6s. The 20s budget
   // leaves 9.4s scheduling/cleanup margin. Use a lock cap so the idle cap stays

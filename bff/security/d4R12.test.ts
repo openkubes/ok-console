@@ -44,7 +44,7 @@ it.each([
   const revoke = vi.spyOn(store, 'revoke')
   if (!['compensation-ok', 'compensation-absent'].includes(mode)) revoke.mockImplementation(() => pool.query('SELECT 1'))
   if (mode === 'compensation-absent') Object.defineProperty(store, 'revoke', { value: undefined })
-  const throttle = { reserve: async () => ({ blocked: mode === 'blocked-audit', globalWindow: 'window' }), success: async () => {} }
+  const throttle = { reserve: async () => ({ blocked: mode === 'blocked-audit', globalWindow: 'window' }), success: async () => {}, release: async () => ({ released: true }) }
   if (mode === 'reserve') throttle.reserve = () => pgThrottle.reserve('reader')
   if (mode === 'success') throttle.success = () => pgThrottle.success('reader', { globalWindow: 'window' })
   const verifier = createLocalAccessVerifier({ mode: 'Bootstrap', accounts: [account], throttle, sessionStore: mode === 'create' ? pgStore : store, authorizationRevision: 'revision', audit: ['blocked-audit', 'rejected-audit', 'granted-audit', 'compensation', 'compensation-ok', 'compensation-absent'].includes(mode) ? (event: object) => pgAudit.record(event) : async () => {}, ...(mode === 'kdf' ? { derive: () => promisify(scrypt)(password, salt, -1) } : {}) })

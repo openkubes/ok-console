@@ -8,6 +8,9 @@ import { Worker } from 'node:worker_threads'
 // A derivation that misses its deadline is rejected AND its worker is terminated; the
 // slot stays held until that thread has actually exited, so the number of concurrent
 // derivations (and their memory) never exceeds `slots`, even after timeouts.
+// terminate() cannot interrupt a native scrypt call that is already running: such a thread
+// exits when that one computation returns. Nothing ever queues behind it, so a slot is held
+// past the deadline for at most the remaining compute time of a single derivation.
 
 export const KDF_DEADLINE_MS = 10_000
 
@@ -35,8 +38,10 @@ export const createKdf = ({ slots = 2, deadlineMs = KDF_DEADLINE_MS, workerFacto
     throw new TypeError('Invalid key derivation configuration.')
   }
   const idle = []
+  const active = new Set()
   let held = 0
   let sequence = 0
+  let closed = false
 
   const run = (worker, message) => new Promise((resolve, reject) => {
     const finish = (error, key) => {
@@ -65,6 +70,7 @@ export const createKdf = ({ slots = 2, deadlineMs = KDF_DEADLINE_MS, workerFacto
   // and no worker is still computing for it, or when release() is called on an unused lease.
   // release() on a lease whose derivation is still running never frees the slot early.
   const acquire = () => {
+    if (closed) throw new KdfUnavailableError('CLOSED')
     if (held >= slots) throw new KdfUnavailableError('CAPACITY')
     held++
     let used = false, released = false, busy = false, freed = false
@@ -86,8 +92,12 @@ export const createKdf = ({ slots = 2, deadlineMs = KDF_DEADLINE_MS, workerFacto
           throw new KdfUnavailableError('FAILED', { cause })
         }
         worker.ref()
+        active.add(worker)
         try {
+          if (closed) throw new KdfUnavailableError('CLOSED')
           const key = await run(worker, { id: ++sequence, password, salt, keylen, params })
+          active.delete(worker)
+          if (closed) throw new KdfUnavailableError('CLOSED')
           worker.unref()
           idle.push(worker)
           busy = false
@@ -99,6 +109,7 @@ export const createKdf = ({ slots = 2, deadlineMs = KDF_DEADLINE_MS, workerFacto
           // until the thread is gone so a timed-out derivation cannot outlive its bound.
           released = true
           Promise.resolve().then(() => worker.terminate()).catch(() => {}).finally(() => {
+            active.delete(worker)
             busy = false
             free()
           })
@@ -116,8 +127,12 @@ export const createKdf = ({ slots = 2, deadlineMs = KDF_DEADLINE_MS, workerFacto
     acquire,
     get held() { return held },
     get idle() { return idle.length },
+    // Refuse new leases and stop every worker, including ones still deriving; resolves once
+    // the threads have exited. A native derivation cannot be interrupted, so its thread exits
+    // when that computation returns.
     async close() {
-      await Promise.all(idle.splice(0).map((worker) => worker.terminate().catch(() => {})))
+      closed = true
+      await Promise.all([...idle.splice(0), ...active].map((worker) => worker.terminate().catch(() => {})))
     },
   }
 }

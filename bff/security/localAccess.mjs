@@ -130,8 +130,40 @@ export class PostgresLocalAccessThrottle {
         RETURNING principal_digest, floor(extract(epoch FROM window_started_at) * 1e6)::bigint AS window,
           floor(extract(epoch FROM blocked_until) * 1e6)::bigint AS block_token`, [lockedDigests, globalDigest, now])
       if (reserved.rowCount !== 2 || !holdsBoth(reserved, lockedDigests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      const principal = reserved.rows.find(row => row.principal_digest !== globalDigest)
       return { blocked: false, globalWindow: reserved.rows.find((row) => row.principal_digest === globalDigest)?.window,
-        principalBlock: reserved.rows.find(row => row.principal_digest !== globalDigest).block_token }
+        principalWindow: principal.window, principalBlock: principal.block_token }
+    })
+  }
+
+  // Give back exactly one reservation whose credential was never evaluated (for example a key
+  // derivation that missed its deadline). Only this reservation's own attempt and window are
+  // touched: other failures stay counted, and a block is cleared only if this reservation set it.
+  async release(username, reservation) {
+    const principalDigest = this.digest(username)
+    const globalDigest = this.globalDigest()
+    const digests = [principalDigest, globalDigest].sort()
+    return this.transaction(async (client) => {
+      const locked = await pgQuery(client, `
+        SELECT principal_digest FROM ok_console.local_access_throttle
+        WHERE principal_digest = ANY($1::text[]) ORDER BY principal_digest FOR UPDATE`, [digests])
+      if (!holdsBoth(locked, digests)) throw new LocalAccessError('LOCAL_ACCESS_UNAVAILABLE')
+      const now = await this.instant(client)
+      await pgQuery(client, `
+        UPDATE ok_console.local_access_throttle SET
+          failures = GREATEST(failures - 1, 0),
+          blocked_until = CASE WHEN floor(extract(epoch FROM blocked_until) * 1e6)::bigint = $3::bigint THEN NULL ELSE blocked_until END,
+          updated_at = to_timestamp($4::numeric / 1e6)
+        WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
+      [principalDigest, reservation.principalWindow, reservation.principalBlock ?? null, now])
+      await pgQuery(client, `
+        UPDATE ok_console.local_access_throttle SET
+          failures = GREATEST(failures - 1, 0),
+          blocked_until = CASE WHEN failures - 1 < 50 THEN NULL ELSE blocked_until END,
+          updated_at = to_timestamp($3::numeric / 1e6)
+        WHERE principal_digest = $1 AND floor(extract(epoch FROM window_started_at) * 1e6)::bigint = $2::bigint`,
+      [globalDigest, reservation.globalWindow, now])
+      return { released: true }
     })
   }
 
@@ -218,6 +250,13 @@ export const createLocalAccessVerifier = ({ mode, accounts, throttle, sessionSto
         throw new LocalAccessError()
       }
       actual = await run('KDF', () => lease ? lease.derive(input.password, salt, 32, KDF) : derive(input.password, salt, 32, KDF))
+    } catch (error) {
+      // An unfinished derivation never evaluated the credential: return its attempt so
+      // timeouts under load cannot lock out a correct password. Fail closed if that fails.
+      if (error?.step === 'KDF' && reservation && !reservation.blocked) {
+        try { await throttle.release(username, reservation) } catch (releaseError) { error.compensationError = releaseError }
+      }
+      throw error
     } finally { lease?.release() }
     const accepted = account?.enabled === true && expected.length === 32 && actual.length === 32 && timingSafeEqual(actual, expected)
     if (!accepted) {

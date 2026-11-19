@@ -110,6 +110,49 @@ describe('bounded key derivation', () => {
     expect(kdf.idle).toBe(0)
   })
 
+  it('a native derivation past its deadline is rejected on time and holds its slot only until it returns', async () => {
+    const kdf = kdfFor({ slots: 1, deadlineMs: 150 })
+    // Warm the slot's worker so the deadline lands inside the native call, not in thread startup.
+    const warm = kdf.acquire()
+    await warm.derive('password', salt, 32, FAST)
+    expect(kdf.idle).toBe(1)
+    const lease = kdf.acquire()
+    const started = Date.now()
+    // Production ordinary-login parameters: one native scryptSync that terminate() cannot interrupt.
+    await expect(lease.derive('password', salt, 32, { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 })).rejects.toMatchObject({ reason: 'DEADLINE' })
+    const rejectedMs = Date.now() - started
+    expect(kdf.held).toBe(1)
+    await until(() => kdf.held === 0, 30_000)
+    const freedMs = Date.now() - started
+    console.log(`native-deadline rejectedMs=${rejectedMs} slotFreedMs=${freedMs}`)
+    expect(rejectedMs).toBeLessThan(2_000)
+    // The slot outlived the rejection: the native call kept running after the deadline.
+    expect(freedMs).toBeGreaterThan(rejectedMs)
+  }, 40_000)
+
+  it('close() stops idle and running workers, refuses new leases and is idempotent', async () => {
+    const kdf = createKdf({ slots: 2, deadlineMs: 10_000, workerFactory: stuckFactory })
+    const lease = kdf.acquire()
+    const running = lease.derive('password', salt, 32, FAST)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await kdf.close()
+    await expect(running).rejects.toMatchObject({ reason: 'EXITED' })
+    expect(() => kdf.acquire()).toThrow(expect.objectContaining({ reason: 'CLOSED' }))
+    await until(() => kdf.held === 0)
+    await kdf.close()
+  })
+
+  it('does not return a worker to the pool when close() lands during a derivation', async () => {
+    const kdf = createKdf({ slots: 1 })
+    const lease = kdf.acquire()
+    const running = lease.derive('password', salt, 32, { N: 16384, r: 8, p: 1 })
+    const closing = kdf.close()
+    await expect(running).rejects.toBeInstanceOf(KdfUnavailableError)
+    await closing
+    await until(() => kdf.held === 0)
+    expect(kdf.idle).toBe(0)
+  })
+
   it.each([{ slots: 0 }, { slots: 1.5 }, { deadlineMs: 0 }, { deadlineMs: Infinity }, { workerFactory: 'x' }])('rejects invalid configuration %j', (options) => {
     expect(() => createKdf(options as never)).toThrow(TypeError)
   })
@@ -151,6 +194,30 @@ describe('login paths use the bounded derivation', () => {
     await expect(verify(input('correct horse battery'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'KDF' })
     expect(sessionStore.create).not.toHaveBeenCalled()
     await until(() => kdf.held === 0)
+  })
+
+  it('returns the throttle attempt of a timed-out exceptional-access derivation, and fails closed if that fails', async () => {
+    const kdf = kdfFor({ slots: 1, deadlineMs: 50, workerFactory: stuckFactory })
+    const { verify, throttle } = verifierWith(kdf)
+    const release = vi.fn(async () => ({ released: true }))
+    Object.assign(throttle, { reserve: vi.fn(async () => ({ blocked: false, principalWindow: '1', globalWindow: '2' })), release })
+    await expect(verify(input('correct horse battery'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'KDF' })
+    expect(release).toHaveBeenCalledExactlyOnceWith('recovery-admin', { blocked: false, principalWindow: '1', globalWindow: '2' })
+    await until(() => kdf.held === 0)
+    release.mockRejectedValueOnce(new Error('throttle store down'))
+    await expect(verify(input('correct horse battery'))).rejects.toMatchObject({ code: 'LOCAL_ACCESS_UNAVAILABLE', step: 'KDF', compensationError: expect.any(Error) })
+    expect(throttle.success).not.toHaveBeenCalled()
+  })
+
+  it('returns the throttle attempt of a timed-out ordinary login and still answers 503', async () => {
+    const kdf = kdfFor({ slots: 2, deadlineMs: 50, workerFactory: stuckFactory })
+    const reservation = { blocked: false, principalWindow: '1', globalWindow: '2' }
+    const throttle = { reserve: vi.fn(async () => reservation), release: vi.fn(async () => ({ released: true })), success: vi.fn() }
+    const pool = { query: vi.fn(async () => ({ rows: [] })) }
+    const identity = new LocalIdentity({ pool, sessions: {}, throttle, scope: {}, authorizationRevision: 'r', kdf })
+    await expect(identity.login({ username: 'admin-one', password: 'correct horse battery staple' }, 'c')).rejects.toMatchObject({ status: 503 })
+    expect(throttle.release).toHaveBeenCalledExactlyOnceWith('ordinary:admin-one', reservation)
+    expect(throttle.success).not.toHaveBeenCalled()
   })
 
   it('maps an ordinary-login KDF deadline to 503 and frees the slot after the worker exits', async () => {

@@ -19,10 +19,13 @@ export type AccessInspectionRow = AccessTargetInput & {
 }
 export type AccessTargetState = 'Proposed' | 'Not verified' | 'Unreachable' | 'Unknown' | 'Verified' | 'Stale'
 
+/** Only the exact Console BFF source counts as observed; anything else is treated as fixture. */
+export const isObservedSource = (input: Pick<AccessTargetInput, 'source'>) => input.source === 'bff'
+
 /** First match wins; fixture provenance can never establish verified access. */
 export function accessTargetState(input: AccessTargetInput): AccessTargetState {
   if (input.proposed && !input.evidence) return 'Proposed'
-  if (input.source !== 'bff') return 'Not verified'
+  if (!isObservedSource(input)) return 'Not verified'
   if (input.clusterReachable === false) return 'Unreachable'
   if (input.clusterReachable !== true) return 'Unknown'
   if (!input.evidence || input.evidence.kind !== 'target-cluster') return 'Not verified'
@@ -30,6 +33,6 @@ export function accessTargetState(input: AccessTargetInput): AccessTargetState {
   if (verdict === 'Stale') return 'Stale'
   if (verdict !== 'Current') return 'Unknown'
   // ADR-Platform-046 §8: Verified needs the observed binding and no unresolved reason.
-  if (!input.evidence.binding || (input.evidence.reasons?.length ?? 0) > 0) return 'Not verified'
+  if (!input.evidence.binding?.roleRef || (input.evidence.reasons?.length ?? 0) > 0) return 'Not verified'
   return 'Verified'
 }

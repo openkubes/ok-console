@@ -5,6 +5,7 @@ import type { AccessInspectionRow } from './accessInspection'
 import { readAccessInspectionFixture } from './accessInspectionFixture'
 
 const states = (container: HTMLElement) => [...container.querySelectorAll('[data-access-state]')].map(badge => badge.textContent)
+const accessWording = /\b(has|have|can|may)\s+access\b|access\s+(is\s+)?(granted|allowed)|\bgrant(ed)?\s+access\b|\ballowed\s+to\b/i
 const evidence = { kind: 'target-cluster', observedAt: '2026-11-19T10:02:11Z', freshness: 'Current' as const, binding: { roleRef: 'fixture-viewer' } }
 
 afterEach(() => vi.restoreAllMocks())
@@ -27,17 +28,28 @@ describe('Read-only access inspection', () => {
       expect(target.getByText('No target-cluster evidence')).toBeInTheDocument()
     }
     expect(states(container)).toEqual(['Proposed', 'Not verified', 'Not verified', 'Not verified'])
-    expect(document.body).not.toHaveTextContent(/\b(has|have|can|may)\s+access\b|access\s+(is\s+)?(granted|allowed)|\bgrant(ed)?\s+access\b|\ballowed\s+to\b/i)
+    expect(document.body).not.toHaveTextContent(accessWording)
   })
 
   it('has no forms, inputs, buttons or links, and sends no request or storage write on render or interaction', () => {
     const request = vi.spyOn(globalThis, 'fetch')
     const store = vi.spyOn(Storage.prototype, 'setItem')
     const xhr = vi.spyOn(XMLHttpRequest.prototype, 'open')
+    const beacon = vi.fn(); Object.defineProperty(navigator, 'sendBeacon', { value: beacon, configurable: true })
+    const popup = vi.spyOn(window, 'open').mockImplementation(() => null)
+    localStorage.clear(); sessionStorage.clear()
+    const cookiesBefore = document.cookie
     const { container } = render(<UserProjectManagement/>)
     for (const role of ['form', 'textbox', 'combobox', 'button', 'link', 'checkbox', 'menuitem']) expect(screen.queryByRole(role)).not.toBeInTheDocument()
-    expect(container.querySelector('form, input, select, textarea, a, button, [onclick], [contenteditable]')).toBeNull()
-    for (const element of container.querySelectorAll('*')) fireEvent.click(element)
+    expect(container.querySelector('form, input, select, textarea, a, button, img, iframe, object, embed, link, script, video, audio, source, [onclick], [contenteditable], [style*="url("]')).toBeNull()
+    for (const element of container.querySelectorAll('*')) {
+      for (const fire of [fireEvent.pointerDown, fireEvent.mouseDown, fireEvent.pointerUp, fireEvent.mouseUp, fireEvent.click, fireEvent.keyDown, fireEvent.focus]) fire(element)
+    }
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+    expect(document.cookie).toBe(cookiesBefore)
+    expect(beacon).not.toHaveBeenCalled()
+    expect(popup).not.toHaveBeenCalled()
     expect(request).not.toHaveBeenCalled()
     expect(store).not.toHaveBeenCalled()
     expect(xhr).not.toHaveBeenCalled()
@@ -64,15 +76,30 @@ describe('Read-only access inspection', () => {
     expect(verified.getByText('Source: Console BFF')).toBeInTheDocument()
     for (const text of ['Kind: target-cluster', `Observed at: ${evidence.observedAt}`, 'Freshness: Current', 'Role reference: fixture-viewer']) expect(verified.getByText(text)).toBeInTheDocument()
     expect(verified.queryByText(/^Reason:/)).not.toBeInTheDocument()
+    expect(fixtureWithEvidence.getByText('Illustrative evidence (fixture, not observed)')).toBeInTheDocument()
+    expect(verified.queryByText(/Illustrative evidence/)).not.toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent(accessWording)
+  })
+
+  it.each(['BFF', 'mock', '', undefined])('labels a row with unrecognised source %j as fixture in every place', (source) => {
+    const base = readAccessInspectionFixture()[0]
+    const { container } = render(<UserProjectManagement rows={[{ ...base, source: source as unknown as AccessInspectionRow['source'], proposed: false, clusterReachable: true, evidence }]}/>)
+    expect(states(container)).toEqual(['Not verified'])
+    expect(screen.getByText('Source: Fixture')).toBeInTheDocument()
+    expect(screen.getByText('Reachability (illustrative): Reachable')).toBeInTheDocument()
+    expect(screen.getByText('Illustrative evidence (fixture, not observed)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Data boundaries')).toHaveTextContent('Fixture data · no target-cluster evidence')
   })
 
   it('names the boundary from the rows it shows and explains an empty table', () => {
     const base = readAccessInspectionFixture()[0]
-    const { unmount } = render(<UserProjectManagement rows={[{ ...base, source: 'bff', proposed: false, clusterReachable: true, evidence }]}/>)
-    expect(screen.getByLabelText('Data boundaries')).toHaveTextContent('Read-only target-cluster observations')
-    expect(screen.getByLabelText('Data boundaries')).not.toHaveTextContent('Fixture data · no target-cluster evidence')
+    const { unmount } = render(<UserProjectManagement rows={[{ ...base, source: 'bff', proposed: false, clusterReachable: false }]}/>)
+    expect(screen.getByLabelText('Data boundaries')).toHaveTextContent('Console BFF data · each target shows its own evidence state')
+    expect(screen.getByLabelText('Data boundaries')).not.toHaveTextContent(/Fixture data|observations/)
     unmount()
     render(<UserProjectManagement rows={[]}/>)
+    expect(screen.getByLabelText('Data boundaries')).toHaveTextContent('No targets to inspect')
+    expect(screen.getByLabelText('Data boundaries')).not.toHaveTextContent('Fixture data')
     expect(screen.getByText('No targets to inspect.')).toBeInTheDocument()
   })
 })

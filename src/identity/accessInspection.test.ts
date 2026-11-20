@@ -43,6 +43,7 @@ describe('accessTargetState (first match wins)', () => {
   })
   it('f binding: Current evidence without an observed binding is Not verified', () => {
     expect(accessTargetState({ ...current, evidence: { kind: 'target-cluster', freshness: 'Current' } })).toBe('Not verified')
+    expect(accessTargetState({ ...current, evidence: { ...current.evidence!, binding: { roleRef: '' } } })).toBe('Not verified')
   })
   it.each(['TARGET_UNREACHABLE', 'OBSERVATION_STALE', 'NAMESPACE_UID_MISMATCH', 'PRESET_DRIFTED'])('f reasons: Current evidence with reason %s is Not verified', (code) => {
     expect(accessTargetState({ ...current, evidence: { ...current.evidence!, reasons: [{ code }] } })).toBe('Not verified')
@@ -71,11 +72,11 @@ describe('accessTargetState (first match wins)', () => {
     for (const [file, source] of [['accessInspection.ts', inspectionSource], ['accessInspectionFixture.ts', fixtureSource], ['UserProjectManagement.tsx', componentSource]]) {
       const imports = [...source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/g)].map(match => match[1])
       for (const target of imports) expect(allowed, `${file} imports ${target}`).toContain(target)
-      expect(source, file).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|document\.cookie|rolebinding|subjectaccessreview|\bon(Click|Submit|Change)\b/i)
+      expect(source, file).not.toMatch(/\bfetch\b|XMLHttpRequest|sendBeacon|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|cookie|rolebinding|subjectaccessreview|\[\s*['"`]|\bon[A-Z]\w*\s*=|<(img|iframe|object|embed|link|script|a)\b|window\.open|url\(/)
     }
   })
   it('keeps the page out of production builds (DEV-only lazy import in App.tsx)', () => {
-    const imports = appSource.split('\n').filter(line => line.includes("'./identity/UserProjectManagement'"))
-    expect(imports).toEqual(["const UserProjectManagement = import.meta.env.DEV ? lazy(() => import('./identity/UserProjectManagement')) : null"])
+    const references = appSource.split('\n').filter(line => /identity\/(UserProjectManagement|accessInspection)/.test(line))
+    expect(references).toEqual(["const UserProjectManagement = import.meta.env.DEV ? lazy(() => import('./identity/UserProjectManagement')) : null"])
   })
 })

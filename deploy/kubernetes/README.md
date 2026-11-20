@@ -119,10 +119,11 @@ gate.
 
 ## OK-172 ok-shared live slice
 
-The `overlays/ok-shared-live` path is the render-first Phase B1 candidate. It
-pins the accepted Console `dev-v0.1.0-rc.9` and observed-state producer
-`console-observer-dev-v0.1.0-rc.3` digests. The Console uses PostgreSQL-backed
-bootstrap sessions and the producer's explicit `hosting-cluster` source. The
+The `overlays/ok-shared-live` path is the render-first Phase B1 candidate. Its
+`kustomization.yaml` pins the Console and observed-state producer images by
+digest; that file, not this README, is the record of the current pins. The
+Console uses PostgreSQL-backed sessions with OIDC (`keycloak-openkubes`) and
+break-glass local access, and the producer's explicit `hosting-cluster` source. The
 source reads Kubernetes version, a bounded Node list, and the exact
 `Deployment/openkubes-console/ok-console`; it installs and reads no Crossplane,
 KubeVirt, or CAPI APIs.
@@ -137,16 +138,19 @@ PostgreSQL, producer mTLS, and the producer's Kubernetes API read path.
 The CNPG operator may reach only the database instance-manager status port
 `8000`; application traffic remains restricted to Console pods on `5432`.
 
-Render, perform server-side admission dry-run, and change no cluster state:
+Verify a reviewed change package read-only: render, non-forced server-side
+dry-run of every admitted object against the approved delta, managedFields
+ownership inventory, a drift check of every other rendered object, and the
+running Pods' image identity. It never applies and never forces conflicts:
 
 ```bash
-./deploy/kubernetes/verify-ok-shared-live.sh
+./deploy/kubernetes/verify-ok-shared-readonly.sh <approved-package-dir> <new-output-dir>
 ```
 
-The live field manager explicitly takes ownership of the reviewed Console image
-and mode fields previously owned by `ok-170-preview`. Both dry-run and apply use
-the same bounded server-side conflict policy, so the Preview-to-Phase-B1
-transition cannot be an accidental client-side merge.
+`verify-ok-shared-live.sh` dry-runs and applies with `--force-conflicts`, taking
+ownership of fields held by other managers. It is the historical Phase B1
+transition path; do not use it for a change that must leave other managers'
+fields untouched.
 The existing Preview ingress-policy identity is deliberately reused and
 narrowed to Traefik, preventing the old same-namespace allow rule from
 remaining as an additive policy after the transition.
@@ -175,12 +179,16 @@ The protected projection denial is the BFF contract's bounded `403 FORBIDDEN`;
 credential rejection on the dedicated bootstrap authentication route remains
 the separate `401` boundary.
 
-The lab route is `https://console.ok-shared.internal:30443`. Resolve that name
-to an `ok-shared` node and trust only the public CA certificate carried in
-`Secret/ok-console-ingress-tls`. The initial username is `arash`; every login
-also requires a 12–512 character operational reason and writes credential-free
-audit Evidence to PostgreSQL. OIDC remains disabled until a separate reviewed
-identity-provider step replaces bootstrap access.
+The route is `https://console.ok-shared.internal`. Trust only the public CA
+certificate carried in `Secret/ok-console-ingress-tls`. Sign-in uses OIDC
+through `keycloak-openkubes`; break-glass local access additionally requires a
+12–512 character operational reason, and every sign-in writes credential-free
+audit Evidence to PostgreSQL.
+
+The recovery overlays (`ok-shared-bootstrap-recovery`, `ok-shared-breakglass`)
+take their Console image from `overlays/expected-digests.json`: the index digest
+and the platform-child digests per overlay. The recovery renderer refuses an
+overlay whose pin or rendered image differs from that file.
 
 ## Development image publication
 

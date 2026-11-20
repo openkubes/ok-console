@@ -94,6 +94,9 @@ patches:
             value: /run/secrets/ok-console/observed-state/tls.key
           - name: OK_CONSOLE_BFF_ENABLE_FAILURE_INJECTION
             value: "false"
+          # D6: the live Deployment already carries this value (added outside Git); kept last to match its position.
+          - name: OK_CONSOLE_DRY_RUN_URL
+            value: http://ok147-console-dry-run.openkubes-system.svc.cluster.local:8790
       - op: replace
         path: /spec/template/spec/containers/0/volumeMounts
         value:

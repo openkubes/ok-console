@@ -9,7 +9,10 @@ import { describe, expect, it } from 'vitest'
 
 const exec = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
-const digest = 'sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc'
+import expectedDigests from './overlays/expected-digests.json'
+
+const digest = expectedDigests['ok-shared-breakglass'].image.split('@')[1]
+const bootstrapDigest = expectedDigests['ok-shared-bootstrap-recovery'].image.split('@')[1]
 const envValue = (manifest: string, name: string) => {
   const match = manifest.match(new RegExp(`- name: ${name}\\n\\s+value: ([^\\s]+)`))
   if (!match) throw new Error(`${name} is missing from the rendered Deployment.`)
@@ -34,7 +37,7 @@ describe('bootstrap recovery profile', () => {
     const bootstrapPatch = await read('./overlays/ok-shared-bootstrap-recovery/deployment-bootstrap-recovery.yaml')
     const restoredPatch = await read('./overlays/ok-shared-breakglass/deployment-breakglass.yaml')
 
-    expect(bootstrapOverlay).toContain(digest)
+    expect(bootstrapOverlay).toContain(bootstrapDigest)
     expect(bootstrapPatch).toContain('value: "false"')
     expect(bootstrapPatch).toContain('value: bootstrap')
     expect(bootstrapPatch).toContain('REPLACE_BOOTSTRAP_RECOVERY_EPOCH')
@@ -73,10 +76,14 @@ describe('bootstrap recovery profile', () => {
 
       expect(new Set(firstValues).size).toBe(4)
       expect(new Set([...firstValues, ...secondValues]).size).toBe(8)
-      expect(first.bootstrap).toContain(`image: ghcr.io/openkubes/ok-console@${digest}`)
+      expect(first.bootstrap).toContain(`image: ghcr.io/openkubes/ok-console@${bootstrapDigest}`)
       expect(first.restored).toContain(`image: ghcr.io/openkubes/ok-console@${digest}`)
       expect(`${first.bootstrap}${first.restored}`).not.toMatch(/REPLACE_(?:BOOTSTRAP|POST_RECOVERY)_/)
-      expect(first.evidence).toMatchObject({ imageDigest: digest, singleUse: true })
+      expect(first.evidence).toMatchObject({ singleUse: true, imageDigests: {
+        bootstrap: { overlay: 'ok-shared-bootstrap-recovery', image: expectedDigests['ok-shared-bootstrap-recovery'].image, platforms: expectedDigests['ok-shared-bootstrap-recovery'].platforms },
+        postRecovery: { overlay: 'ok-shared-breakglass', image: expectedDigests['ok-shared-breakglass'].image, platforms: expectedDigests['ok-shared-breakglass'].platforms },
+      } })
+      expect(first.evidence).not.toHaveProperty('imageDigest')
     } finally {
       await Promise.all([
         rm(first.parent, { recursive: true, force: true }),

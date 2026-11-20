@@ -27,6 +27,17 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(stdout).toContain('value: openkubes')
   }, 15_000)
 
+  it.each(['ok-shared-live', 'ok-shared-breakglass', 'ok-shared-bootstrap-recovery'])('%s tracks the live dry-run runner URL as the last Console env entry (D6)', async (name) => {
+    const { stdout } = await execute('kubectl', ['kustomize', new URL(`./overlays/${name}`, import.meta.url).pathname])
+    const console = (yamlToJson(stdout) as Array<Record<string, any>>).filter((o) => o.kind === 'Deployment' && o.metadata.name === 'ok-console')
+    expect(console).toHaveLength(1)
+    const env = console[0].spec.template.spec.containers[0].env as Array<{ name: string; value?: string }>
+    expect(env.filter((e) => e.name === 'OK_CONSOLE_DRY_RUN_URL')).toEqual([
+      { name: 'OK_CONSOLE_DRY_RUN_URL', value: 'http://ok147-console-dry-run.openkubes-system.svc.cluster.local:8790' }])
+    expect(env.at(-1)?.name).toBe('OK_CONSOLE_DRY_RUN_URL')
+    expect(env.some((e) => e.name === 'OK_CONSOLE_DEPLOYMENT_POLICY')).toBe(false)
+  }, 15_000)
+
   it('grants the producer only its bounded hosting-cluster reads', async () => {
     const rbac = await read(`${overlay}/producer-rbac.yaml`)
     expect(rbac).toContain('resources: ["nodes"]')

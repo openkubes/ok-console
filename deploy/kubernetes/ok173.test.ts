@@ -9,7 +9,9 @@ import { describe, expect, it } from 'vitest'
 
 const exec = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
-const digest = 'sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc'
+import expectedDigests from './overlays/expected-digests.json'
+
+const digest = expectedDigests['ok-shared-breakglass'].image.split('@')[1]
 
 const generatedRecovery = async () => {
   const parent = await mkdtemp(join(tmpdir(), 'ok-console-recovery-test-'))

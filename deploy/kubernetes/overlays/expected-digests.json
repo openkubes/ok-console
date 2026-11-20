@@ -1,0 +1,16 @@
+{
+  "ok-shared-bootstrap-recovery": {
+    "image": "ghcr.io/openkubes/ok-console@sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc",
+    "platforms": {
+      "linux/amd64": "sha256:349eca29013daf4b087d94eda60c587268a50c1d2a0d78fab20479c1ff6600b1",
+      "linux/arm64": "sha256:cf1c2209ed9c27932de932a3188ad17bf81e37b3bba503d6c5f8297a28811f46"
+    }
+  },
+  "ok-shared-breakglass": {
+    "image": "ghcr.io/openkubes/ok-console@sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc",
+    "platforms": {
+      "linux/amd64": "sha256:349eca29013daf4b087d94eda60c587268a50c1d2a0d78fab20479c1ff6600b1",
+      "linux/arm64": "sha256:cf1c2209ed9c27932de932a3188ad17bf81e37b3bba503d6c5f8297a28811f46"
+    }
+  }
+}

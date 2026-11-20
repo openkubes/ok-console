@@ -720,14 +720,15 @@ describe('runtime-identity: running Pods match the approved image through their 
     passed(go(w), 'runtime-identity')
   })
 
-  it.each<[string, (d: Record<string, any>) => void]>([
+  type Deployment = ReturnType<typeof world>['deployment']
+  it.each<[string, (d: Deployment) => void]>([
     ['a new generation', (d) => { d.metadata.generation = 5 }],
     ['a new revision', (d) => { d.metadata.annotations['deployment.kubernetes.io/revision'] = '8' }],
     ['a new template image', (d) => { d.spec.template = template(`ghcr.io/openkubes/ok-console@${child}`) }],
-    ['an unavailable replica', (d) => { d.status.unavailableReplicas = 1 }],
+    ['an unavailable replica', (d) => { (d.status as Record<string, number>).unavailableReplicas = 1 }],
     ['a recreated Deployment', (d) => { d.metadata.uid = 'd-2' }],
   ])('fails closed when a rollout starts during verification: %s', (_label, change) => {
-    const w = world(); const later = structuredClone(w.deployment) as Record<string, any>; change(later)
+    const w = world(); const later = structuredClone(w.deployment); change(later)
     failed(go(w, expected, later), 'deployment changed during verification')
   })
 

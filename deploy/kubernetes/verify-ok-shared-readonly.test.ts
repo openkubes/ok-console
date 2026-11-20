@@ -81,7 +81,8 @@ function runtime(imageID = `ghcr.io/openkubes/ok-console@${child}`) {
 }
 
 const netpol = 'NetworkPolicy.v1.networking.k8s.io/ok-console-live-egress'
-const livePolicy = () => ({ apiVersion: 'networking.k8s.io/v1', kind: 'NetworkPolicy',
+type Policy = { apiVersion: string; kind: string; metadata: { name: string; namespace: string; uid: string; resourceVersion: string; labels: Record<string, string> }; spec: Record<string, unknown> }
+const livePolicy = (): Policy => ({ apiVersion: 'networking.k8s.io/v1', kind: 'NetworkPolicy',
   metadata: { name: 'ok-console-live-egress', namespace: ns, uid: 'n-1', resourceVersion: '12', labels: { extra: 'server-side' } },
   spec: { podSelector: {}, policyTypes: ['Egress'] } })
 function scenario() {
@@ -197,13 +198,13 @@ describe('verify-ok-shared-readonly.sh', () => {
   })
 
   it.each([
-    ['a missing field', (o: Record<string, any>) => { delete o.spec.policyTypes }, '/spec/policyTypes'],
-    ['a different label', (o: Record<string, any>) => { o.metadata.labels.extra = 'other' }, '/metadata/labels/extra'],
-    ['a shorter list', (o: Record<string, any>) => { o.spec.policyTypes = [] }, '/spec/policyTypes'],
-    ['a wrong type', (o: Record<string, any>) => { o.spec.podSelector = 'all' }, '/spec/podSelector'],
+    ['a missing field', (o: Policy) => { delete o.spec.policyTypes }, '/spec/policyTypes'],
+    ['a different label', (o: Policy) => { o.metadata.labels.extra = 'other' }, '/metadata/labels/extra'],
+    ['a shorter list', (o: Policy) => { o.spec.policyTypes = [] }, '/spec/policyTypes'],
+    ['a wrong type', (o: Policy) => { o.spec.podSelector = 'all' }, '/spec/podSelector'],
   ])('reports drift on %s', (_label, change, path) => {
     const s = scenario()
-    s.replies.kustomize = { stdout: rendered().replace('spec: {}', 'metadata:\n  labels:\n    extra: server-side\nspec:\n  podSelector: {}\n  policyTypes:\n  - Egress').replace(/(name: ok-console-live-egress\n  namespace: [a-z-]+\n)metadata:\n/, '$1') }
+    s.replies.kustomize = { stdout: rendered().replace('spec: {}', 'metadata:\n  labels:\n    extra: server-side\nspec:\n  podSelector: {}\n  policyTypes:\n  - Egress').replace(/(name: ok-console-live-egress\n {2}namespace: [a-z-]+\n)metadata:\n/, '$1') }
     const live = livePolicy(); change(live); s.replies[`get ${netpol} -o json`] = json(live)
     const r = run(s)
     stopped(r, 'an object the gates do not admit differs from the live cluster')
@@ -212,7 +213,7 @@ describe('verify-ok-shared-readonly.sh', () => {
 
   it('reports drift when the live value equals the rendered one only after type coercion (true vs 1)', () => {
     const s = scenario(); s.replies.kustomize = { stdout: rendered().replace('spec: {}', 'spec:\n  x: true') }
-    const live = livePolicy() as Record<string, any>; live.spec.x = 1; s.replies[`get ${netpol} -o json`] = json(live)
+    const live = livePolicy(); live.spec.x = 1; s.replies[`get ${netpol} -o json`] = json(live)
     const r = run(s)
     stopped(r, 'an object the gates do not admit differs from the live cluster')
     expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toBe(`${netpol}\tDRIFT /spec/x\n`)

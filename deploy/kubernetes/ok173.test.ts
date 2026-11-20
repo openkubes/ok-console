@@ -1,30 +1,17 @@
 // @vitest-environment node
 
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { recoveryTree, runRenderer } from './fixtures/releasedRecovery'
 
-const exec = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 const digest = 'sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc'
-const releasedProvenance = {
-  image: 'ghcr.io/openkubes/ok-console',
-  authMode: 'bootstrap',
-  dataMode: 'bff',
-  releaseTag: 'dev-v0.1.0-rc.9',
-  revision: 'c'.repeat(40),
-  digest: `sha256:${'ab'.repeat(32)}`,
-}
 
 const generatedRecovery = async () => {
-  const parent = await mkdtemp(join(tmpdir(), 'ok-console-recovery-test-'))
+  const parent = await recoveryTree()
   const output = join(parent, 'generated')
-  const provenance = join(parent, 'image-provenance.json')
-  await writeFile(provenance, JSON.stringify(releasedProvenance))
-  await exec('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', '--provenance', provenance, output])
+  await runRenderer(parent, output)
   return {
     parent,
     restored: await readFile(join(output, 'post-recovery.yaml'), 'utf8'),

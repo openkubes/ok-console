@@ -1,12 +1,14 @@
 // @vitest-environment node
 
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { BREAKGLASS_DIGEST, UNRELEASED_DIGEST, checkRecoveryProvenance, consoleImageReferences } from './recovery-image.mjs'
+import { recoveryTree, releasedProvenance as released, runRenderer } from './fixtures/releasedRecovery'
 
 // OK-173: the bootstrap-only recovery overlay may run only a bootstrap-built image, referenced by
 // an immutable digest recorded with its provenance. Until a release publishes one, the overlay
@@ -14,14 +16,7 @@ import { BREAKGLASS_DIGEST, UNRELEASED_DIGEST, checkRecoveryProvenance, consoleI
 const exec = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 const overlayDigest = (kustomization: string) => kustomization.match(/^\s+digest:\s*(\S+)\s*$/m)?.[1]
-const released = {
-  image: 'ghcr.io/openkubes/ok-console',
-  authMode: 'bootstrap',
-  dataMode: 'bff',
-  releaseTag: 'dev-v0.1.0-rc.9',
-  revision: 'c'.repeat(40),
-  digest: `sha256:${'ab'.repeat(32)}`,
-}
+const checkedIn = checkRecoveryProvenance(JSON.parse(readFileSync(new URL('./overlays/ok-shared-bootstrap-recovery/image-provenance.json', import.meta.url), 'utf8')))
 const unreleased = { ...released, releaseTag: null, revision: null, digest: UNRELEASED_DIGEST }
 
 describe('OK-173 bootstrap recovery image reference', () => {
@@ -92,25 +87,21 @@ describe('OK-173 bootstrap recovery image reference', () => {
 })
 
 describe('OK-173 recovery bundle renderer', () => {
-  const renderWith = async (provenance: unknown) => {
-    const parent = await mkdtemp(join(tmpdir(), 'ok-console-recovery-image-test-'))
-    const file = join(parent, 'image-provenance.json')
-    await writeFile(file, typeof provenance === 'string' ? provenance : JSON.stringify(provenance))
-    const output = join(parent, 'generated')
+  const renderTree = async (options: Parameters<typeof recoveryTree>[0]) => {
+    const root = await recoveryTree(options)
+    const output = join(root, 'generated')
     try {
-      const result = await exec('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', '--provenance', file, output])
+      const result = await runRenderer(root, output)
         .then(() => ({ code: 0, stderr: '' }), (error) => ({ code: error.code, stderr: String(error.stderr) }))
       const written = await stat(output).then(() => true, () => false)
       const bootstrap = written ? await readFile(join(output, 'bootstrap.yaml'), 'utf8').catch(() => '') : ''
       return { ...result, written, bootstrap }
     } finally {
-      await rm(parent, { recursive: true, force: true })
+      await rm(root, { recursive: true, force: true })
     }
   }
 
-  it('refuses the checked-in record until a bootstrap build is released', async () => {
-    const provenance = JSON.parse(await read('./overlays/ok-shared-bootstrap-recovery/image-provenance.json'))
-    if (checkRecoveryProvenance(provenance).state !== 'unreleased') return
+  it.skipIf(checkedIn.state !== 'unreleased')('refuses the checked-in record until a bootstrap build is released', async () => {
     const parent = await mkdtemp(join(tmpdir(), 'ok-console-recovery-image-test-'))
     try {
       const output = join(parent, 'generated')
@@ -123,25 +114,27 @@ describe('OK-173 recovery bundle renderer', () => {
   }, 60_000)
 
   it.each([
-    ['the unreleased sentinel', unreleased, 'No bootstrap-built recovery image has been released'],
-    ['the break-glass digest', { ...released, digest: BREAKGLASS_DIGEST }, 'break-glass build'],
-    ['a break-glass mode', { ...released, authMode: 'breakglass' }, 'authMode must be bootstrap'],
-    ['malformed JSON', '{', 'Cannot read the recovery image provenance'],
-  ])('refuses %s and writes nothing', async (_case, provenance, message) => {
-    const result = await renderWith(provenance)
-    expect(result.code).toBe(2)
+    ['an unreleased record', { provenance: unreleased, overlayDigest: UNRELEASED_DIGEST }, 'No bootstrap-built recovery image has been released', 2],
+    ['a released record the overlay does not pin', { overlayDigest: UNRELEASED_DIGEST }, 'does not reference the expected Console digest', 1],
+    ['an overlay pinning another digest', { overlayDigest: `sha256:${'cd'.repeat(32)}` }, 'does not reference the expected Console digest', 1],
+    ['an overlay pinning the break-glass build', { overlayDigest: BREAKGLASS_DIGEST }, 'does not reference the expected Console digest', 1],
+    ['a record naming the break-glass build', { provenance: { ...released, digest: BREAKGLASS_DIGEST }, overlayDigest: BREAKGLASS_DIGEST }, 'break-glass build', 2],
+    ['a record in the break-glass mode', { provenance: { ...released, authMode: 'breakglass' } }, 'authMode must be bootstrap', 2],
+    ['malformed JSON', { provenance: '{' }, 'Cannot read the recovery image provenance', 2],
+  ])('refuses %s and writes nothing', async (_case, options, message, code) => {
+    const result = await renderTree(options)
+    expect(result.code).toBe(code)
     expect(result.stderr).toContain(message)
     expect(result.written).toBe(false)
   }, 60_000)
 
-  it('renders the bootstrap bundle with the released bootstrap digest only', async () => {
-    const result = await renderWith(released)
+  it('renders the bootstrap bundle with the recorded and pinned bootstrap digest only', async () => {
+    const result = await renderTree({})
     expect(result.code).toBe(0)
     expect(consoleImageReferences(result.bootstrap)).toEqual([`ghcr.io/openkubes/ok-console@${released.digest}`])
-    expect(result.bootstrap).not.toContain(UNRELEASED_DIGEST)
   }, 60_000)
 
-  it.each([[[]], [['--provenance']], [['--provenance', 'x', 'a', 'b']], [['--bogus', 'out']]])('rejects the usage %j', async (args) => {
+  it.each([[[]], [['--provenance', 'x', 'out']], [['--bogus']], [['a', 'b']]])('rejects the usage %j', async (args) => {
     await expect(exec('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', ...args]))
       .rejects.toMatchObject({ code: 2 })
   })

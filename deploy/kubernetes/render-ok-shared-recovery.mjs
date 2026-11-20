@@ -16,6 +16,28 @@ const expectedDigestsPath = 'deploy/kubernetes/overlays/expected-digests.json'
 const overlays = { bootstrap: 'ok-shared-bootstrap-recovery', postRecovery: 'ok-shared-breakglass' }
 const repository = 'ghcr.io/openkubes/ok-console'
 const digestPattern = /^sha256:[a-f0-9]{64}$/
+// python3 + PyYAML (also required by the read-only verifier) parse YAML and reject duplicate JSON keys,
+// which JSON.parse would silently collapse to the last value.
+const parser = `
+import json, sys, yaml
+mode, text = sys.argv[1], sys.stdin.read()
+def strict(pairs):
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+try:
+    value = json.loads(text, object_pairs_hook=strict) if mode == "json" else [d for d in yaml.safe_load_all(text) if d is not None]
+except Exception:
+    sys.exit(3)
+json.dump(value, sys.stdout)
+`
+const parse = (mode, text, failure) => {
+  const result = spawnSync('python3', ['-c', parser, mode], { input: text, encoding: 'utf8' })
+  if (result.error || result.status === 1) throw new Error('python3 with PyYAML is required.')
+  if (result.status !== 0) throw new Error(failure)
+  return JSON.parse(result.stdout)
+}
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
 const sameKeys = (value, keys) => isRecord(value) && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort())
 
@@ -27,16 +49,10 @@ const loadExpectedDigests = async () => {
   } catch {
     throw new Error(`${expectedDigestsPath} is missing.`)
   }
-  let parsed
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error(`${expectedDigestsPath} is not valid JSON.`)
-  }
+  const parsed = parse('json', text, `${expectedDigestsPath} is not valid JSON or repeats a key.`)
   const names = Object.values(overlays)
   if (!sameKeys(parsed, names)) throw new Error(`${expectedDigestsPath} must name exactly ${names.join(' and ')}.`)
   for (const name of names) {
-    if (text.split(`"${name}"`).length - 1 !== 1) throw new Error(`${expectedDigestsPath} names ${name} more than once.`)
     const entry = parsed[name]
     if (!sameKeys(entry, ['image', 'platforms'])) throw new Error(`${name}: entry must have exactly image and platforms.`)
     const [imageRepository, indexDigest, extra] = typeof entry.image === 'string' ? entry.image.split('@') : []
@@ -75,8 +91,10 @@ const replaceExactlyOnce = (manifest, placeholder, value) => {
 const prepare = async (name, replacements) => {
   const overlay = `deploy/kubernetes/overlays/${name}`
   const { image } = expectedDigests[name]
-  const pinned = [...(await readFile(`${overlay}/kustomization.yaml`, 'utf8')).matchAll(/^\s*digest:\s*(\S+)\s*$/gm)].map((match) => match[1])
-  if (pinned.length !== 1 || `${repository}@${pinned[0]}` !== image) {
+  const [kustomization] = parse('yaml', await readFile(`${overlay}/kustomization.yaml`, 'utf8'), `${overlay}/kustomization.yaml is not valid YAML.`)
+  const pins = (Array.isArray(kustomization?.images) ? kustomization.images : []).filter((entry) => entry?.name === repository)
+  if (pins.length !== 1 || (pins[0].newName ?? repository) !== repository || pins[0].newTag !== undefined
+    || `${repository}@${pins[0].digest}` !== image) {
     throw new Error(`${overlay}/kustomization.yaml does not pin the image in ${expectedDigestsPath}.`)
   }
   let manifest = render(overlay)
@@ -86,9 +104,17 @@ const prepare = async (name, replacements) => {
   if (/REPLACE_[A-Z_]+/.test(manifest)) {
     throw new Error(`Rendered ${overlay} contains an unresolved recovery placeholder.`)
   }
-  const consoleImages = [...manifest.matchAll(/^\s*(?:-\s+)?image:\s*["']?([^"'\s]+)["']?\s*$/gm)]
-    .map((match) => match[1]).filter((reference) => reference.startsWith(`${repository}@`) || reference.startsWith(`${repository}:`))
-  if (consoleImages.length === 0 || consoleImages.some((reference) => reference !== image)) {
+  // Inspect real Pod specs only, so an image string elsewhere (a ConfigMap value, an annotation) cannot stand in.
+  const objects = parse('yaml', manifest, `Rendered ${overlay} is not valid YAML.`)
+  const podSpecs = objects.map((o) => o?.kind === 'Pod' ? o.spec : o?.kind === 'CronJob' ? o.spec?.jobTemplate?.spec?.template?.spec : o?.spec?.template?.spec)
+    .filter(isRecord)
+  const containers = podSpecs.flatMap((spec) => [...(spec.initContainers ?? []), ...(spec.containers ?? [])])
+  const isConsole = (reference) => typeof reference === 'string'
+    && (reference === repository || reference.startsWith(`${repository}@`) || reference.startsWith(`${repository}:`))
+  const consoleImages = containers.map((c) => c?.image).filter(isConsole)
+  const app = objects.filter((o) => o?.kind === 'Deployment' && o.metadata?.name === 'ok-console')
+    .flatMap((o) => (o.spec?.template?.spec?.containers ?? []).map((c) => c?.image).filter(isConsole))
+  if (app.length !== 1 || app[0] !== image || consoleImages.some((reference) => reference !== image)) {
     throw new Error(`Rendered ${overlay} does not run exactly the image in ${expectedDigestsPath}.`)
   }
   return manifest

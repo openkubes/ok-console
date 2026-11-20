@@ -61,20 +61,11 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     refused(root, `overlays/${overlay}/kustomization.yaml does not pin the image in ${file}`)
   })
 
-  it('refuses when the rendered Deployment runs another image than the file', () => {
-    const root = tree()
-    const p = join(root, 'deploy/kubernetes/overlays/ok-shared-breakglass/kustomization.yaml')
-    writeFileSync(p, readFileSync(p, 'utf8').replace('newName: ghcr.io/openkubes/ok-console', 'newName: ghcr.io/openkubes/other'))
-    refused(root, `Rendered deploy/kubernetes/overlays/ok-shared-breakglass does not run exactly the image in ${file}`)
-  })
-
   it('refuses a render that also carries a Console image with another digest', () => {
     const root = tree()
-    const real = spawnSync('sh', ['-c', 'command -v kubectl'], { encoding: 'utf8' }).stdout.trim()
-    const bin = join(root, 'bin'); mkdirSync(bin)
-    writeFileSync(join(bin, 'kubectl'), `#!/bin/sh\n"${real}" "$@" || exit $?\nprintf -- '---\\napiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: extra\\nspec:\\n  initContainers:\\n  - name: extra\\n    image: ghcr.io/openkubes/ok-console@${index('c')}\\n'\n`)
-    chmodSync(join(bin, 'kubectl'), 0o755)
-    refused(root, `Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image in ${file}`, { ...process.env, PATH: `${bin}:${process.env.PATH}` })
+    const env = wrapKubectl(root, `"$REAL" "$@" || exit $?
+printf -- '---\\napiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: extra\\nspec:\\n  initContainers:\\n  - name: extra\\n    image: ghcr.io/openkubes/ok-console@${index('c')}\\n'`)
+    refused(root, `Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image in ${file}`, env)
   })
 
   it('refuses when the file is absent', () => {
@@ -84,14 +75,61 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
 
   it('refuses when the file is not JSON', () => {
     const root = tree(); write(root, '{"ok-shared-breakglass": ')
-    refused(root, `${file} is not valid JSON`)
+    refused(root, `${file} is not valid JSON or repeats a key`)
   })
 
   it('refuses a duplicated overlay key that JSON.parse would silently collapse', () => {
     const root = tree(); const text = readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8')
     const entry = JSON.stringify(original()['ok-shared-breakglass'])
     write(root, text.replace(/\n}\s*$/, `,\n  "ok-shared-breakglass": ${entry}\n}\n`))
-    refused(root, 'names ok-shared-breakglass more than once')
+    refused(root, `${file} is not valid JSON or repeats a key`)
+  })
+
+  it.each([
+    ['image', (t: string) => t.replace(/("image": "[^"]+",)/, `$1\n    "image": "ghcr.io/openkubes/ok-console@${index('d')}",`)],
+    ['linux/amd64', (t: string) => t.replace(/("linux\/amd64": "[^"]+",)/, `$1\n      "linux/amd64": "${index('e')}",`)],
+  ])('refuses a nested duplicate %s key', (_key, change) => {
+    const root = tree(); const text = readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8')
+    const changed = change(text); expect(changed).not.toBe(text); write(root, changed)
+    refused(root, `${file} is not valid JSON or repeats a key`)
+  })
+
+  function wrapKubectl(root: string, script: string) {
+    const real = spawnSync('sh', ['-c', 'command -v kubectl'], { encoding: 'utf8' }).stdout.trim()
+    const bin = join(root, 'bin'); mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, 'kubectl'), `#!/bin/sh\nREAL="${real}"\n${script}\n`); chmodSync(join(bin, 'kubectl'), 0o755)
+    return { ...process.env, PATH: `${bin}:${process.env.PATH}` }
+  }
+
+  it('refuses a Deployment on another repository even when a ConfigMap value names the expected image', () => {
+    const root = tree(); const expected = original()['ok-shared-bootstrap-recovery'].image
+    const env = wrapKubectl(root, `"$REAL" "$@" | sed 's#ghcr.io/openkubes/ok-console@#ghcr.io/openkubes/other@#' || exit 1
+printf -- '---\\napiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: decoy\\ndata:\\n  image: ${expected}\\n'`)
+    refused(root, 'Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image', env)
+  })
+
+  it.each([
+    ['a quoted digest', (k: string) => k.replace(/digest: (sha256:[a-f0-9]{64})/, 'digest: "$1"')],
+    ['a trailing comment', (k: string) => k.replace(/digest: (sha256:[a-f0-9]{64})/, 'digest: $1 # reviewed')],
+    ['an unrelated image entry with its own digest', (k: string) => k.replace(/images:\n/, `images:\n  - name: docker.io/library/busybox\n    digest: ${index('f')}\n`)],
+  ])('accepts a kustomization pin with %s', (_label, change) => {
+    const root = tree()
+    for (const overlay of ['ok-shared-bootstrap-recovery', 'ok-shared-breakglass']) {
+      const p = join(root, 'deploy/kubernetes/overlays', overlay, 'kustomization.yaml'); const before = readFileSync(p, 'utf8')
+      const after = change(before); expect(after).not.toBe(before); writeFileSync(p, after)
+    }
+    const r = render(root); expect(r.stderr).toBe(''); expect(r.status).toBe(0)
+  })
+
+  it.each([
+    ['a second Console image entry', (k: string) => k.replace(/images:\n/, `images:\n  - name: ghcr.io/openkubes/ok-console\n    digest: ${index('f')}\n`)],
+    ['a tag on the Console entry', (k: string) => k.replace(/(digest: sha256:[a-f0-9]{64})/, '$1\n    newTag: rc.30')],
+    ['a renamed Console entry', (k: string) => k.replace('newName: ghcr.io/openkubes/ok-console', 'newName: ghcr.io/openkubes/other')],
+  ])('refuses a kustomization with %s', (_label, change) => {
+    const root = tree()
+    const p = join(root, 'deploy/kubernetes/overlays/ok-shared-breakglass/kustomization.yaml'); const before = readFileSync(p, 'utf8')
+    const after = change(before); expect(after).not.toBe(before); writeFileSync(p, after)
+    refused(root, 'overlays/ok-shared-breakglass/kustomization.yaml does not pin the image')
   })
 
   type Entry = { image: unknown; platforms: Record<string, string>; tag?: string }

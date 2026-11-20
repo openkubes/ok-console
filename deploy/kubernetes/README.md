@@ -165,13 +165,12 @@ OK_CONSOLE_APPLY_BOOTSTRAP=true \
 ```
 
 Store the entered password immediately in the approved credential manager.
-Then apply through the explicit live gate:
+Any change to ok-shared follows the reviewed maintenance procedure
+(`docs/evidence/ok-170/maintenance-procedure.md`) in a separately approved
+window. Do not run `verify-ok-shared-live.sh` with `OK_CONSOLE_APPLY_LIVE=true`
+for such a change: its apply forces conflicts.
 
-```bash
-OK_CONSOLE_APPLY_LIVE=true ./deploy/kubernetes/verify-ok-shared-live.sh
-```
-
-The verifier waits for all certificates, the CNPG database, the producer and
+For the historical Phase B1 transition, that verifier waits for all certificates, the CNPG database, the producer and
 the Console; checks both immutable images and producer allow/deny RBAC; and
 proves health, readiness, static delivery, and unauthenticated API denial. It
 does not print Secret data and contains no delete or rollback mutation.

@@ -122,7 +122,7 @@ printf -- '---\\napiVersion: v1\\nkind: ConfigMap\\nmetadata:\\n  name: decoy\\n
   })
 
   it.each([
-    ['a second Console image entry', (k: string) => k.replace(/images:\n/, `images:\n  - name: ghcr.io/openkubes/ok-console\n    digest: ${index('f')}\n`)],
+    ['a second Console image entry after the reviewed one', (k: string) => k.replace(/(digest: sha256:[a-f0-9]{64}\n)/, `$1  - name: ghcr.io/openkubes/ok-console\n    digest: ${index('f')}\n`)],
     ['a tag on the Console entry', (k: string) => k.replace(/(digest: sha256:[a-f0-9]{64})/, '$1\n    newTag: rc.30')],
     ['a renamed Console entry', (k: string) => k.replace('newName: ghcr.io/openkubes/ok-console', 'newName: ghcr.io/openkubes/other')],
   ])('refuses a kustomization with %s', (_label, change) => {

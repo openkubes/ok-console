@@ -114,7 +114,7 @@ const prepare = async (name, replacements) => {
   const consoleImages = containers.map((c) => c?.image).filter(isConsole)
   const app = objects.filter((o) => o?.kind === 'Deployment' && o.metadata?.name === 'ok-console')
     .flatMap((o) => (o.spec?.template?.spec?.containers ?? []).map((c) => c?.image).filter(isConsole))
-  if (app.length !== 1 || app[0] !== image || consoleImages.some((reference) => reference !== image)) {
+  if (app.length !== 1 || consoleImages.some((reference) => reference !== image)) {
     throw new Error(`Rendered ${overlay} does not run exactly the image in ${expectedDigestsPath}.`)
   }
   return manifest

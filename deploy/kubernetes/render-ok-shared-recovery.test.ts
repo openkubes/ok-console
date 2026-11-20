@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,13 +22,13 @@ function tree() {
   return root
 }
 const original = () => JSON.parse(readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8')) as Record<string, { image: string; platforms: Record<string, string> }>
-function render(root: string) {
+function render(root: string, env: NodeJS.ProcessEnv = process.env) {
   const out = join(root, 'out')
-  const r = spawnSync('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', out], { cwd: root, encoding: 'utf8', timeout: 55_000 })
+  const r = spawnSync('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', out], { cwd: root, encoding: 'utf8', timeout: 55_000, env })
   return { ...r, out }
 }
-function refused(root: string, reason: string) {
-  const r = render(root)
+function refused(root: string, reason: string, env?: NodeJS.ProcessEnv) {
+  const r = render(root, env)
   expect(r.status).not.toBe(0)
   expect(r.stderr).toContain(reason)
   expect(existsSync(r.out)).toBe(false)
@@ -66,6 +66,15 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     const p = join(root, 'deploy/kubernetes/overlays/ok-shared-breakglass/kustomization.yaml')
     writeFileSync(p, readFileSync(p, 'utf8').replace('newName: ghcr.io/openkubes/ok-console', 'newName: ghcr.io/openkubes/other'))
     refused(root, `Rendered deploy/kubernetes/overlays/ok-shared-breakglass does not run exactly the image in ${file}`)
+  })
+
+  it('refuses a render that also carries a Console image with another digest', () => {
+    const root = tree()
+    const real = spawnSync('sh', ['-c', 'command -v kubectl'], { encoding: 'utf8' }).stdout.trim()
+    const bin = join(root, 'bin'); mkdirSync(bin)
+    writeFileSync(join(bin, 'kubectl'), `#!/bin/sh\n"${real}" "$@" || exit $?\nprintf -- '---\\napiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: extra\\nspec:\\n  initContainers:\\n  - name: extra\\n    image: ghcr.io/openkubes/ok-console@${index('c')}\\n'\n`)
+    chmodSync(join(bin, 'kubectl'), 0o755)
+    refused(root, `Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image in ${file}`, { ...process.env, PATH: `${bin}:${process.env.PATH}` })
   })
 
   it('refuses when the file is absent', () => {

@@ -256,6 +256,9 @@ describe('session runtime configuration', () => {
     ['OIDC with break-glass', { ...oidcEnv, ...localEnv('breakglass') }, ['OIDC', 'BreakGlass']],
     ['OIDC only', oidcEnv, ['OIDC']],
     ['no sign-in method', {}, []],
+    ['ok-local identity', { OK_CONSOLE_LOCAL_IDENTITY_ENABLED: 'true', OK_CONSOLE_PROFILE: 'ok-local', NODE_ENV: 'development',
+      OK_CONSOLE_BFF_HOST: '127.0.0.1', OK_CONSOLE_BFF_PORT: '8787', OK_CONSOLE_ORIGIN: 'https://127.0.0.1:8787',
+      OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper' }, ['Local']],
   ])('gives the session store only the methods the %s mode enables', async (_mode, extra, expected) => {
     let storeConfiguration: Record<string, unknown> | undefined
     await createSessionRuntime({

@@ -78,10 +78,8 @@ const rowContext = (row, codec) => {
     }
     throw error
   }
-  if (payload.subject.method !== row.authentication_method) {
-    console.error(JSON.stringify({ event: 'SESSION_METHOD_REJECTED', cause: 'METHOD_MISMATCH' }))
-    throw new SessionStoreError('INVALID_ROW')
-  }
+  // The SQL filter trusts the authentication_method column; the encrypted context must agree.
+  if (payload.subject.method !== row.authentication_method) throw new SessionStoreError('SESSION_METHOD_MISMATCH')
   return {
     apiVersion: SECURITY_CONTRACT_VERSION,
     kind: 'AuthorizationContext',
@@ -146,6 +144,7 @@ export class PostgresSessionStore {
 
   async create({ subject, scope, permissions, authorizationRevision }, database = this.pool) {
     validateSessionCreationInput({ subject, scope, permissions })
+    if (!this.allowedMethods.includes(subject.method)) throw new SessionStoreError('INVALID_INPUT')
     assertStoreInput({ authorizationRevision, deploymentEpoch: this.deploymentEpoch })
     try {
       const clock = await pgQuery(database, 'SELECT clock_timestamp() AS database_now')
@@ -195,11 +194,28 @@ export class PostgresSessionStore {
         : await pgQuery(this.pool, `
           SELECT * FROM ok_console.sessions
           WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch, this.allowedMethods])
-      const context = result.rows[0] ? rowContext(result.rows[0], this.codec) : null
+      const context = result.rows[0] ? await this.contextOrRevoke(result.rows[0]) : null
       if (context && this.contextValidator && !await this.contextValidator(context)) return null
       return context
     } catch (error) {
       throw normalizeStoreFailure(error)
+    }
+  }
+
+  // A row whose column and encrypted method disagree is revoked, so a touch that already
+  // extended it cannot leave a live session behind.
+  async contextOrRevoke(row) {
+    try {
+      return rowContext(row, this.codec)
+    } catch (error) {
+      if (error?.code === 'SESSION_METHOD_MISMATCH') {
+        await pgQuery(this.pool, `
+          UPDATE ok_console.sessions
+          SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+              revoke_reason = COALESCE(revoke_reason, 'METHOD_MISMATCH')
+          WHERE session_digest = $1`, [row.session_digest])
+      }
+      throw error
     }
   }
 

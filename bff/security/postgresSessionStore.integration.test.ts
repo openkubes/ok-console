@@ -181,13 +181,11 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     const bootstrapOnly = storeFor(['Bootstrap'])
     const before = await pool.query('SELECT idle_expires_at FROM ok_console.sessions')
     await waitForDatabaseTimePast('SELECT issued_at FROM ok_console.sessions')
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     expect(await bootstrapOnly.resolve(issued.cookie, { touch: false })).toBeNull()
     expect(await bootstrapOnly.resolve(issued.cookie)).toBeNull()
     expect(await bootstrapOnly.authorize(issued.cookie, request)).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
     expect(await bootstrapOnly.rotate(issued.cookie)).toBeNull()
-    errors.mockRestore()
 
     const after = await pool.query('SELECT idle_expires_at, revoked_at, deployment_epoch FROM ok_console.sessions')
     expect(after.rowCount).toBe(1)
@@ -222,16 +220,24 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     }
   })
 
-  it('rejects a row whose recorded method disagrees with its encrypted context', async () => {
+  it.each([[{ touch: false }], [{ touch: true }]])('revokes a row whose recorded method disagrees with its encrypted context (%j)', async (options) => {
     const issued = await issue()
     await pool.query("UPDATE ok_console.sessions SET authentication_method = 'Bootstrap'")
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const bootstrapOnly = storeFor(['Bootstrap'])
 
-    await expect(storeFor(['Bootstrap']).resolve(issued.cookie, { touch: false }))
-      .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'INVALID_ROW' })
-    expect(errors.mock.calls.map(call => JSON.parse(String(call[0])))).toContainEqual({ event: 'SESSION_METHOD_REJECTED', cause: 'METHOD_MISMATCH' })
-    expect(JSON.stringify(errors.mock.calls)).not.toContain(subject.subjectId)
-    errors.mockRestore()
+    await expect(bootstrapOnly.resolve(issued.cookie, options))
+      .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'SESSION_METHOD_MISMATCH' })
+    const row = await pool.query('SELECT revoked_at, revoke_reason FROM ok_console.sessions')
+    expect(row.rows[0].revoked_at).not.toBeNull()
+    expect(row.rows[0].revoke_reason).toBe('METHOD_MISMATCH')
+    expect(await bootstrapOnly.resolve(issued.cookie, options)).toBeNull()
+    expect(await bootstrapOnly.rotate(issued.cookie)).toBeNull()
+  })
+
+  it('refuses to issue a session for a method the mode does not enable', async () => {
+    await expect(storeFor(['Bootstrap']).create({ subject, scope, permissions, authorizationRevision: 'mapping-revision-7' }))
+      .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'INVALID_INPUT' })
+    expect((await pool.query('SELECT count(*)::int AS count FROM ok_console.sessions')).rows[0].count).toBe(0)
   })
 
   it('fails closed when the envelope key is unavailable', async () => {

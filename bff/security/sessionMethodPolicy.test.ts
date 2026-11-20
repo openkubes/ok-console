@@ -51,7 +51,7 @@ describe('session store allowed methods', () => {
     for (const call of reads) expect(call.params[2]).toEqual(['Bootstrap'])
   })
 
-  it('keeps revocation method-agnostic so a stale cookie can still log out', async () => {
+  it('keeps store-level revocation method-agnostic (HTTP logout resolves first, so a disallowed session gets 401 and the epoch change ends it)', async () => {
     const { pool, calls } = recordingPool()
     const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch', allowedMethods: ['Bootstrap'] })
     expect(await store.revoke(cookie)).toBe(false)

@@ -46,6 +46,9 @@ equal the environment the observed-state source serves, otherwise every projecti
 3. Deploy an image whose SPA was built with `VITE_CONSOLE_AUTH_MODE=bootstrap` (image label
    `io.openkubes.console.auth-mode=bootstrap`). The SPA mode is fixed at build time: a
    break-glass build keeps offering the identity provider even when the BFF runs bootstrap-only.
+   For ok-shared, that image is the one recorded in
+   `deploy/kubernetes/overlays/ok-shared-bootstrap-recovery/image-provenance.json` and checked by
+   `deploy/kubernetes/verify-recovery-image.sh`.
 4. Verify: the sign-in page offers no identity provider; an unauthenticated
    `GET /api/console/v0/auth/oidc/start` returns `403` with no redirect to the issuer; a
    pre-rollback session cookie returns `401` on `GET /api/console/v0/auth/session`; a Bootstrap

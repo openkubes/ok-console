@@ -34,7 +34,9 @@ node deploy/kubernetes/render-ok-shared-recovery.mjs \
 ```
 
 The renderer creates distinct random epochs and authorization revisions and
-refuses an existing output directory. Never apply the checked-in templates,
+refuses an existing output directory. It also refuses to run until a
+bootstrap-built recovery image is released and recorded; see
+`../ok-shared-bootstrap-recovery/README.md`. Never apply the checked-in templates,
 reuse generated manifests, or restore a prior epoch/revision.
 
 Apply the generated Bootstrap manifest, prove prior sessions are rejected, and

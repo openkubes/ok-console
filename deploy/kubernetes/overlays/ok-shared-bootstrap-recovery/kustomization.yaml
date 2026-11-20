@@ -7,7 +7,10 @@ resources:
 images:
   - name: ghcr.io/openkubes/ok-console
     newName: ghcr.io/openkubes/ok-console
-    digest: sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc
+    # Unreleased sentinel. A bootstrap build (VITE_CONSOLE_AUTH_MODE=bootstrap) is published under a
+    # separate release authorization; its digest then replaces this value and image-provenance.json.
+    # The breakglass rc.3 digest must never be used here: its SPA keeps offering the identity provider.
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
 patches:
   - path: deployment-bootstrap-recovery.yaml

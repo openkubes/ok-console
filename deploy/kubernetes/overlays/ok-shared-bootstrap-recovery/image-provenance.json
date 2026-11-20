@@ -1,0 +1,8 @@
+{
+  "image": "ghcr.io/openkubes/ok-console",
+  "authMode": "bootstrap",
+  "dataMode": "bff",
+  "releaseTag": null,
+  "revision": null,
+  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+}

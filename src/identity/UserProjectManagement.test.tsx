@@ -1,81 +1,78 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import UserProjectManagement from './UserProjectManagement'
+import type { AccessInspectionRow } from './accessInspection'
+import { readAccessInspectionFixture } from './accessInspectionFixture'
 
-const add = (username = 'developer01') => {
-  fireEvent.change(screen.getByLabelText('Username'), { target: { value: username } })
-  fireEvent.click(screen.getByRole('button', { name: 'Add preview user' }))
-}
-const users = () => within(screen.getByRole('region', { name: 'Preview users table' }))
-const assignments = () => within(screen.getByRole('region', { name: 'Proposed assignments table' }))
+const states = (container: HTMLElement) => [...container.querySelectorAll('[data-access-state]')].map(badge => badge.textContent)
+const evidence = { kind: 'target-cluster', observedAt: '2026-11-19T10:02:11Z', freshness: 'Current' as const, binding: { roleRef: 'fixture-viewer' } }
+
 afterEach(() => vi.restoreAllMocks())
 
-describe('Identity & access preview', () => {
-  it('uses neutral branding and explains the empty, simulated sections', () => {
+describe('Read-only access inspection', () => {
+  it('discloses fixture boundaries and renders subjects, Project references and target identities', () => {
     const { container } = render(<UserProjectManagement/>)
-    for (const name of ['Preview users', 'Project planning', 'Proposed access', 'No preview users yet', 'No proposed assignments']) {
-      expect(screen.getByRole('heading', { name })).toBeInTheDocument()
+    const banner = screen.getByLabelText('Data boundaries')
+    expect(banner).toHaveTextContent('Fixture data · no target-cluster evidence')
+    expect(banner).toHaveTextContent('“Verified” means target-cluster evidence was observed')
+    for (const row of readAccessInspectionFixture()) {
+      const target = within(screen.getByRole('row', { name: new RegExp(`${row.subject.kind}: ${row.subject.displayName}.*${row.target.namespaceUid}`) }))
+      expect(target.getByText(`Subject: ${row.subject.subject}`)).toBeInTheDocument()
+      expect(target.getByText(`Issuer: ${row.subject.issuer}`)).toBeInTheDocument()
+      expect(target.getByText(`tenantId: ${row.project.tenantId}`)).toBeInTheDocument()
+      expect(target.getByText(`projectId: ${row.project.projectId}`)).toBeInTheDocument()
+      expect(target.getByText(`${row.target.clusterId} / ${row.target.namespace}`)).toBeInTheDocument()
+      expect(target.getByText('Source: Fixture')).toBeInTheDocument()
+      expect(target.getByText(/^Reachability \(illustrative\): /)).toBeInTheDocument()
+      expect(target.getByText('No target-cluster evidence')).toBeInTheDocument()
     }
-    expect(screen.getByLabelText('Preview boundaries')).toHaveTextContent(/reset on reload or when you leave/)
-    expect(screen.getByLabelText('Preview boundaries')).toHaveTextContent(/No accounts, authentication, credentials, Kubernetes RBAC or Developer Workspace access/)
-    expect(screen.getByText(/Projects are not connected/)).toBeInTheDocument()
-    expect(container).not.toHaveTextContent(/W-JAX|OK-214|Local demo|kind-wjax|wjax-demo|\bActive\b/i)
-    expect(container.querySelector('input[type="password"]')).toBeNull()
+    expect(states(container)).toEqual(['Proposed', 'Not verified', 'Not verified', 'Not verified'])
+    expect(document.body).not.toHaveTextContent(/\b(has|have|can|may)\s+access\b|access\s+(is\s+)?(granted|allowed)|\bgrant(ed)?\s+access\b|\ballowed\s+to\b/i)
   })
 
-  it('creates, disables, enables and removes an in-memory proposal without network or storage writes', () => {
+  it('has no forms, inputs, buttons or links, and sends no request or storage write on render or interaction', () => {
     const request = vi.spyOn(globalThis, 'fetch')
-    const storage = vi.spyOn(Storage.prototype, 'setItem')
-    const { unmount } = render(<UserProjectManagement/>)
-    fireEvent.change(screen.getByLabelText('Example namespace'), { target: { value: 'developer-workspaces' } })
-    fireEvent.change(screen.getByLabelText('Proposed role'), { target: { value: 'Editor' } })
-    add('  alice  ')
-    expect(users().getByRole('rowheader', { name: 'alice' })).toBeInTheDocument()
-    expect(assignments().getByRole('row', { name: /alice developer-workspaces Editor Proposed/ })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('No account or access was created.')
-    expect(screen.getByLabelText('Username')).toHaveFocus()
-    fireEvent.click(users().getByRole('button', { name: 'Disable alice in preview' }))
-    expect(users().getByText('Disabled in preview')).toBeInTheDocument()
-    expect(assignments().getByText('Paused in preview')).toBeInTheDocument()
-    fireEvent.click(users().getByRole('button', { name: 'Enable alice in preview' }))
-    expect(assignments().getByText('Proposed')).toBeInTheDocument()
-    // Same tick additions must retain independent identifiers and actions.
-    add('bob')
-    fireEvent.click(users().getByRole('button', { name: 'Remove alice from preview' }))
-    expect(assignments().queryByRole('rowheader', { name: 'alice' })).not.toBeInTheDocument()
-    expect(assignments().getByRole('rowheader', { name: 'bob' })).toBeInTheDocument()
-    fireEvent.click(users().getByRole('button', { name: 'Remove bob from preview' }))
-    expect(screen.getByRole('heading', { name: 'No proposed assignments' })).toBeInTheDocument()
-    add('charlie')
-    unmount()
-    render(<UserProjectManagement/>)
-    expect(screen.queryByRole('rowheader', { name: 'charlie' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'No preview users yet' })).toBeInTheDocument()
+    const store = vi.spyOn(Storage.prototype, 'setItem')
+    const xhr = vi.spyOn(XMLHttpRequest.prototype, 'open')
+    const { container } = render(<UserProjectManagement/>)
+    for (const role of ['form', 'textbox', 'combobox', 'button', 'link', 'checkbox', 'menuitem']) expect(screen.queryByRole(role)).not.toBeInTheDocument()
+    expect(container.querySelector('form, input, select, textarea, a, button, [onclick], [contenteditable]')).toBeNull()
+    for (const element of container.querySelectorAll('*')) fireEvent.click(element)
     expect(request).not.toHaveBeenCalled()
-    expect(storage).not.toHaveBeenCalled()
+    expect(store).not.toHaveBeenCalled()
+    expect(xhr).not.toHaveBeenCalled()
   })
 
-  it.each(['', '  ', 'ab', '1alice', 'a b', '<script>', 'a'.repeat(33)])('rejects invalid username %j with a linked, focused error', (name) => {
-    render(<UserProjectManagement/>)
-    add(name)
-    const error = screen.getByRole('alert')
-    expect(error).toHaveTextContent('Use 3–32')
-    expect(screen.getByLabelText('Username')).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByLabelText('Username')).toHaveAccessibleDescription(expect.stringContaining(error.textContent!))
-    expect(screen.getByLabelText('Username')).toHaveFocus()
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  it('renders six distinct state texts, sources and per-target evidence from injected rows', () => {
+    const base = readAccessInspectionFixture()[0]
+    const rows: AccessInspectionRow[] = [
+      { ...base, id: 'proposed' },
+      { ...base, id: 'fixture', proposed: false, clusterReachable: true, evidence },
+      { ...base, id: 'unknown', source: 'bff', proposed: false, evidence },
+      { ...base, id: 'stale', source: 'bff', clusterReachable: true, evidence: { ...evidence, freshness: 'Stale' } },
+      { ...base, id: 'unreachable', source: 'bff', clusterReachable: false, evidence: { ...evidence, reasons: [{ code: 'TARGET_UNREACHABLE' }] } },
+      { ...base, id: 'verified', source: 'bff', clusterReachable: true, evidence },
+    ]
+    const { container } = render(<UserProjectManagement rows={rows}/>)
+    expect(states(container)).toEqual(['Proposed', 'Not verified', 'Unknown', 'Stale', 'Unreachable', 'Verified'])
+    expect(screen.getByLabelText('Data boundaries')).toHaveTextContent('Mixed sources · fixture rows are never verified')
+    const fixtureWithEvidence = within(screen.getAllByRole('row')[2])
+    expect(fixtureWithEvidence.getByText('Source: Fixture')).toBeInTheDocument()
+    const unreachable = within(screen.getAllByRole('row')[5])
+    expect(unreachable.getByText('Reason: TARGET_UNREACHABLE')).toBeInTheDocument()
+    const verified = within(screen.getAllByRole('row')[6])
+    expect(verified.getByText('Source: Console BFF')).toBeInTheDocument()
+    for (const text of ['Kind: target-cluster', `Observed at: ${evidence.observedAt}`, 'Freshness: Current', 'Role reference: fixture-viewer']) expect(verified.getByText(text)).toBeInTheDocument()
+    expect(verified.queryByText(/^Reason:/)).not.toBeInTheDocument()
   })
 
-  it('rejects case-insensitive duplicates, clears validation on edit and allows reuse after removal', () => {
-    render(<UserProjectManagement/>)
-    add('Alice')
-    add(' alice ')
-    expect(screen.getByRole('alert')).toHaveTextContent('already exists')
-    expect(users().getAllByRole('rowheader')).toHaveLength(1)
-    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'bob' } })
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    fireEvent.click(users().getByRole('button', { name: 'Remove Alice from preview' }))
-    add('alice')
-    expect(users().getAllByRole('rowheader')).toHaveLength(1)
+  it('names the boundary from the rows it shows and explains an empty table', () => {
+    const base = readAccessInspectionFixture()[0]
+    const { unmount } = render(<UserProjectManagement rows={[{ ...base, source: 'bff', proposed: false, clusterReachable: true, evidence }]}/>)
+    expect(screen.getByLabelText('Data boundaries')).toHaveTextContent('Read-only target-cluster observations')
+    expect(screen.getByLabelText('Data boundaries')).not.toHaveTextContent('Fixture data · no target-cluster evidence')
+    unmount()
+    render(<UserProjectManagement rows={[]}/>)
+    expect(screen.getByText('No targets to inspect.')).toBeInTheDocument()
   })
 })

@@ -696,7 +696,7 @@ describe('local-only W-JAX Console route', () => {
 
 
 describe('Identity & access preview navigation', () => {
-  it('opens directly, preserves workspaces, resets proposals on leaving and retains the Clusters lab link', async () => {
+  it('opens the read-only page directly, preserves workspace navigation and retains the Clusters lab link', async () => {
     wjaxPreview.enabled = true
     window.location.hash = '#/users'
     const request = vi.spyOn(globalThis, 'fetch')
@@ -704,15 +704,17 @@ describe('Identity & access preview navigation', () => {
       await renderSignedIn()
       expect(await screen.findByRole('heading', { name: 'User & Project Management' })).toBeInTheDocument()
       expect(screen.getByRole('link', { name: /User & Project Management/ })).toHaveTextContent('Preview · identity & access')
-      fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } })
-      fireEvent.click(screen.getByRole('button', { name: 'Add preview user' }))
-      expect(screen.getByRole('status')).toHaveTextContent('No account or access was created.')
+      expect(screen.getByText('Fixture data · no target-cluster evidence')).toBeInTheDocument()
+      const page = screen.getByRole('main')
+      expect(within(page).queryByRole('textbox')).not.toBeInTheDocument()
+      expect(within(page).queryByRole('combobox')).not.toBeInTheDocument()
+      expect(page.querySelector('form')).toBeNull()
       fireEvent.click(screen.getByRole('link', { name: /Developer Workspaces/ }))
       expect(await screen.findByRole('heading', { name: 'Developer Workspaces' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /Create Workspace/ })).toBeInTheDocument()
       fireEvent.click(screen.getByRole('link', { name: /User & Project Management/ }))
-      expect(await screen.findByRole('heading', { name: 'No preview users yet' })).toBeInTheDocument()
-      expect(screen.queryByRole('rowheader', { name: 'alice' })).not.toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: 'User & Project Management' })).toBeInTheDocument()
+      expect(screen.getByText('Fixture data · no target-cluster evidence')).toBeInTheDocument()
       expect(request).not.toHaveBeenCalled()
       fireEvent.click(screen.getByRole('link', { name: /Clusters/ }))
       expect(await screen.findByRole('link', { name: /View Deployments & Pods/ })).toHaveAttribute('href', '#/wjax')

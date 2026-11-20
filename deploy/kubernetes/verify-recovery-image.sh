@@ -5,7 +5,8 @@
 #     Builds the recovery image twice, without cache, from a clean `git archive` of one commit
 #     (linux/amd64 only, VITE_CONSOLE_AUTH_MODE=bootstrap, VITE_CONSOLE_DATA_MODE=bff) and asserts:
 #     the auth-mode, data-mode and revision labels; an identical image configuration; and
-#     identical content hashes of /app/dist, /app/bff, /app/node_modules and /app/package.json.
+#     identical content hashes of /app/dist, /app/bff, /app/node_modules and /app/package.json
+#     (pnpm's prunedAt and lastValidatedTimestamp install timestamps are blanked first).
 #     Image IDs are printed for the record; byte-identical layers are not required. Nothing is
 #     pushed. The labels record how the image was built; the bootstrap SPA's behaviour at a
 #     revision is proven by `pnpm test:e2e:oidc` (AC11), not by this script.
@@ -83,20 +84,24 @@ verify_local() {
     for path in /app/dist /app/bff /app/node_modules /app/package.json; do
       docker cp "$name-$n:$path" - | tar -x -C "$tmp/fs-$n"
     done
+    # pnpm records install-time timestamps in two bookkeeping files; blank only those fields.
+    [ ! -f "$tmp/fs-$n/node_modules/.modules.yaml" ] || sed -i -E 's/^prunedAt: .*/prunedAt: normalised/' "$tmp/fs-$n/node_modules/.modules.yaml"
+    [ ! -f "$tmp/fs-$n/node_modules/.pnpm-workspace-state-v1.json" ] \
+      || sed -i -E 's/"lastValidatedTimestamp": *[0-9]+/"lastValidatedTimestamp":0/' "$tmp/fs-$n/node_modules/.pnpm-workspace-state-v1.json"
     (cd "$tmp/fs-$n" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum) >"$tmp/content-$n.sha256"
   done
   for required in ./dist/index.html ./bff/server.mjs ./package.json; do
     grep -q "  $required\$" "$tmp/content-1.sha256" || fail "build 1 lacks $required"
   done
   cmp -s "$tmp/content-1.sha256" "$tmp/content-2.sha256" \
-    || { diff "$tmp/content-1.sha256" "$tmp/content-2.sha256" | head -20 >&2; fail "/app/dist or /app/bff differs between the two builds"; }
+    || { diff "$tmp/content-1.sha256" "$tmp/content-2.sha256" | head -20 >&2; fail "/app content differs between the two builds"; }
   local id1 id2
   id1=$(docker image inspect --format '{{.Id}}' "$tag:1")
   id2=$(docker image inspect --format '{{.Id}}' "$tag:2")
   echo "revision=$revision"
   echo "labels: auth-mode=$EXPECTED_AUTH_MODE data-mode=$EXPECTED_DATA_MODE revision=$revision (both builds)"
   echo "image configuration: identical"
-  echo "content: $(wc -l <"$tmp/content-1.sha256") files under /app/{dist,bff,node_modules,package.json}, identical sha256 ($(sha256sum "$tmp/content-1.sha256" | cut -c1-64))"
+  echo "content: $(wc -l <"$tmp/content-1.sha256") files under /app/{dist,bff,node_modules,package.json}, identical sha256 after blanking pnpm install timestamps ($(sha256sum "$tmp/content-1.sha256" | cut -c1-64))"
   echo "image ids: $id1 $id2 ($([ "$id1" = "$id2" ] && echo identical || echo differ, not gated))"
   echo "PASS (linux/amd64)"
 }

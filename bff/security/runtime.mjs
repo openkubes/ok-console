@@ -225,6 +225,19 @@ const parseLocalAccounts = (content, mode, environmentId) => {
   return document.accounts
 }
 
+// A session is honoured only while the server-side mode still enables the method that issued it,
+// so a rollback to bootstrap-only rejects earlier OIDC and break-glass sessions even if the
+// session epoch is left unchanged. Epoch rotation remains the operator's defense in depth.
+export const allowedSessionMethods = (env, ordinaryLocal) => {
+  const localAccessMode = env.OK_CONSOLE_LOCAL_ACCESS_MODE ?? 'disabled'
+  return [
+    ...(env.OK_CONSOLE_OIDC_ENABLED === 'true' ? ['OIDC'] : []),
+    ...(localAccessMode === 'breakglass' ? ['BreakGlass'] : []),
+    ...(localAccessMode === 'bootstrap' ? ['Bootstrap'] : []),
+    ...(ordinaryLocal ? ['Local'] : []),
+  ]
+}
+
 export const createSessionRuntime = async ({
   env = process.env,
   fileReader = readFile,
@@ -299,12 +312,14 @@ export const createSessionRuntime = async ({
   pool.on?.('error', error => {
     console.error(JSON.stringify({ event: 'PG_POOL_FAILED', errorCode: startErrorCode(classifyPgError(error)) }))
   })
+  const allowedMethods = allowedSessionMethods(env, ordinaryLocal)
   let sessionStore
   try {
     sessionStore = storeFactory({
       pool,
       codec,
       deploymentEpoch,
+      allowedMethods,
       authorizationRevisionValidator: async (input) => {
         if (ordinaryLocal && input.revision.startsWith('local:')) {
           return identity.current({ subject: { id: input.subjectId, method: 'Local' }, authorizationRevision: input.revision })

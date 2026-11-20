@@ -17,7 +17,7 @@
 #     allowlist.json        ok170-gates ownership-inventory allowlist; must name exactly the
 #                           admitted objects
 #     expected-images.json  ok170-gates runtime-identity input
-#   <new-output-dir> must not exist; rendered artifacts, snapshots, gate results and
+#   <new-output-dir> must not exist; rendered artifacts (from the repository), gate results and
 #   SHA256SUMS are written there.
 # The kube context is fixed to ok-shared-admin@ok-shared and cannot be overridden.
 # Environment: OK170_FIELD_MANAGER (default ok-172-live).
@@ -46,7 +46,12 @@ actual_context="$(kubectl config current-context)"
 [[ "${actual_context}" == "${expected_context}" ]] \
   || stop "current context '${actual_context}' is not '${expected_context}'"
 
-mkdir -p "${out}/artifacts" "${out}/snapshots" "${out}/results"
+mkdir -p "${out}/artifacts" "${out}/results"
+# Raw live objects (env, ConfigMap data, managedFields) stay in a private scratch directory that is
+# removed on exit; only rendered repository content and value-free gate results reach the output.
+snapshots="$(mktemp -d)"
+chmod 700 "${snapshots}"
+trap 'rm -rf -- "${snapshots}"' EXIT
 kubectl kustomize "${overlay}" >"${out}/rendered.yaml"
 if grep -Eq 'REPLACE_|\.invalid|sha256:0{64}|image: .+:latest' "${out}/rendered.yaml"; then
   stop "rendered overlay contains an unresolved or mutable deployment identity"
@@ -126,22 +131,22 @@ gate ownership-inventory --allowlist "${package}/allowlist.json" >"${out}/result
 
 while IFS= read -r id; do
   base="${id/\//-}"
-  "${kube[@]}" get "${id}" --show-managed-fields -o json >"${out}/snapshots/${base}.json" \
+  "${kube[@]}" get "${id}" --show-managed-fields -o json >"${snapshots}/${base}.json" \
     || stop "cannot read live ${id}"
-  gate admission --snapshot "${out}/snapshots/${base}.json" --artifact "${out}/artifacts/${base}.json" \
+  gate admission --snapshot "${snapshots}/${base}.json" --artifact "${out}/artifacts/${base}.json" \
     --manager "${manager}" --delta "${out}/artifacts/${base}.delta.json" >"${out}/results/admission-${base}.txt" \
     || stop "non-forced server-side dry-run of ${id} is not exactly the approved delta for ${manager}"
 done <"${out}/admitted.txt"
 
 n=0
 while IFS= read -r ref; do
-  "${kube[@]}" get "${ref}" -o json >"${out}/snapshots/unadmitted-$(printf '%03d' "${n}").json" \
+  "${kube[@]}" get "${ref}" -o json >"${snapshots}/unadmitted-$(printf '%03d' "${n}").json" \
     || stop "cannot read live ${ref}"
   n=$((n + 1))
 done <"${out}/not-admitted.txt"
-python3 - "${out}" <<'PY' >"${out}/results/unadmitted-drift.txt" || stop "an object the gates do not admit differs from the live cluster (see results/unadmitted-drift.txt)"
+python3 - "${out}" "${snapshots}" <<'PY' >"${out}/results/unadmitted-drift.txt" || stop "an object the gates do not admit differs from the live cluster (see results/unadmitted-drift.txt)"
 import json, os, sys
-out = sys.argv[1]
+out, snapshots = sys.argv[1], sys.argv[2]
 MISSING = object()
 def diff(want, have, path, found):
     if isinstance(want, dict):
@@ -165,7 +170,7 @@ names = sorted(os.listdir(os.path.join(out, "unadmitted")))
 refs = open(os.path.join(out, "not-admitted.txt")).read().split()
 for name, ref in zip(names, refs):
     want = json.load(open(os.path.join(out, "unadmitted", name)))
-    have = json.load(open(os.path.join(out, "snapshots", f"unadmitted-{name}")))
+    have = json.load(open(os.path.join(snapshots, f"unadmitted-{name}")))
     found = []
     if have.get("kind") != want["kind"] or have.get("metadata", {}).get("name") != want["metadata"]["name"]:
         found.append("identity")

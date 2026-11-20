@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -144,17 +144,19 @@ function run(s = scenario(), opts: Opts = {}) {
   writeFileSync(join(dir, 'replies.json'), JSON.stringify(s.replies))
   const log = join(dir, 'calls.jsonl'); writeFileSync(log, '')
   const out = join(dir, 'out'); if (opts.outExists) mkdirSync(out)
+  const tmp = join(dir, 'tmp'); mkdirSync(tmp)
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, CALL_LOG: log, REPLIES: join(dir, 'replies.json'),
-    ...opts.env }
+    TMPDIR: tmp, ...opts.env }
   const r = spawnSync('bash', [script, ...(opts.args ? opts.args(pkg, out) : [pkg, out])], { encoding: 'utf8', env, timeout: 55_000 })
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { args?: string[]; violation?: string[]; kuberc?: string })
-  return { ...r, calls, out }
+  return { ...r, calls, out, tmp }
 }
 function stopped(r: ReturnType<typeof run>, reason: string) {
   expect(r.status).not.toBe(0)
   expect(r.stdout).not.toContain('VERIFY_READONLY=PASS')
   expect(r.stderr).toContain(`STOP: ${reason}`)
   expect(r.calls.filter((c) => c.violation)).toEqual([])
+  expect(readdirSync(r.tmp)).toEqual([])
 }
 
 describe('verify-ok-shared-readonly.sh', () => {
@@ -175,7 +177,10 @@ describe('verify-ok-shared-readonly.sh', () => {
     expect(readFileSync(join(r.out, 'not-admitted.txt'), 'utf8')).toBe(`${netpol}\n`)
     expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toBe(`${netpol}\tunchanged\n`)
     const sums = readFileSync(join(r.out, 'SHA256SUMS'), 'utf8')
-    for (const f of ['rendered.yaml', 'artifacts/Deployment-ok-console.json', 'snapshots/ConfigMap-observations.json', 'results/runtime-identity.txt']) expect(sums).toContain(`./${f}`)
+    expect(existsSync(join(r.out, 'snapshots'))).toBe(false)
+    expect(sums).not.toMatch(/snapshot|unadmitted-0/)
+    expect(readdirSync(r.tmp)).toEqual([])
+    for (const f of ['rendered.yaml', 'artifacts/Deployment-ok-console.json', 'results/unadmitted-drift.txt', 'results/runtime-identity.txt']) expect(sums).toContain(`./${f}`)
   })
 
   it.each([[{}], [{ OK_CONSOLE_KUBE_CONTEXT: 'kind-other' }]])('refuses another current kube context before reading anything else (env %j)', (env) => {

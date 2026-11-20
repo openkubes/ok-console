@@ -20,7 +20,14 @@ const ACTIVE_PREDICATE = `
   AND deployment_epoch = $2
   AND revoked_at IS NULL
   AND idle_expires_at > clock_timestamp()
-  AND absolute_expires_at > clock_timestamp()`
+  AND absolute_expires_at > clock_timestamp()
+  AND authentication_method = ANY($3::text[])`
+
+export const SESSION_METHODS = Object.freeze(['OIDC', 'BreakGlass', 'Bootstrap', 'Local'])
+
+const validAllowedMethods = (value) => Array.isArray(value)
+  && value.every(method => SESSION_METHODS.includes(method))
+  && new Set(value).size === value.length
 
 export class SessionStoreError extends Error {
   constructor(code, cause) {
@@ -71,6 +78,10 @@ const rowContext = (row, codec) => {
     }
     throw error
   }
+  if (payload.subject.method !== row.authentication_method) {
+    console.error(JSON.stringify({ event: 'SESSION_METHOD_REJECTED', cause: 'METHOD_MISMATCH' }))
+    throw new SessionStoreError('INVALID_ROW')
+  }
   return {
     apiVersion: SECURITY_CONTRACT_VERSION,
     kind: 'AuthorizationContext',
@@ -111,16 +122,19 @@ export class PostgresSessionStore {
     pool,
     codec,
     deploymentEpoch,
+    allowedMethods,
     authorizationRevisionValidator = null,
     contextValidator = null,
     random = randomBytes,
     lifetimesFor = sessionLifetimesFor,
     now = () => new Date(),
   }) {
-    if (!pool?.query || !pool?.connect || !codec?.encrypt || !codec?.decrypt || !validSessionString(deploymentEpoch)) {
+    if (!pool?.query || !pool?.connect || !codec?.encrypt || !codec?.decrypt || !validSessionString(deploymentEpoch)
+      || !validAllowedMethods(allowedMethods)) {
       throw new SessionStoreError('INVALID_CONFIGURATION')
     }
     this.pool = pool
+    this.allowedMethods = Object.freeze([...allowedMethods])
     this.codec = codec
     this.deploymentEpoch = deploymentEpoch
     this.authorizationRevisionValidator = authorizationRevisionValidator
@@ -177,10 +191,10 @@ export class PostgresSessionStore {
             absolute_expires_at
           )
           WHERE ${ACTIVE_PREDICATE}
-          RETURNING *`, [digest, this.deploymentEpoch])
+          RETURNING *`, [digest, this.deploymentEpoch, this.allowedMethods])
         : await pgQuery(this.pool, `
           SELECT * FROM ok_console.sessions
-          WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch])
+          WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch, this.allowedMethods])
       const context = result.rows[0] ? rowContext(result.rows[0], this.codec) : null
       if (context && this.contextValidator && !await this.contextValidator(context)) return null
       return context
@@ -226,7 +240,7 @@ export class PostgresSessionStore {
         SELECT *, clock_timestamp() AS database_now
         FROM ok_console.sessions
         WHERE ${ACTIVE_PREDICATE}
-        FOR UPDATE`, [digestSessionValue(oldSessionId), this.deploymentEpoch])
+        FOR UPDATE`, [digestSessionValue(oldSessionId), this.deploymentEpoch, this.allowedMethods])
       const row = selected.rows[0]
       if (!row) {
         await pgQuery(client, 'ROLLBACK')

@@ -39,7 +39,7 @@ it.each([
   const pool = new Pool({ host: '127.0.0.1', port: 1, connectionTimeoutMillis: 500 })
   cleanup.push(() => pool.end())
   const pepper = Buffer.alloc(32), pgThrottle = new PostgresLocalAccessThrottle({ pool, pepper }), pgAudit = new PostgresLocalAccessAudit({ pool, pepper })
-  const pgStore = new PostgresSessionStore({ pool, codec: new SessionEnvelopeCodec({ primaryKeyId: 'key', keys: { key: Buffer.alloc(32) } }), deploymentEpoch: 'epoch' })
+  const pgStore = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec: new SessionEnvelopeCodec({ primaryKeyId: 'key', keys: { key: Buffer.alloc(32) } }), deploymentEpoch: 'epoch' })
   const store = new InMemorySessionStore()
   const revoke = vi.spyOn(store, 'revoke')
   if (!['compensation-ok', 'compensation-absent'].includes(mode)) revoke.mockImplementation(() => pool.query('SELECT 1'))

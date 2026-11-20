@@ -10,7 +10,7 @@ const pool = new pg.Pool({ connectionString, max: 1,
   options: mode === 'idle' ? '-c idle_in_transaction_session_timeout=200' : undefined })
 const admin = new pg.Pool({ connectionString })
 const codec = new SessionEnvelopeCodec({ primaryKeyId: 'key', keys: { key: Buffer.alloc(32, 11) } })
-const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'r4' })
+const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'r4' })
 let fired = false
 try {
   const issued = await store.create({

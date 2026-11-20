@@ -48,7 +48,7 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     const r = render(root)
     expect(r.stderr).toBe(''); expect(r.status).toBe(0)
     expect(readFileSync(join(r.out, 'bootstrap.yaml'), 'utf8')).toContain(`image: ${other}`)
-    expect(readFileSync(join(r.out, 'post-recovery.yaml'), 'utf8')).toContain(`image: ${e['ok-shared-breakglass'].image}`)
+    expect(readFileSync(join(r.out, 'post-recovery.yaml'), 'utf8')).toContain(`image: ${bg(e).image}`)
     const evidence = JSON.parse(readFileSync(join(r.out, 'recovery-evidence.json'), 'utf8'))
     expect(evidence.imageDigests).toEqual({
       bootstrap: { overlay: 'ok-shared-bootstrap-recovery', image: other, platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 } },
@@ -85,25 +85,28 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     refused(root, 'names ok-shared-breakglass more than once')
   })
 
-  const mutate = (f: (e: Record<string, any>) => unknown) => { const e: Record<string, any> = original(); const r = f(e); return r === undefined ? e : r }
+  type Entry = { image: unknown; platforms: Record<string, string>; tag?: string }
+  type Digests = Record<string, Entry | null>
+  const bg = (e: Digests) => e['ok-shared-breakglass'] as Entry
+  const mutate = (f: (e: Digests) => unknown) => { const e: Digests = original(); const r = f(e); return r === undefined ? e : r }
   it.each([
     ['null', () => null, 'must name exactly'],
     ['an array', () => [], 'must name exactly'],
     ['a missing overlay', mutate((e) => { delete e['ok-shared-bootstrap-recovery'] }), 'must name exactly'],
     ['a foreign overlay', mutate((e) => { e['ok-shared-live'] = e['ok-shared-breakglass'] }), 'must name exactly'],
     ['a null entry', mutate((e) => { e['ok-shared-breakglass'] = null }), 'entry must have exactly image and platforms'],
-    ['an extra entry key', mutate((e) => { e['ok-shared-breakglass'].tag = 'rc.30' }), 'entry must have exactly image and platforms'],
-    ['a missing platforms key', mutate((e) => { delete e['ok-shared-breakglass'].platforms }), 'entry must have exactly image and platforms'],
-    ['a tag instead of a digest', mutate((e) => { e['ok-shared-breakglass'].image = 'ghcr.io/openkubes/ok-console:rc.30' }), 'image must be'],
-    ['a truncated digest', mutate((e) => { e['ok-shared-breakglass'].image = 'ghcr.io/openkubes/ok-console@sha256:705edc32' }), 'image must be'],
-    ['another repository', mutate((e) => { e['ok-shared-breakglass'].image = e['ok-shared-breakglass'].image.replace('openkubes/ok-console', 'other/ok-console') }), 'image must be'],
-    ['a wrong-type image', mutate((e) => { e['ok-shared-breakglass'].image = 7 }), 'image must be'],
-    ['platforms without linux/amd64', mutate((e) => { e['ok-shared-breakglass'].platforms = { 'linux/arm64': arm64 } }), 'platforms must map'],
-    ['an empty platforms map', mutate((e) => { e['ok-shared-breakglass'].platforms = {} }), 'platforms must map'],
-    ['an unknown platform', mutate((e) => { e['ok-shared-breakglass'].platforms['windows/amd64'] = index('3') }), 'platforms must map'],
-    ['a malformed child digest', mutate((e) => { e['ok-shared-breakglass'].platforms['linux/amd64'] = 'sha256:349eca29' }), 'platforms must map'],
-    ['a child equal to the index', mutate((e) => { e['ok-shared-breakglass'].platforms['linux/amd64'] = e['ok-shared-breakglass'].image.split('@')[1] }), 'platforms must map'],
-    ['duplicate child digests', mutate((e) => { e['ok-shared-breakglass'].platforms['linux/arm64'] = e['ok-shared-breakglass'].platforms['linux/amd64'] }), 'platforms must map'],
+    ['an extra entry key', mutate((e) => { bg(e).tag = 'rc.30' }), 'entry must have exactly image and platforms'],
+    ['a missing platforms key', mutate((e) => { delete (bg(e) as Partial<Entry>).platforms }), 'entry must have exactly image and platforms'],
+    ['a tag instead of a digest', mutate((e) => { bg(e).image = 'ghcr.io/openkubes/ok-console:rc.30' }), 'image must be'],
+    ['a truncated digest', mutate((e) => { bg(e).image = 'ghcr.io/openkubes/ok-console@sha256:705edc32' }), 'image must be'],
+    ['another repository', mutate((e) => { bg(e).image = (bg(e).image as string).replace('openkubes/ok-console', 'other/ok-console') }), 'image must be'],
+    ['a wrong-type image', mutate((e) => { bg(e).image = 7 }), 'image must be'],
+    ['platforms without linux/amd64', mutate((e) => { bg(e).platforms = { 'linux/arm64': arm64 } }), 'platforms must map'],
+    ['an empty platforms map', mutate((e) => { bg(e).platforms = {} }), 'platforms must map'],
+    ['an unknown platform', mutate((e) => { bg(e).platforms['windows/amd64'] = index('3') }), 'platforms must map'],
+    ['a malformed child digest', mutate((e) => { bg(e).platforms['linux/amd64'] = 'sha256:349eca29' }), 'platforms must map'],
+    ['a child equal to the index', mutate((e) => { bg(e).platforms['linux/amd64'] = (bg(e).image as string).split('@')[1] }), 'platforms must map'],
+    ['duplicate child digests', mutate((e) => { bg(e).platforms['linux/arm64'] = bg(e).platforms['linux/amd64'] }), 'platforms must map'],
   ])('refuses a file with %s', (_label, body, reason) => {
     const root = tree(); write(root, typeof body === 'function' ? (body as () => unknown)() : body)
     refused(root, reason)

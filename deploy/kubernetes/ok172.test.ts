@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 const execute = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 const overlay = './overlays/ok-shared-live'
+type RenderedObject = { kind: string; metadata: { name: string }; spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value?: string }> }> } } } }
 
 const yamlToJson = (manifest: string) => JSON.parse(execFileSync('python3', [
   '-c',
@@ -29,9 +30,9 @@ describe('OK-172 ok-shared live slice invariants', () => {
 
   it.each(['ok-shared-live', 'ok-shared-breakglass', 'ok-shared-bootstrap-recovery'])('%s tracks the live dry-run runner URL as the last Console env entry (D6)', async (name) => {
     const { stdout } = await execute('kubectl', ['kustomize', new URL(`./overlays/${name}`, import.meta.url).pathname])
-    const console = (yamlToJson(stdout) as Array<Record<string, any>>).filter((o) => o.kind === 'Deployment' && o.metadata.name === 'ok-console')
+    const console = (yamlToJson(stdout) as RenderedObject[]).filter((o) => o.kind === 'Deployment' && o.metadata.name === 'ok-console')
     expect(console).toHaveLength(1)
-    const env = console[0].spec.template.spec.containers[0].env as Array<{ name: string; value?: string }>
+    const env = console[0].spec.template.spec.containers[0].env
     expect(env.filter((e) => e.name === 'OK_CONSOLE_DRY_RUN_URL')).toEqual([
       { name: 'OK_CONSOLE_DRY_RUN_URL', value: 'http://ok147-console-dry-run.openkubes-system.svc.cluster.local:8790' }])
     expect(env.at(-1)?.name).toBe('OK_CONSOLE_DRY_RUN_URL')

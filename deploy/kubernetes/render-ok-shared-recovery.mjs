@@ -112,9 +112,10 @@ const prepare = async (name, replacements) => {
   const isConsole = (reference) => typeof reference === 'string'
     && (reference === repository || reference.startsWith(`${repository}@`) || reference.startsWith(`${repository}:`))
   const consoleImages = containers.map((c) => c?.image).filter(isConsole)
+  // The app container is identified by name, so a sidecar carrying the approved image cannot stand in for it.
   const app = objects.filter((o) => o?.kind === 'Deployment' && o.metadata?.name === 'ok-console')
-    .flatMap((o) => (o.spec?.template?.spec?.containers ?? []).map((c) => c?.image).filter(isConsole))
-  if (app.length !== 1 || consoleImages.some((reference) => reference !== image)) {
+    .flatMap((o) => (o.spec?.template?.spec?.containers ?? []).filter((c) => c?.name === 'console'))
+  if (app.length !== 1 || app[0].image !== image || consoleImages.some((reference) => reference !== image)) {
     throw new Error(`Rendered ${overlay} does not run exactly the image in ${expectedDigestsPath}.`)
   }
   return manifest

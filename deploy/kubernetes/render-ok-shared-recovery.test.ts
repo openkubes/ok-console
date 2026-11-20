@@ -61,6 +61,27 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     refused(root, `overlays/${overlay}/kustomization.yaml does not pin the image in ${file}`)
   })
 
+  it('refuses a foreign app image even when a sidecar carries the expected Console image', () => {
+    const root = tree()
+    const p = join(root, 'deploy/kubernetes/overlays/ok-shared-bootstrap-recovery/kustomization.yaml'); const before = readFileSync(p, 'utf8')
+    const after = before.replace(/^patches:\n/m, `patches:
+  - target:
+      kind: Deployment
+      name: ok-console
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: ghcr.io/other/console@${index('9')}
+      - op: add
+        path: /spec/template/spec/containers/-
+        value:
+          name: sidecar
+          image: ghcr.io/openkubes/ok-console
+`)
+    expect(after).not.toBe(before); writeFileSync(p, after)
+    refused(root, 'Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image')
+  })
+
   it('refuses a render that also carries a Console image with another digest', () => {
     const root = tree()
     const env = wrapKubectl(root, `"$REAL" "$@" || exit $?

@@ -49,7 +49,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
   beforeEach(async () => {
     await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions, ok_console.local_access_throttle, ok_console.local_access_audit')
     codec = new SessionEnvelopeCodec({ primaryKeyId: 'key-1', keys: { 'key-1': keyOne } })
-    store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test-1' })
   })
 
   afterAll(async () => {
@@ -98,7 +98,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   it('propagates revocation across independent BFF store instances', async () => {
     const issued = await issue()
-    const secondReplica = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    const secondReplica = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test-1' })
 
     expect(await secondReplica.resolve(issued.cookie, { touch: false })).not.toBeNull()
     expect(await store.revoke(issued.cookie, 'ADMIN_REVOKE')).toBe(true)
@@ -140,6 +140,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   it('uses database-time expiry and bounded terminal-row cleanup', async () => {
     const shortStore = new PostgresSessionStore({
+      allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'],
       pool,
       codec,
       deploymentEpoch: 'epoch-test-1',
@@ -155,15 +156,88 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   it('invalidates sessions across deployment epochs', async () => {
     const issued = await issue()
-    const recoveredDeployment = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-after-restore' })
+    const recoveredDeployment = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-after-restore' })
 
     expect(await recoveredDeployment.resolve(issued.cookie, { touch: false })).toBeNull()
+  })
+
+  const storeFor = (allowedMethods: string[]) => new PostgresSessionStore({
+    allowedMethods,
+    pool,
+    codec,
+    deploymentEpoch: 'epoch-test-1',
+    authorizationRevisionValidator: async () => true,
+  })
+  const issueAs = (method: string) => store.create({
+    subject: { ...subject, id: `subject-${method}`, method },
+    scope,
+    permissions,
+    authorizationRevision: 'mapping-revision-7',
+  })
+  const request = { permission: 'platform.read', environmentId: scope.environmentId }
+
+  it('fails closed for an OIDC session after a switch to bootstrap-only without an epoch change', async () => {
+    const issued = await issue()
+    const bootstrapOnly = storeFor(['Bootstrap'])
+    const before = await pool.query('SELECT idle_expires_at FROM ok_console.sessions')
+    await waitForDatabaseTimePast('SELECT issued_at FROM ok_console.sessions')
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(await bootstrapOnly.resolve(issued.cookie, { touch: false })).toBeNull()
+    expect(await bootstrapOnly.resolve(issued.cookie)).toBeNull()
+    expect(await bootstrapOnly.authorize(issued.cookie, request)).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
+    expect(await bootstrapOnly.rotate(issued.cookie)).toBeNull()
+    errors.mockRestore()
+
+    const after = await pool.query('SELECT idle_expires_at, revoked_at, deployment_epoch FROM ok_console.sessions')
+    expect(after.rowCount).toBe(1)
+    expect(after.rows[0].idle_expires_at.getTime()).toBe(before.rows[0].idle_expires_at.getTime())
+    expect(after.rows[0].revoked_at).toBeNull()
+    expect(after.rows[0].deployment_epoch).toBe('epoch-test-1')
+    // Positive control: the same row still resolves where OIDC is enabled, so only the method rule rejected it.
+    expect(await storeFor(['OIDC', 'BreakGlass']).resolve(issued.cookie, { touch: false })).toMatchObject({ subject: { method: 'OIDC' } })
+  })
+
+  it.each([
+    ['bootstrap-only', ['Bootstrap'], { Bootstrap: true, BreakGlass: false, OIDC: false }],
+    ['OIDC with break-glass', ['OIDC', 'BreakGlass'], { Bootstrap: false, BreakGlass: true, OIDC: true }],
+    ['OIDC only', ['OIDC'], { Bootstrap: false, BreakGlass: false, OIDC: true }],
+  ])('honours exactly the methods the %s mode enables', async (_mode, allowed, expected) => {
+    const modeStore = storeFor(allowed)
+    for (const [method, accepted] of Object.entries(expected)) {
+      const issued = await issueAs(method)
+      const resolved = await modeStore.resolve(issued.cookie, { touch: false })
+      const decision = await modeStore.authorize(issued.cookie, request)
+      if (accepted) {
+        expect(resolved, method).toMatchObject({ subject: { method } })
+        expect(decision.allowed, method).toBe(true)
+        const rotated = await modeStore.rotate(issued.cookie)
+        expect(rotated, method).not.toBeNull()
+        expect(await modeStore.resolve(rotated!.cookie, { touch: false }), method).toMatchObject({ subject: { method } })
+      } else {
+        expect(resolved, method).toBeNull()
+        expect(decision, method).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
+        expect(await modeStore.rotate(issued.cookie), method).toBeNull()
+      }
+    }
+  })
+
+  it('rejects a row whose recorded method disagrees with its encrypted context', async () => {
+    const issued = await issue()
+    await pool.query("UPDATE ok_console.sessions SET authentication_method = 'Bootstrap'")
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(storeFor(['Bootstrap']).resolve(issued.cookie, { touch: false }))
+      .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'INVALID_ROW' })
+    expect(errors.mock.calls.map(call => JSON.parse(String(call[0])))).toContainEqual({ event: 'SESSION_METHOD_REJECTED', cause: 'METHOD_MISMATCH' })
+    expect(JSON.stringify(errors.mock.calls)).not.toContain(subject.subjectId)
+    errors.mockRestore()
   })
 
   it('fails closed when the envelope key is unavailable', async () => {
     const issued = await issue()
     const wrongCodec = new SessionEnvelopeCodec({ primaryKeyId: 'key-2', keys: { 'key-2': keyTwo } })
-    const wrongKeyStore = new PostgresSessionStore({ pool, codec: wrongCodec, deploymentEpoch: 'epoch-test-1' })
+    const wrongKeyStore = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec: wrongCodec, deploymentEpoch: 'epoch-test-1' })
 
     await expect(wrongKeyStore.resolve(issued.cookie, { touch: false })).rejects.toMatchObject<Partial<SessionStoreError>>({
       code: 'DECRYPT_FAILED',
@@ -180,6 +254,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       environmentId: scope.environmentId,
     })
     const staleStore = new PostgresSessionStore({
+      allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'],
       pool,
       codec,
       deploymentEpoch: 'epoch-test-1',
@@ -190,6 +265,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       environmentId: scope.environmentId,
     })
     const currentStore = new PostgresSessionStore({
+      allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'],
       pool,
       codec,
       deploymentEpoch: 'epoch-test-1',

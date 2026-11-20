@@ -25,8 +25,11 @@ const serve = async (page: Page, kind: 'item' | 'envelope' | 'deployment' | 'fre
     await route.fulfill({ status: response.status, contentType: 'application/json', body: await response.text() })
   })
   return { evidence, cluster, close: async () => {
-    server.closeAllConnections()
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    try { if (!page.isClosed()) await page.unrouteAll({ behavior: 'ignoreErrors' }) }
+    finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
   } }
 }
 

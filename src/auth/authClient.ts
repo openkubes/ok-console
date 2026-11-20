@@ -50,6 +50,7 @@ const sessionProjection = (value: unknown): PrototypeSession => {
   }
   return {
     method: subject.method === 'OIDC' ? 'oidc' : 'local',
+    ...(subject.method === 'Bootstrap' || subject.method === 'BreakGlass' ? { exceptionalMethod: subject.method } : {}),
     identity: subject.displayName,
     source: subject.method === 'OIDC' ? subject.provider : subject.method === 'Local' ? 'Ordinary local account' : `${subject.method} local account`,
     assurance: subject.assurance.join(' · '),

@@ -4,6 +4,8 @@ import { PoweredBy, useBrandTerms, useBranding } from '../branding/BrandingConte
 
 export type PrototypeSession = {
   method: 'oidc' | 'local'
+  /** Server-side exceptional-access method of a restored BFF session; absent for prototype and ordinary local sessions. */
+  exceptionalMethod?: 'Bootstrap' | 'BreakGlass'
   identity: string
   source: string
   assurance: string

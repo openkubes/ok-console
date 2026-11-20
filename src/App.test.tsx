@@ -112,6 +112,19 @@ describe('OpenKubes Console', () => {
     expect(screen.queryByRole('button', { name: /Use a local account/i })).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['bootstrap', 'BreakGlass', 'Break-glass session'],
+    ['breakglass', 'Bootstrap', 'Bootstrap session'],
+  ] as const)('labels a restored session by its server-side method, not the %s build mode', async (mode, exceptionalMethod, label) => {
+    const auth: ConsoleAuthClient = {
+      mode,
+      restoreSession: vi.fn(async () => ({ method: 'local' as const, exceptionalMethod, identity: 'Recovery Admin', source: `${exceptionalMethod} local account`, assurance: 'Password · ExceptionalAccess', expiresIn: 'Until 10:00' })),
+      startOidc: vi.fn(), authenticateLocal: vi.fn(), logout: vi.fn(async () => {}),
+    }
+    render(<App auth={auth}/>)
+    expect(await screen.findByText(label)).toBeInTheDocument()
+  })
+
   it('hands the live sign-in action to the fixed OIDC client port', async () => {
     const auth: ConsoleAuthClient = {
       mode: 'oidc', restoreSession: vi.fn(async () => null), startOidc: vi.fn(), authenticateLocal: vi.fn(), logout: vi.fn(async () => {}),

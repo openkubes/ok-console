@@ -19,6 +19,14 @@ const localSession = {
 }
 
 describe('Console auth client', () => {
+  it('carries the server-side exceptional-access method so the UI labels Bootstrap and Break-glass sessions apart', async () => {
+    const bootstrap = { ...localSession, data: { ...localSession.data, subject: { ...localSession.data.subject, method: 'Bootstrap' } } }
+    for (const [body, expected] of [[localSession, 'BreakGlass'], [bootstrap, 'Bootstrap'], [session, undefined]] as const) {
+      const auth = createConsoleAuthClient({ mode: 'breakglass', fetcher: vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })) })
+      expect((await auth.restoreSession())?.exceptionalMethod).toBe(expected)
+    }
+  })
+
   it('restores only a compatible public Console session', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(session), { status: 200 }))
     const auth = createConsoleAuthClient({ mode: 'oidc', fetcher })

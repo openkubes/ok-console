@@ -20,13 +20,13 @@ Caps exclude review time; at a cap or failed exit, stop and report. One review r
 
 | Step | Content | Cap | Exit | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Build C1/P1 once after the C1 PRs merge; record digests and provenance | 20 min | Digests and source revisions recorded | Open: C1 PRs merged; publication needs separate approval (decision 1 of OK-170 comment 15421) |
+| 1 | Build C1, C1-R and P1 once after the prerequisite PRs merge; record digests, platform-child digests and provenance | 20 min | Digests and source revisions recorded for all three | Open: C1 PRs merged; publication needs separate approval (decision 1 of OK-170 comment 15421) |
 | 2 | Gate-tooling proof on disposable kind v1.34.1: ownership, permission, admission with real server-side apply adopt/release/conflict and one expected rejection | 60 min | Each check passes its positive and fails its invalid-input case | Done off-cluster, #145 |
 | 3 | Disposable C1/P1 drills: invalid trust, producer down, stale and partial data, rollback and forward, cleanup | 70 min | Baseline/fault/recovery per drill; stale items Unknown end to end | Done off-cluster on locally built C1/P1; results below |
-| 4 | ok-shared: read-only inventory, deploy C1/P1, image ID check, four authenticated read-only views, mutations confirmed disabled; fail-closed abort withdraws the producer route and Console serves its bounded 503 | 180 min live | Image IDs match; views show producer data with observation times | Needs Arash's explicit approval |
+| 4 | ok-shared: read-only inventory, deploy C1/P1, image ID check, four authenticated read-only views, mutations confirmed disabled; fail-closed abort withdraws the producer route and Console serves its bounded 503 | Within the ≤2 h window | Image IDs match; views show producer data with observation times | Needs Arash's explicit approval of the hashed package and a dated window |
 | 5 | One evidence record and disposition (GO / REVISE / STOP) | 30 min | Disposition recorded | Open |
 
-Total: 6 h = 2.5 h off-cluster + 3 h live + 0.5 h record. Step 4 uses existing sign-in configuration, with no OIDC change. Event features stay in C1 only while they need no live change.
+Live work fits the proposed UTC window of at most 2 h ([procedure](maintenance-procedure.md)); building, the disposable rehearsal and the G0 package come first and are not part of the window. Window and owners are deferred (decision 6 of OK-170 comment 15421).
 
 ## Step 3 drill results
 

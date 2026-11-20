@@ -80,6 +80,10 @@ function runtime(imageID = `ghcr.io/openkubes/ok-console@${child}`) {
   return { d, rs, pod }
 }
 
+const netpol = 'NetworkPolicy.v1.networking.k8s.io/ok-console-live-egress'
+const livePolicy = () => ({ apiVersion: 'networking.k8s.io/v1', kind: 'NetworkPolicy',
+  metadata: { name: 'ok-console-live-egress', namespace: ns, uid: 'n-1', resourceVersion: '12', labels: { extra: 'server-side' } },
+  spec: { podSelector: {}, policyTypes: ['Egress'] } })
 function scenario() {
   const before = deployment(oldImage)
   const after = structuredClone(before); after.spec.template.spec.containers[0].image = newImage
@@ -95,6 +99,7 @@ function scenario() {
     'get deployment ok-console -o json': json(r.d),
     'get replicasets -l app.kubernetes.io/name=ok-console -o json': json({ kind: 'List', items: [r.rs] }),
     'get pods -l app.kubernetes.io/name=ok-console -o json': json({ kind: 'List', items: [r.pod] }),
+    [`get ${netpol} -o json`]: json(livePolicy()),
   }
   const pkg = {
     deltas: { 'Deployment/ok-console': [{ path: imagePath, value: newImage }] } as Record<string, unknown>,
@@ -125,7 +130,7 @@ if (!r) { process.stderr.write('unexpected call'); process.exit(98); }
 process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? ''); process.exitCode = r.status ?? 0;
 `
 
-type Opts = { outExists?: boolean; contextOverride?: string; raw?: Record<string, string>; symlink?: string; env?: Record<string, string>; args?: (pkg: string, out: string) => string[] }
+type Opts = { outExists?: boolean; raw?: Record<string, string>; symlink?: string; env?: Record<string, string>; args?: (pkg: string, out: string) => string[] }
 function run(s = scenario(), opts: Opts = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ok170-ro-')); dirs.push(dir)
   writeFileSync(join(dir, 'kubectl'), fake); chmodSync(join(dir, 'kubectl'), 0o755)
@@ -139,7 +144,7 @@ function run(s = scenario(), opts: Opts = {}) {
   const log = join(dir, 'calls.jsonl'); writeFileSync(log, '')
   const out = join(dir, 'out'); if (opts.outExists) mkdirSync(out)
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, CALL_LOG: log, REPLIES: join(dir, 'replies.json'),
-    OK_CONSOLE_KUBE_CONTEXT: opts.contextOverride ?? context, ...opts.env }
+    ...opts.env }
   const r = spawnSync('bash', [script, ...(opts.args ? opts.args(pkg, out) : [pkg, out])], { encoding: 'utf8', env, timeout: 55_000 })
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { args?: string[]; violation?: string[]; kuberc?: string })
   return { ...r, calls, out }
@@ -166,15 +171,61 @@ describe('verify-ok-shared-readonly.sh', () => {
     }
     expect(r.calls.filter((c) => c.violation)).toEqual([])
     expect(r.calls.every((c) => c.kuberc === 'false')).toBe(true)
-    expect(readFileSync(join(r.out, 'not-admitted.txt'), 'utf8')).toBe('NetworkPolicy/ok-console-live-egress\n')
+    expect(readFileSync(join(r.out, 'not-admitted.txt'), 'utf8')).toBe(`${netpol}\n`)
+    expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toBe(`${netpol}\tunchanged\n`)
     const sums = readFileSync(join(r.out, 'SHA256SUMS'), 'utf8')
     for (const f of ['rendered.yaml', 'artifacts/Deployment-ok-console.json', 'snapshots/ConfigMap-observations.json', 'results/runtime-identity.txt']) expect(sums).toContain(`./${f}`)
   })
 
-  it('refuses the wrong kube context before reading anything else', () => {
-    const r = run(scenario(), { contextOverride: 'kind-other' })
-    stopped(r, "current context 'ok-shared-admin@ok-shared' is not 'kind-other'")
+  it.each([[{}], [{ OK_CONSOLE_KUBE_CONTEXT: 'kind-other' }]])('refuses another current kube context before reading anything else (env %j)', (env) => {
+    const s = scenario(); s.replies['config current-context'] = { stdout: 'kind-other\n' }
+    const r = run(s, { env })
+    stopped(r, "current context 'kind-other' is not 'ok-shared-admin@ok-shared'")
     expect(r.calls.map((c) => c.args)).toEqual([['config', 'current-context']])
+  })
+
+  it('stops when allowlist.json leaves an admitted object out of the ownership inventory', () => {
+    const s = scenario(); delete s.pkg.allowlist['Deployment/ok-console']
+    const r = run(s); stopped(r, 'render split failed'); expect(r.stderr).toContain('allowlist.json must name exactly the admitted objects'); noApply(r)
+  })
+
+  it('stops when an object the gates do not admit differs from the live cluster', () => {
+    const s = scenario(); s.replies.kustomize = { stdout: rendered().replace('spec: {}', 'spec:\n  policyTypes:\n  - Ingress') }
+    const r = run(s)
+    stopped(r, 'an object the gates do not admit differs from the live cluster')
+    expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toBe(`${netpol}\tDRIFT /spec/policyTypes/0\n`)
+  })
+
+  it.each([
+    ['a missing field', (o: Record<string, any>) => { delete o.spec.policyTypes }, '/spec/policyTypes'],
+    ['a different label', (o: Record<string, any>) => { o.metadata.labels.extra = 'other' }, '/metadata/labels/extra'],
+    ['a shorter list', (o: Record<string, any>) => { o.spec.policyTypes = [] }, '/spec/policyTypes'],
+    ['a wrong type', (o: Record<string, any>) => { o.spec.podSelector = 'all' }, '/spec/podSelector'],
+  ])('reports drift on %s', (_label, change, path) => {
+    const s = scenario()
+    s.replies.kustomize = { stdout: rendered().replace('spec: {}', 'metadata:\n  labels:\n    extra: server-side\nspec:\n  podSelector: {}\n  policyTypes:\n  - Egress').replace(/(name: ok-console-live-egress\n  namespace: [a-z-]+\n)metadata:\n/, '$1') }
+    const live = livePolicy(); change(live); s.replies[`get ${netpol} -o json`] = json(live)
+    const r = run(s)
+    stopped(r, 'an object the gates do not admit differs from the live cluster')
+    expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toContain(`DRIFT ${path}`)
+  })
+
+  it('reports drift when the live value equals the rendered one only after type coercion (true vs 1)', () => {
+    const s = scenario(); s.replies.kustomize = { stdout: rendered().replace('spec: {}', 'spec:\n  x: true') }
+    const live = livePolicy() as Record<string, any>; live.spec.x = 1; s.replies[`get ${netpol} -o json`] = json(live)
+    const r = run(s)
+    stopped(r, 'an object the gates do not admit differs from the live cluster')
+    expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toBe(`${netpol}\tDRIFT /spec/x\n`)
+  })
+
+  it('stops when an object the gates do not admit is absent from the live cluster', () => {
+    const s = scenario(); s.replies[`get ${netpol} -o json`] = { status: 1, stderr: 'Error from server (NotFound)' }
+    stopped(run(s), `cannot read live ${netpol}`)
+  })
+
+  it('stops on a non-admitted object outside the namespace', () => {
+    const s = scenario(); s.replies.kustomize = { stdout: rendered().replace(`name: ok-console-live-egress\n  namespace: ${ns}`, 'name: ok-console-live-egress\n  namespace: kube-system') }
+    const r = run(s); stopped(r, 'render split failed'); expect(r.stderr).toContain('non-admitted object outside the namespace'); noApply(r)
   })
 
   it('refuses an existing output directory before any kubectl call', () => {

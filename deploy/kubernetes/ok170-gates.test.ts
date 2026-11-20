@@ -671,12 +671,12 @@ describe('runtime-identity: running Pods match the approved image through their 
       status: { phase: 'Running', conditions: [{ type: 'Ready', status: 'True' }], containerStatuses: [{ name: 'ok-console', ready: true, imageID: id }] } })
     return { deployment, sets: [current, old], pods: [pod(0), pod(1)] }
   }
-  function replies(w: ReturnType<typeof world>) {
-    return [version, reply(w.deployment), reply({ kind: 'List', items: w.sets }), reply({ kind: 'List', items: w.pods })]
+  function replies(w: ReturnType<typeof world>, later = w.deployment) {
+    return [version, reply(w.deployment), reply({ kind: 'List', items: w.sets }), reply({ kind: 'List', items: w.pods }), reply(later)]
   }
-  function go(w = world(), exp: unknown = expected) {
+  function go(w = world(), exp: unknown = expected, later?: unknown) {
     const h = harness()
-    return h.run('runtime-identity', ['--expected', h.input(exp)], replies(w))
+    return h.run('runtime-identity', ['--expected', h.input(exp)], replies(w, later as typeof w.deployment))
   }
 
   it('passes when every Pod runs an approved index or platform-child digest from the current revision', () => {
@@ -686,7 +686,7 @@ describe('runtime-identity: running Pods match the approved image through their 
     expect(r.calls.map((c) => c.args.slice(5))).toEqual([
       ['version', '--client', '-o', 'json'], ['get', 'deployment', 'ok-console', '-o', 'json'],
       ['get', 'replicasets', '-l', 'app.kubernetes.io/name=ok-console', '-o', 'json'],
-      ['get', 'pods', '-l', 'app.kubernetes.io/name=ok-console', '-o', 'json']])
+      ['get', 'pods', '-l', 'app.kubernetes.io/name=ok-console', '-o', 'json'], ['get', 'deployment', 'ok-console', '-o', 'json']])
     expect(r.calls.some((c) => c.args.includes('apply'))).toBe(false)
   })
 
@@ -713,6 +713,22 @@ describe('runtime-identity: running Pods match the approved image through their 
   it.each(cases)('fails closed on %s', (_label, reason, mutate) => {
     const w = world(); mutate(w)
     failed(go(w), reason)
+  })
+
+  it('accepts a docker-pullable transport prefix on an approved imageID', () => {
+    const w = world(); w.pods[0].status.containerStatuses[0].imageID = `docker-pullable://ghcr.io/openkubes/ok-console@${index}`
+    passed(go(w), 'runtime-identity')
+  })
+
+  it.each<[string, (d: Record<string, any>) => void]>([
+    ['a new generation', (d) => { d.metadata.generation = 5 }],
+    ['a new revision', (d) => { d.metadata.annotations['deployment.kubernetes.io/revision'] = '8' }],
+    ['a new template image', (d) => { d.spec.template = template(`ghcr.io/openkubes/ok-console@${child}`) }],
+    ['an unavailable replica', (d) => { d.status.unavailableReplicas = 1 }],
+    ['a recreated Deployment', (d) => { d.metadata.uid = 'd-2' }],
+  ])('fails closed when a rollout starts during verification: %s', (_label, change) => {
+    const w = world(); const later = structuredClone(w.deployment) as Record<string, any>; change(later)
+    failed(go(w, expected, later), 'deployment changed during verification')
   })
 
   it.each([

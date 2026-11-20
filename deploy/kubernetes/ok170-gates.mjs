@@ -382,10 +382,17 @@ function main() {
         check(p.status?.phase === 'Running' && (p.status?.conditions ?? []).some((c) => c?.type === 'Ready' && c?.status === 'True'), 'Pod not ready');
         const s = (p.status?.containerStatuses ?? []).filter((c) => c?.name === e.container);
         check(s.length === 1 && s[0].ready === true, 'app container not ready');
-        const m = pinned.exec(s[0].imageID ?? '');
+        // Docker-shim runtimes report docker-pullable://<repo>@<digest>; containerd reports <repo>@<digest>.
+        const m = pinned.exec(typeof s[0].imageID === 'string' ? s[0].imageID.replace(/^docker-pullable:\/\//, '') : '');
         check(m && m[1] === pinned.exec(e.image)[1] && e.imageIDs.includes(m[2]), 'running imageID not approved');
         reported.push(m[2]);
       }
+      // A rollout that started after the first read would leave the old revision looking healthy: reread and compare.
+      const again = object(run(['get', 'deployment', deploymentName, '-o', 'json']));
+      const pin = (x) => JSON.stringify([x.metadata?.uid, x.metadata?.generation, revision(x), x.status?.observedGeneration,
+        ...['replicas', 'updatedReplicas', 'readyReplicas', 'availableReplicas', 'unavailableReplicas'].map((k) => x.status?.[k] ?? null),
+        app(x.spec?.template?.spec, e.container).image]);
+      check(pin(again) === pin(d), 'deployment changed during verification');
       result.push({ object: id, revision: revision(d), replicaSet: current[0].metadata.name, imageIDs: [...new Set(reported)].sort(), verdict: 'pass' });
     }
   } else {

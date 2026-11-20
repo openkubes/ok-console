@@ -36,6 +36,7 @@ for f in deltas.json allowlist.json expected-images.json; do
 done
 [[ ! -e "${out}" ]] || stop "output directory already exists"
 [[ "${manager}" =~ ^[a-z0-9][a-z0-9.-]*$ ]] || stop "invalid field manager"
+python3 -c 'import yaml' 2>/dev/null || stop "python3 with PyYAML is required"
 
 export KUBECTL_KUBERC=false
 actual_context="$(kubectl config current-context)"
@@ -52,9 +53,9 @@ if grep -Eq '^kind: Secret$' "${out}/rendered.yaml"; then
 fi
 
 # Split the render into one JSON artifact per object the gates admit, and list the rest.
-python3 - "${out}" "${package}/deltas.json" "${namespace}" <<'PY' || stop "render split failed"
+python3 - "${out}" "${package}/deltas.json" "${namespace}" "${package}/expected-images.json" <<'PY' || stop "render split failed"
 import json, os, re, sys, yaml
-out, deltas_path, namespace = sys.argv[1:4]
+out, deltas_path, namespace, expected_path = sys.argv[1:5]
 admitted = {"Deployment", "Service", "ConfigMap", "Ingress"}
 with open(os.path.join(out, "rendered.yaml")) as f:
     objects = [o for o in yaml.safe_load_all(f) if o is not None]
@@ -83,6 +84,13 @@ for o in objects:
 unknown = sorted(set(deltas) - set(ids))
 if unknown:
     sys.exit("deltas.json names objects the overlay does not render")
+with open(expected_path) as f:
+    expected = json.load(f)
+if not isinstance(expected, dict):
+    sys.exit("expected-images.json must be an object")
+deployments = {i for i in ids if i.startswith("Deployment/")}
+if set(expected) != deployments:
+    sys.exit("expected-images.json must name exactly the rendered Deployments")
 with open(os.path.join(out, "admitted.txt"), "w") as f:
     f.write("".join(f"{i}\n" for i in ids))
 with open(os.path.join(out, "not-admitted.txt"), "w") as f:

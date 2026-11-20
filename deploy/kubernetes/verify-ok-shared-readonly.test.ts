@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -125,19 +125,22 @@ if (!r) { process.stderr.write('unexpected call'); process.exit(98); }
 process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? ''); process.exitCode = r.status ?? 0;
 `
 
-function run(s = scenario(), opts: { outExists?: boolean; contextOverride?: string } = {}) {
+type Opts = { outExists?: boolean; contextOverride?: string; raw?: Record<string, string>; symlink?: string; env?: Record<string, string>; args?: (pkg: string, out: string) => string[] }
+function run(s = scenario(), opts: Opts = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ok170-ro-')); dirs.push(dir)
   writeFileSync(join(dir, 'kubectl'), fake); chmodSync(join(dir, 'kubectl'), 0o755)
   const pkg = join(dir, 'package'); mkdirSync(pkg)
   writeFileSync(join(pkg, 'deltas.json'), JSON.stringify(s.pkg.deltas))
   writeFileSync(join(pkg, 'allowlist.json'), JSON.stringify(s.pkg.allowlist))
   writeFileSync(join(pkg, 'expected-images.json'), JSON.stringify(s.pkg.expected))
+  for (const [f, v] of Object.entries(opts.raw ?? {})) writeFileSync(join(pkg, f), v)
+  if (opts.symlink) { writeFileSync(join(dir, 'elsewhere.json'), readFileSync(join(pkg, opts.symlink))); rmSync(join(pkg, opts.symlink)); symlinkSync(join(dir, 'elsewhere.json'), join(pkg, opts.symlink)) }
   writeFileSync(join(dir, 'replies.json'), JSON.stringify(s.replies))
   const log = join(dir, 'calls.jsonl'); writeFileSync(log, '')
   const out = join(dir, 'out'); if (opts.outExists) mkdirSync(out)
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, CALL_LOG: log, REPLIES: join(dir, 'replies.json'),
-    OK_CONSOLE_KUBE_CONTEXT: opts.contextOverride ?? context }
-  const r = spawnSync('bash', [script, pkg, out], { encoding: 'utf8', env, timeout: 55_000 })
+    OK_CONSOLE_KUBE_CONTEXT: opts.contextOverride ?? context, ...opts.env }
+  const r = spawnSync('bash', [script, ...(opts.args ? opts.args(pkg, out) : [pkg, out])], { encoding: 'utf8', env, timeout: 55_000 })
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { args?: string[]; violation?: string[]; kuberc?: string })
   return { ...r, calls, out }
 }
@@ -182,6 +185,8 @@ describe('verify-ok-shared-readonly.sh', () => {
 
   it.each([
     ['a Secret object', '---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: s\n', 'rendered overlay must not contain Secret values'],
+    ['an .invalid host', '---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: p\ndata:\n  x: https://console.example.invalid\n', 'rendered overlay contains an unresolved or mutable deployment identity'],
+    ['a zero digest', `---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: p\ndata:\n  x: sha256:${'0'.repeat(64)}\n`, 'rendered overlay contains an unresolved or mutable deployment identity'],
     ['a placeholder', '---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: p\ndata:\n  x: REPLACE_ME\n', 'rendered overlay contains an unresolved or mutable deployment identity'],
   ])('stops on a render with %s', (_label, extra, reason) => {
     const s = scenario(); s.replies.kustomize = { stdout: rendered(newImage, extra) }
@@ -240,6 +245,62 @@ describe('verify-ok-shared-readonly.sh', () => {
     const r = spawnSync('bash', [script, pkg, join(dir, 'out')], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } })
     expect(r.status).not.toBe(0); expect(r.stderr).toContain(`STOP: approved package is missing ${name}`)
     expect(existsSync(join(dir, 'out'))).toBe(false)
+  })
+
+  it('applies the same render lint as verify-ok-shared-live.sh', () => {
+    const lint = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8').match(/grep -E?q '[^']+'/g)
+    const live = lint('./verify-ok-shared-live.sh'); const ro = lint('./verify-ok-shared-readonly.sh')
+    expect(live).toEqual(["grep -Eq 'REPLACE_|\\.invalid|sha256:0{64}|image: .+:latest'", "grep -Eq '^kind: Secret$'"])
+    expect(ro).toEqual(live)
+  })
+
+  const noApply = (r: ReturnType<typeof run>) => expect(r.calls.filter((c) => c.args?.includes('apply'))).toEqual([])
+
+  it.each([
+    ['deltas.json', '[]', 'deltas.json must be an object'],
+    ['deltas.json', '{"Deployment/ok-console": ', 'JSONDecodeError'],
+    ['deltas.json', 'null', 'deltas.json must be an object'],
+    ['expected-images.json', '[]', 'expected-images.json must be an object'],
+    ['expected-images.json', 'null', 'expected-images.json must be an object'],
+    ['expected-images.json', '{}', 'expected-images.json must name exactly the rendered Deployments'],
+  ])('stops before any dry-run when %s is %s', (file, body, cause) => {
+    const r = run(scenario(), { raw: { [file]: body } })
+    stopped(r, 'render split failed'); expect(r.stderr).toContain(cause); noApply(r)
+    if (cause !== 'JSONDecodeError') expect(r.stderr).not.toContain('Traceback')
+  })
+
+  it('stops when expected-images.json names a Deployment the overlay does not render', () => {
+    const s = scenario(); s.pkg.expected['Deployment/ghost'] = s.pkg.expected['Deployment/ok-console']
+    const r = run(s); stopped(r, 'render split failed'); expect(r.stderr).toContain('expected-images.json must name exactly the rendered Deployments'); noApply(r)
+  })
+
+  it.each(['deltas.json', 'allowlist.json', 'expected-images.json'])('refuses a symlinked %s', (name) => {
+    const r = run(scenario(), { symlink: name })
+    stopped(r, `approved package is missing ${name}`); expect(r.calls).toEqual([])
+  })
+
+  it.each([
+    ['a duplicate object', 'duplicate rendered object', `---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: observations\n  namespace: ${ns}\ndata:\n  a: "1"\n`],
+    ['an object in a foreign namespace', 'rendered object outside the namespace', '---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\n  namespace: kube-system\n'],
+    ['a non-object document', 'invalid rendered object', '---\njust-a-string\n'],
+  ])('stops on a render with %s', (_label, cause, extra) => {
+    const s = scenario(); s.replies.kustomize = { stdout: rendered(newImage, extra) }
+    const r = run(s); stopped(r, 'render split failed'); expect(r.stderr).toContain(cause); expect(r.stderr).not.toContain('Traceback'); noApply(r)
+  })
+
+  it.each([['Bad Manager'], ['--force']])('refuses field manager %j before any kubectl call', (m) => {
+    const r = run(scenario(), { env: { OK170_FIELD_MANAGER: m } })
+    stopped(r, 'invalid field manager'); expect(r.calls).toEqual([])
+  })
+
+  it('refuses extra arguments before any kubectl call', () => {
+    const r = run(scenario(), { args: (pkg, out) => [pkg, out, '--apply'] })
+    stopped(r, 'usage: verify-ok-shared-readonly.sh'); expect(r.calls).toEqual([])
+  })
+
+  it('stops when python3 cannot load PyYAML', () => {
+    const r = run(scenario(), { env: { PYTHONPATH: join(fileURLToPath(new URL('.', import.meta.url)), 'fixtures', 'ok170-no-yaml') } })
+    stopped(r, 'python3 with PyYAML is required'); expect(r.calls).toEqual([])
   })
 
   it('contains no code path that applies for real or forces conflicts', () => {

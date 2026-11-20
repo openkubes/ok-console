@@ -703,6 +703,8 @@ describe('runtime-identity: running Pods match the approved image through their 
     ['an extra Pod', 'unexpected Pod count', (w) => { w.pods.push(structuredClone(w.pods[0])) }],
     ['an old ReplicaSet still holding Pods', 'old ReplicaSet has Pods', (w) => { w.sets[1].status.replicas = 1 }],
     ['a ReplicaSet owned by another Deployment', 'foreign ReplicaSet', (w) => { w.sets[1].metadata.ownerReferences[0].uid = 'd-2' }],
+    ['two ReplicaSets at the Deployment revision', 'current ReplicaSet mismatch', (w) => { const twin = structuredClone(w.sets[0]); twin.metadata.name = 'ok-console-twin'; twin.metadata.uid = 'rs-7b'; w.sets.push(twin) }],
+    ['a current ReplicaSet template on another image', 'current ReplicaSet mismatch', (w) => { w.sets[0].spec.template = template(`ghcr.io/openkubes/ok-console@${child}`) }],
     ['no ReplicaSet at the Deployment revision', 'current ReplicaSet mismatch', (w) => { w.deployment.metadata.annotations['deployment.kubernetes.io/revision'] = '8' }],
     ['a rollout the controller has not observed', 'deployment rollout not observed', (w) => { w.deployment.status.observedGeneration = 3 }],
     ['an incomplete rollout', 'deployment rollout incomplete', (w) => { w.deployment.status.updatedReplicas = 1 }],

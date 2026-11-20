@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -62,6 +62,9 @@ describe('OK-173 bootstrap recovery image reference', () => {
     ['the sentinel with a release tag', { ...unreleased, releaseTag: 'dev-v0.1.0-rc.9' }],
     ['a released digest without revision or tag', { ...unreleased, digest: released.digest }],
     ['an unreleased record in the break-glass mode', { ...unreleased, authMode: 'breakglass' }],
+    ['an array digest', { ...released, digest: [released.digest] }],
+    ['an array revision', { ...released, revision: [released.revision] }],
+    ['an array release tag', { ...released, releaseTag: [released.releaseTag] }],
   ])('rejects %s', (_case, provenance) => {
     const checked = checkRecoveryProvenance(provenance)
     expect(checked.state).toBe('invalid')
@@ -148,6 +151,55 @@ describe('OK-173 recovery image verifier', () => {
       await expect(exec('bash', [script, ...args]), args.join(' ')).rejects.toMatchObject({ code: 2 })
     }
   })
+
+  // Registry mode against stubbed docker/gh: the release check reads only their output.
+  const labels = { 'io.openkubes.console.auth-mode': 'bootstrap', 'io.openkubes.console.data-mode': 'bff', 'org.opencontainers.image.revision': released.revision }
+  const metadataFor = (overrides = {}) => ({ 'linux/amd64': { config: { Labels: labels } }, 'linux/arm64': { config: { Labels: { ...labels, ...overrides } } } })
+  const attestationFor = ({ ref = `refs/tags/${released.releaseTag}`, commit = released.revision, repository = 'https://github.com/openkubes/ok-console' } = {}) => [{
+    verificationResult: { statement: { predicate: { buildDefinition: {
+      externalParameters: { workflow: { repository, ref } },
+      resolvedDependencies: [{ uri: 'git+https://github.com/openkubes/ok-console', digest: { gitCommit: commit } }],
+    } } } },
+  }]
+  const reference = `${released.image}@${released.digest}`
+  const runRegistry = async ({ metadata = metadataFor() as unknown, attestation = attestationFor() as unknown, ghFails = false, ref = reference } = {}) => {
+    const dir = await mkdtemp(join(tmpdir(), 'ok-console-registry-verify-'))
+    try {
+      await mkdir(join(dir, 'bin'))
+      await writeFile(join(dir, 'metadata.json'), JSON.stringify(metadata))
+      await writeFile(join(dir, 'attestation.json'), JSON.stringify(attestation))
+      await writeFile(join(dir, 'provenance.json'), JSON.stringify(released))
+      await writeFile(join(dir, 'bin', 'docker'), `#!/bin/sh\ncat '${join(dir, 'metadata.json')}'\n`)
+      await writeFile(join(dir, 'bin', 'gh'), ghFails ? '#!/bin/sh\nexit 1\n' : `#!/bin/sh\ncat '${join(dir, 'attestation.json')}'\n`)
+      await chmod(join(dir, 'bin', 'docker'), 0o755)
+      await chmod(join(dir, 'bin', 'gh'), 0o755)
+      return await exec('bash', [script, 'registry', ref, join(dir, 'provenance.json')], { env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}` } })
+        .then((r) => ({ code: 0, out: r.stdout + r.stderr }), (e) => ({ code: e.code, out: String(e.stdout) + String(e.stderr) }))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('passes registry mode only for an attested bootstrap release matching the record', async () => {
+    expect(await runRegistry()).toMatchObject({ code: 0, out: expect.stringContaining('PASS: linux/amd64, linux/arm64') })
+  }, 60_000)
+
+  it.each([
+    ['a break-glass platform', { metadata: metadataFor({ 'io.openkubes.console.auth-mode': 'breakglass' }) }, 'auth-mode label is breakglass'],
+    ['a fixture data mode', { metadata: metadataFor({ 'io.openkubes.console.data-mode': 'fixture' }) }, 'data-mode label'],
+    ['another revision label', { metadata: metadataFor({ 'org.opencontainers.image.revision': 'd'.repeat(40) }) }, 'revision label does not match'],
+    ['no platform configuration', { metadata: {} }, 'no image configuration found'],
+    ['an attestation for another tag', { attestation: attestationFor({ ref: 'refs/tags/dev-breakglass-v0.1.0-rc.3' }) }, 'no attestation binds'],
+    ['an attestation for another commit', { attestation: attestationFor({ commit: 'd'.repeat(40) }) }, 'no attestation binds'],
+    ['an attestation from another repository', { attestation: attestationFor({ repository: 'https://github.com/example/ok-console' }) }, 'no attestation binds'],
+    ['no attestation', { attestation: [] }, 'no attestation binds'],
+    ['a failed attestation verification', { ghFails: true }, 'no valid publish-dev-image build-provenance attestation'],
+    ['a reference to another digest', { ref: `${released.image}@sha256:${'cd'.repeat(32)}` }, 'does not match the provenance'],
+  ])('fails registry mode for %s', async (_case, options, message) => {
+    const result = await runRegistry(options)
+    expect(result.code).toBe(1)
+    expect(result.out).toContain(message)
+  }, 60_000)
 
   it('asserts the bootstrap label, never pushes and never tags for a registry', async () => {
     const source = await read('./verify-recovery-image.sh')

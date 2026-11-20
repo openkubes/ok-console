@@ -89,18 +89,23 @@ verify_local() {
     [ ! -f "$tmp/fs-$n/node_modules/.pnpm-workspace-state-v1.json" ] \
       || sed -i -E 's/"lastValidatedTimestamp": *[0-9]+/"lastValidatedTimestamp":0/' "$tmp/fs-$n/node_modules/.pnpm-workspace-state-v1.json"
     (cd "$tmp/fs-$n" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0r sha256sum) >"$tmp/content-$n.sha256"
+    # Symlink targets, file types and modes too: pnpm resolves dependencies through symlinks.
+    (cd "$tmp/fs-$n" && find . -printf '%y %m %p -> %l\n' | LC_ALL=C sort) >"$tmp/tree-$n.txt"
   done
   for required in ./dist/index.html ./bff/server.mjs ./package.json; do
     grep -q "  $required\$" "$tmp/content-1.sha256" || fail "build 1 lacks $required"
   done
   cmp -s "$tmp/content-1.sha256" "$tmp/content-2.sha256" \
-    || { diff "$tmp/content-1.sha256" "$tmp/content-2.sha256" | head -20 >&2; fail "/app content differs between the two builds"; }
+    || { { diff "$tmp/content-1.sha256" "$tmp/content-2.sha256" | head -20 >&2; } || true; fail "/app content differs between the two builds"; }
+  cmp -s "$tmp/tree-1.txt" "$tmp/tree-2.txt" \
+    || { { diff "$tmp/tree-1.txt" "$tmp/tree-2.txt" | head -20 >&2; } || true; fail "/app file types, modes or symlink targets differ between the two builds"; }
   local id1 id2
   id1=$(docker image inspect --format '{{.Id}}' "$tag:1")
   id2=$(docker image inspect --format '{{.Id}}' "$tag:2")
   echo "revision=$revision"
   echo "labels: auth-mode=$EXPECTED_AUTH_MODE data-mode=$EXPECTED_DATA_MODE revision=$revision (both builds)"
   echo "image configuration: identical"
+  echo "tree: $(wc -l <"$tmp/tree-1.txt") entries, identical types, modes and symlink targets"
   echo "content: $(wc -l <"$tmp/content-1.sha256") files under /app/{dist,bff,node_modules,package.json}, identical sha256 after blanking pnpm install timestamps ($(sha256sum "$tmp/content-1.sha256" | cut -c1-64))"
   echo "image ids: $id1 $id2 ($([ "$id1" = "$id2" ] && echo identical || echo differ, not gated))"
   echo "PASS (linux/amd64)"

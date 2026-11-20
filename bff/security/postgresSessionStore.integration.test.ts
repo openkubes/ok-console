@@ -234,6 +234,39 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     expect(await bootstrapOnly.rotate(issued.cookie)).toBeNull()
   })
 
+  it('revokes a mismatched row when rotation is the first read', async () => {
+    const issued = await issue()
+    await pool.query("UPDATE ok_console.sessions SET authentication_method = 'Bootstrap'")
+    const bootstrapOnly = storeFor(['Bootstrap'])
+
+    await expect(bootstrapOnly.rotate(issued.cookie)).rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'SESSION_METHOD_MISMATCH' })
+    const row = await pool.query('SELECT revoked_at, revoke_reason FROM ok_console.sessions')
+    expect(row.rowCount).toBe(1)
+    expect(row.rows[0].revoked_at).not.toBeNull()
+    expect(row.rows[0].revoke_reason).toBe('METHOD_MISMATCH')
+  })
+
+  it.each([
+    ['Local disabled', [], 'Local', false],
+    ['Local enabled', ['Local'], 'Local', true],
+    ['an empty set', [], 'OIDC', false],
+  ])('applies %s to a restored %s session', async (_case, allowed, method, accepted) => {
+    const issued = await issueAs(method as string)
+    const modeStore = storeFor(allowed as string[])
+    const resolved = await modeStore.resolve(issued.cookie, { touch: false })
+    const decision = await modeStore.authorize(issued.cookie, request)
+    const rotated = await modeStore.rotate(issued.cookie)
+    if (accepted) {
+      expect(resolved).toMatchObject({ subject: { method } })
+      expect(decision.allowed).toBe(true)
+      expect(rotated).not.toBeNull()
+    } else {
+      expect(resolved).toBeNull()
+      expect(decision).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
+      expect(rotated).toBeNull()
+    }
+  })
+
   it('refuses to issue a session for a method the mode does not enable', async () => {
     await expect(storeFor(['Bootstrap']).create({ subject, scope, permissions, authorizationRevision: 'mapping-revision-7' }))
       .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'INVALID_INPUT' })

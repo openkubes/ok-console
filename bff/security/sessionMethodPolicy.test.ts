@@ -26,6 +26,11 @@ describe('session store allowed methods', () => {
     ['a lower-case method', ['oidc']],
     ['a duplicate', ['OIDC', 'OIDC']],
     ['an object', { OIDC: true }],
+    // eslint-disable-next-line no-sparse-arrays
+    ['a sparse array', [, 'OIDC']],
+    ['a null entry', [null, 'OIDC']],
+    ['an undefined entry', [undefined]],
+    ['a valid and an unknown method', ['OIDC', 'SAML']],
   ])('rejects %s as configuration', (_case, allowedMethods) => {
     const { pool } = recordingPool()
     expect(() => new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch', allowedMethods } as never))

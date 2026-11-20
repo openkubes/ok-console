@@ -26,7 +26,7 @@ const ACTIVE_PREDICATE = `
 export const SESSION_METHODS = Object.freeze(['OIDC', 'BreakGlass', 'Bootstrap', 'Local'])
 
 const validAllowedMethods = (value) => Array.isArray(value)
-  && value.every(method => SESSION_METHODS.includes(method))
+  && Array.from(value).every(method => SESSION_METHODS.includes(method))
   && new Set(value).size === value.length
 
 export class SessionStoreError extends Error {
@@ -208,15 +208,17 @@ export class PostgresSessionStore {
     try {
       return rowContext(row, this.codec)
     } catch (error) {
-      if (error?.code === 'SESSION_METHOD_MISMATCH') {
-        await pgQuery(this.pool, `
-          UPDATE ok_console.sessions
-          SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
-              revoke_reason = COALESCE(revoke_reason, 'METHOD_MISMATCH')
-          WHERE session_digest = $1`, [row.session_digest])
-      }
+      if (error?.code === 'SESSION_METHOD_MISMATCH') await this.revokeMismatched(row.session_digest)
       throw error
     }
+  }
+
+  async revokeMismatched(digest) {
+    await pgQuery(this.pool, `
+      UPDATE ok_console.sessions
+      SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+          revoke_reason = COALESCE(revoke_reason, 'METHOD_MISMATCH')
+      WHERE session_digest = $1`, [digest])
   }
 
   async transaction(operation) {
@@ -250,6 +252,7 @@ export class PostgresSessionStore {
   async rotate(cookieHeader) {
     const oldSessionId = readSessionCookie(cookieHeader)
     if (!oldSessionId) return null
+    let mismatched = null
     return this.transaction(async client => {
       await pgQuery(client, 'BEGIN')
       const selected = await pgQuery(client, `
@@ -262,7 +265,13 @@ export class PostgresSessionStore {
         await pgQuery(client, 'ROLLBACK')
         return null
       }
-      const oldContext = rowContext(row, this.codec)
+      let oldContext
+      try {
+        oldContext = rowContext(row, this.codec)
+      } catch (error) {
+        if (error?.code === 'SESSION_METHOD_MISMATCH') mismatched = row.session_digest
+        throw error
+      }
       if (this.contextValidator && !await this.contextValidator(oldContext, client)) {
         await client.query('ROLLBACK')
         return null
@@ -312,6 +321,10 @@ export class PostgresSessionStore {
       }
       const remainingSeconds = Math.max(0, Math.floor((asDate(row.absolute_expires_at).getTime() - asDate(row.database_now).getTime()) / 1_000))
       return publicIssue({ values, context, maxAgeSeconds: remainingSeconds })
+    }).catch(async (error) => {
+      // The aborted transaction cannot revoke the row, so revoke it once the lock is released.
+      if (mismatched) await this.revokeMismatched(mismatched).catch(() => {})
+      throw error
     })
   }
 

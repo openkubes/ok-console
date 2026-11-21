@@ -4,8 +4,8 @@ This overlay is a reviewed candidate template; it is not the default live
 profile and must not be applied directly. It inherits the bounded read-only
 `ok-shared-live` resources and defines this Console authentication boundary:
 
-- immutable Console image `sha256:705edc32...e8ccbc` (development candidate
-  `dev-breakglass-v0.1.0-rc.3`);
+- immutable Console image pinned by digest in `kustomization.yaml` and recorded,
+  with its platform-child digests, in `../expected-digests.json`;
 - OIDC enabled with the `openkubes` Keycloak realm;
 - local access changed from Bootstrap to BreakGlass;
 - internal Keycloak CA mounted through `NODE_EXTRA_CA_CERTS`;

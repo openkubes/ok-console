@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 const execute = promisify(execFile)
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 const overlay = './overlays/ok-shared-live'
+type RenderedObject = { kind: string; metadata: { name: string }; spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value?: string }> }> } } } }
 
 const yamlToJson = (manifest: string) => JSON.parse(execFileSync('python3', [
   '-c',
@@ -25,6 +26,23 @@ describe('OK-172 ok-shared live slice invariants', () => {
     expect(stdout).toContain('value: breakglass')
     expect(stdout).toContain('value: "true"')
     expect(stdout).toContain('value: openkubes')
+  }, 15_000)
+
+  it.each(['ok-shared-live', 'ok-shared-breakglass', 'ok-shared-bootstrap-recovery'])('%s tracks the live dry-run runner URL as the last Console env entry and allows its egress (D6)', async (name) => {
+    const { stdout } = await execute('kubectl', ['kustomize', new URL(`./overlays/${name}`, import.meta.url).pathname])
+    const console = (yamlToJson(stdout) as RenderedObject[]).filter((o) => o.kind === 'Deployment' && o.metadata.name === 'ok-console')
+    expect(console).toHaveLength(1)
+    const env = console[0].spec.template.spec.containers[0].env
+    expect(env.filter((e) => e.name === 'OK_CONSOLE_DRY_RUN_URL')).toEqual([
+      { name: 'OK_CONSOLE_DRY_RUN_URL', value: 'http://ok147-console-dry-run.openkubes-system.svc.cluster.local:8790' }])
+    expect(env.at(-1)?.name).toBe('OK_CONSOLE_DRY_RUN_URL')
+    expect(env.some((e) => e.name === 'OK_CONSOLE_DEPLOYMENT_POLICY')).toBe(false)
+    const egress = (yamlToJson(stdout) as Array<{ kind: string; metadata: { name: string }; spec: { egress?: Array<{ to?: Array<Record<string, { matchLabels?: Record<string, string> }>>; ports?: Array<{ protocol: string; port: number }> }> } }>)
+      .filter((o) => o.kind === 'NetworkPolicy' && o.metadata.name === 'ok-console-live-egress')
+    expect(egress).toHaveLength(1)
+    expect(egress[0].spec.egress?.some((rule) => rule.to?.some((peer) => peer.namespaceSelector?.matchLabels?.['kubernetes.io/metadata.name'] === 'openkubes-system'
+      && peer.podSelector?.matchLabels?.['app.kubernetes.io/name'] === 'ok147-console-dry-run')
+      && rule.ports?.length === 1 && rule.ports[0].protocol === 'TCP' && rule.ports[0].port === 8790)).toBe(true)
   }, 15_000)
 
   it('grants the producer only its bounded hosting-cluster reads', async () => {

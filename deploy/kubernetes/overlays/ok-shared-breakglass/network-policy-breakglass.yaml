@@ -34,6 +34,16 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: openkubes-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ok147-console-dry-run
+      ports:
+        - protocol: TCP
+          port: 8790
+    - to:
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: ingress
           podSelector:
             matchLabels:

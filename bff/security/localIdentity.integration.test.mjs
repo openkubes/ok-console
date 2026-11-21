@@ -52,7 +52,7 @@ suite('OK-214 real PostgreSQL local identity', () => {
     GRANT SELECT,UPDATE ON ok_identity.state TO ok214_runtime;
     GRANT INSERT ON ok_identity.audit,ok_console.authentication_audit,ok_console.local_access_audit TO ok214_runtime;
     GRANT USAGE ON ALL SEQUENCES IN SCHEMA ok_console,ok_identity TO ok214_runtime;`)
-    sessions = new PostgresSessionStore({ pool, codec: new SessionEnvelopeCodec({ primaryKeyId: 'test-key', keys: { 'test-key': Buffer.alloc(32,1) } }), deploymentEpoch: 'test-epoch', authorizationRevisionValidator: async () => true })
+    sessions = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec: new SessionEnvelopeCodec({ primaryKeyId: 'test-key', keys: { 'test-key': Buffer.alloc(32,1) } }), deploymentEpoch: 'test-epoch', authorizationRevisionValidator: async () => true })
     identity = new LocalIdentity({ pool, sessions, throttle: new PostgresLocalAccessThrottle({ pool: ordinaryThrottlePool(pool), pepper: Buffer.alloc(32,2) }), scope, authorizationRevision: 'mapping-1', recoveryEnabled: true })
     sessions.contextValidator = (context, db) => identity.current(context, db)
     directory = await mkdtemp(`${tmpdir()}/ok214-`)
@@ -367,7 +367,7 @@ suite('OK-214 real PostgreSQL local identity', () => {
     await init(); const admin=await adminContext()
     const made=await identity.manage('create',admin,{username:'race-reader',password,consoleReader:true},'create')
     const issued=await identity.login({username:'race-reader',password},'login')
-    const other = new PostgresSessionStore({ pool,codec:sessions.codec,deploymentEpoch:'test-epoch',contextValidator:(c,db)=>identity.current(c,db) })
+    const other = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool,codec:sessions.codec,deploymentEpoch:'test-epoch',contextValidator:(c,db)=>identity.current(c,db) })
     const results=await Promise.allSettled([
       identity.login({username:'race-reader',password},'racing-login'),
       other.rotate(issued.cookie), identity.manage('disable',admin,{id:made.user.id},'disable'),

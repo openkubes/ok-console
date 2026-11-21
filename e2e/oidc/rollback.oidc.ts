@@ -56,16 +56,23 @@ test('AC11: rollback to bootstrap-only removes federation, rejects existing OIDC
   await context.close()
 })
 
-test('AC11: the session-epoch change in the rollback procedure is what rejects existing OIDC sessions', async ({ page }) => {
+test('AC11: bootstrap-only rejects existing OIDC sessions by method even without an epoch change; the epoch keeps them dead', async ({ page }) => {
   await restartBff('breakglass', { epoch: 'ok173-e2e-epoch-forward' })
   await expectFederation(page, true)
   const oidcCookies = await signedInCookies(page)
-  // Same epoch as the OIDC session: the procedure's epoch step deliberately omitted. The OIDC
-  // session survives; rollback then depends on that manual step (tracked as a follow-up).
+  expect((await sessionRequest(page, 'GET', { cookieHeader: oidcCookies })).status()).toBe(200)
+  // Same epoch as the OIDC session: the procedure's epoch step deliberately omitted. The BFF
+  // still rejects the session because bootstrap-only does not enable the OIDC method.
   await restartBff('bootstrap', { epoch: 'ok173-e2e-epoch-forward' })
   await expectFederation(page, false)
+  expect((await sessionRequest(page, 'GET', { cookieHeader: oidcCookies })).status()).toBe(401)
+  // Rolling forward on the same epoch honours the row again: this is why the procedure keeps
+  // the epoch change as defense in depth.
+  await restartBff('breakglass', { epoch: 'ok173-e2e-epoch-forward' })
+  await expectFederation(page, true)
   expect((await sessionRequest(page, 'GET', { cookieHeader: oidcCookies })).status()).toBe(200)
   await restartBff('bootstrap', { epoch: 'ok173-e2e-epoch-rollback-2' })
-  await expectFederation(page, false)
+  await restartBff('breakglass', { epoch: 'ok173-e2e-epoch-rollback-2' })
+  await expectFederation(page, true)
   expect((await sessionRequest(page, 'GET', { cookieHeader: oidcCookies })).status()).toBe(401)
 })

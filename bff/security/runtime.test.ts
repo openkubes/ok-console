@@ -239,6 +239,44 @@ describe('session runtime configuration', () => {
     expect(runtime.localAccessHandler).toEqual(expect.any(Function))
   })
 
+  const oidcEnv = {
+    OK_CONSOLE_OIDC_ENABLED: 'true',
+    OK_CONSOLE_OIDC_PROVIDER_ID: 'provider-1',
+    OK_CONSOLE_OIDC_ISSUER: 'https://identity.example/',
+    OK_CONSOLE_OIDC_CLIENT_ID: 'ok-console',
+    OK_CONSOLE_OIDC_CLIENT_SECRET_FILE: '/run/secrets/oidc-client-secret',
+    OK_CONSOLE_OIDC_SUBJECT_MAPPINGS_FILE: '/run/secrets/oidc-subjects',
+    OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper',
+  }
+  const localEnv = (mode: string) => ({ OK_CONSOLE_LOCAL_ACCESS_MODE: mode,
+    OK_CONSOLE_LOCAL_ACCESS_ACCOUNTS_FILE: '/run/secrets/local-accounts',
+    OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper' })
+  it.each([
+    ['bootstrap-only', localEnv('bootstrap'), ['Bootstrap']],
+    ['OIDC with break-glass', { ...oidcEnv, ...localEnv('breakglass') }, ['OIDC', 'BreakGlass']],
+    ['OIDC only', oidcEnv, ['OIDC']],
+    ['no sign-in method', {}, []],
+    ['ok-local identity', { OK_CONSOLE_LOCAL_IDENTITY_ENABLED: 'true', OK_CONSOLE_PROFILE: 'ok-local', NODE_ENV: 'development',
+      OK_CONSOLE_BFF_HOST: '127.0.0.1', OK_CONSOLE_BFF_PORT: '8787', OK_CONSOLE_ORIGIN: 'https://127.0.0.1:8787',
+      OK_CONSOLE_LOCAL_ACCESS_PEPPER_FILE: '/run/secrets/local-pepper' }, ['Local']],
+  ])('gives the session store only the methods the %s mode enables', async (_mode, extra, expected) => {
+    let storeConfiguration: Record<string, unknown> | undefined
+    await createSessionRuntime({
+      env: { ...baseEnv, ...extra },
+      fileReader, poolFactory: () => ({ end: async () => {} }),
+      storeFactory: (configuration) => {
+        storeConfiguration = configuration
+        return { authorize: vi.fn(), create: vi.fn(), revoke: vi.fn() }
+      },
+      transactionStoreFactory: () => ({ create: vi.fn(), consume: vi.fn() }),
+      oidcProtocolFactory: async () => ({ marker: 'protocol' }),
+      throttleFactory: () => ({ reserve: vi.fn(), success: vi.fn() }),
+      auditFactory: () => ({ record: vi.fn() }),
+      authenticationAuditFactory: () => ({ record: vi.fn() }),
+    })
+    expect(storeConfiguration?.allowedMethods).toEqual(expected)
+  })
+
   it('keeps bootstrap and breakglass mutually exclusive with OIDC', async () => {
     await expect(createSessionRuntime({
       env: { ...baseEnv, OK_CONSOLE_LOCAL_ACCESS_MODE: 'breakglass' }, fileReader,

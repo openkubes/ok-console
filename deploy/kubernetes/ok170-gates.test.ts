@@ -88,7 +88,7 @@ function passed(r: Run, mode: string) {
   for (const c of r.calls) {
     expect(c.args.slice(0, 5)).toEqual(['--context', 'kind-unit', '--namespace', 'openkubes-console', '--request-timeout=10s'])
     expect(c.kuberc).toBe('false')
-    if (c.args[5] === 'get' && c.args[6] !== 'serviceaccount') expect(c.args).toContain('--show-managed-fields')
+    if (c.args[5] === 'get' && c.args[6] !== 'serviceaccount' && mode !== 'runtime-identity') expect(c.args).toContain('--show-managed-fields')
     if (c.args[5] === 'apply') {
       for (const flag of ['--server-side', '--force-conflicts=false', '--show-managed-fields']) expect(c.args).toContain(flag)
       expect(c.args.slice(-4)).toEqual(['-f', '-', '-o', 'json'])
@@ -645,5 +645,104 @@ describe('round 4 discovery boundaries', () => {
     expect(run().status).not.toBe(0)
     writeFileSync(captured, fixture)
     expect(run().status).toBe(0)
+  })
+})
+
+describe('runtime-identity: running Pods match the approved image through their owning revision', () => {
+  const index = `sha256:${'a'.repeat(64)}`
+  const child = `sha256:${'b'.repeat(64)}`
+  const image = `ghcr.io/openkubes/ok-console@${index}`
+  const expected = { 'Deployment/ok-console': { container: 'ok-console', image, imageIDs: [index, child] } }
+  const labels = { 'app.kubernetes.io/name': 'ok-console' }
+  const template = (img = image) => ({ spec: { containers: [{ name: 'ok-console', image: img }] } })
+  function world() {
+    const deployment = { kind: 'Deployment', metadata: { name: 'ok-console', namespace: 'openkubes-console', uid: 'd-1', generation: 4,
+      annotations: { 'deployment.kubernetes.io/revision': '7' } },
+    spec: { replicas: 2, selector: { matchLabels: labels }, template: template() },
+    status: { observedGeneration: 4, replicas: 2, updatedReplicas: 2, readyReplicas: 2, availableReplicas: 2 } }
+    const owner = (kind: string, uid: string) => [{ kind, uid, controller: true }]
+    const current = { metadata: { name: 'ok-console-new', uid: 'rs-7', annotations: { 'deployment.kubernetes.io/revision': '7' }, ownerReferences: owner('Deployment', 'd-1') },
+      spec: { replicas: 2, template: template() }, status: { replicas: 2 } }
+    const old = { metadata: { name: 'ok-console-old', uid: 'rs-6', annotations: { 'deployment.kubernetes.io/revision': '6' }, ownerReferences: owner('Deployment', 'd-1') },
+      spec: { replicas: 0, template: template(`ghcr.io/openkubes/ok-console@sha256:${'c'.repeat(64)}`) }, status: { replicas: 0 } }
+    const pod = (n: number, id = `ghcr.io/openkubes/ok-console@${n ? child : index}`) => ({
+      metadata: { name: `ok-console-${n}`, ownerReferences: owner('ReplicaSet', 'rs-7') },
+      spec: template().spec,
+      status: { phase: 'Running', conditions: [{ type: 'Ready', status: 'True' }], containerStatuses: [{ name: 'ok-console', ready: true, imageID: id }] } })
+    return { deployment, sets: [current, old], pods: [pod(0), pod(1)] }
+  }
+  function replies(w: ReturnType<typeof world>, later = w.deployment) {
+    return [version, reply(w.deployment), reply({ kind: 'List', items: w.sets }), reply({ kind: 'List', items: w.pods }), reply(later)]
+  }
+  function go(w = world(), exp: unknown = expected, later?: unknown) {
+    const h = harness()
+    return h.run('runtime-identity', ['--expected', h.input(exp)], replies(w, later as typeof w.deployment))
+  }
+
+  it('passes when every Pod runs an approved index or platform-child digest from the current revision', () => {
+    const r = go()
+    passed(r, 'runtime-identity')
+    expect(JSON.parse(r.stdout.split('\n')[0])).toEqual([{ object: 'Deployment/ok-console', revision: '7', replicaSet: 'ok-console-new', imageIDs: [index, child], verdict: 'pass' }])
+    expect(r.calls.map((c) => c.args.slice(5))).toEqual([
+      ['version', '--client', '-o', 'json'], ['get', 'deployment', 'ok-console', '-o', 'json'],
+      ['get', 'replicasets', '-l', 'app.kubernetes.io/name=ok-console', '-o', 'json'],
+      ['get', 'pods', '-l', 'app.kubernetes.io/name=ok-console', '-o', 'json'], ['get', 'deployment', 'ok-console', '-o', 'json']])
+    expect(r.calls.some((c) => c.args.includes('apply'))).toBe(false)
+  })
+
+  const cases: Array<[string, string, (w: ReturnType<typeof world>) => void]> = [
+    ['an unapproved running digest', 'running imageID not approved', (w) => { w.pods[1].status.containerStatuses[0].imageID = `ghcr.io/openkubes/ok-console@sha256:${'c'.repeat(64)}` }],
+    ['an approved digest from another repository', 'running imageID not approved', (w) => { w.pods[0].status.containerStatuses[0].imageID = `ghcr.io/other/ok-console@${index}` }],
+    ['a tag-only imageID', 'running imageID not approved', (w) => { w.pods[0].status.containerStatuses[0].imageID = 'ghcr.io/openkubes/ok-console:latest' }],
+    ['a Pod spec image different from the approved one', 'Pod image mismatch', (w) => { w.pods[0].spec = template(`ghcr.io/openkubes/ok-console@${child}`).spec }],
+    ['a Deployment template on another image', 'deployment image mismatch', (w) => { w.deployment.spec.template = template(`ghcr.io/openkubes/ok-console@${child}`) }],
+    ['a Pod from the previous ReplicaSet', 'Pod not owned by current ReplicaSet', (w) => { w.pods[1].metadata.ownerReferences[0].uid = 'rs-6' }],
+    ['a terminating Pod', 'terminating Pod', (w) => { (w.pods[0].metadata as Record<string, unknown>).deletionTimestamp = '2026-11-20T00:00:00Z' }],
+    ['an unready Pod', 'Pod not ready', (w) => { w.pods[0].status.conditions[0].status = 'False' }],
+    ['an unready app container', 'app container not ready', (w) => { w.pods[0].status.containerStatuses[0].ready = false }],
+    ['an extra Pod', 'unexpected Pod count', (w) => { w.pods.push(structuredClone(w.pods[0])) }],
+    ['an old ReplicaSet still holding Pods', 'old ReplicaSet has Pods', (w) => { w.sets[1].status.replicas = 1 }],
+    ['a ReplicaSet owned by another Deployment', 'foreign ReplicaSet', (w) => { w.sets[1].metadata.ownerReferences[0].uid = 'd-2' }],
+    ['two ReplicaSets at the Deployment revision', 'current ReplicaSet mismatch', (w) => { const twin = structuredClone(w.sets[0]); twin.metadata.name = 'ok-console-twin'; twin.metadata.uid = 'rs-7b'; w.sets.push(twin) }],
+    ['a current ReplicaSet template on another image', 'current ReplicaSet mismatch', (w) => { w.sets[0].spec.template = template(`ghcr.io/openkubes/ok-console@${child}`) }],
+    ['no ReplicaSet at the Deployment revision', 'current ReplicaSet mismatch', (w) => { w.deployment.metadata.annotations['deployment.kubernetes.io/revision'] = '8' }],
+    ['a rollout the controller has not observed', 'deployment rollout not observed', (w) => { w.deployment.status.observedGeneration = 3 }],
+    ['an incomplete rollout', 'deployment rollout incomplete', (w) => { w.deployment.status.updatedReplicas = 1 }],
+    ['a selector with expressions', 'unsupported deployment selector', (w) => { (w.deployment.spec.selector as Record<string, unknown>).matchExpressions = [] }],
+  ]
+  it.each(cases)('fails closed on %s', (_label, reason, mutate) => {
+    const w = world(); mutate(w)
+    failed(go(w), reason)
+  })
+
+  it('accepts a docker-pullable transport prefix on an approved imageID', () => {
+    const w = world(); w.pods[0].status.containerStatuses[0].imageID = `docker-pullable://ghcr.io/openkubes/ok-console@${index}`
+    passed(go(w), 'runtime-identity')
+  })
+
+  type Deployment = ReturnType<typeof world>['deployment']
+  it.each<[string, (d: Deployment) => void]>([
+    ['a new generation', (d) => { d.metadata.generation = 5 }],
+    ['a new revision', (d) => { d.metadata.annotations['deployment.kubernetes.io/revision'] = '8' }],
+    ['a new template image', (d) => { d.spec.template = template(`ghcr.io/openkubes/ok-console@${child}`) }],
+    ['an unavailable replica', (d) => { (d.status as Record<string, number>).unavailableReplicas = 1 }],
+    ['a recreated Deployment', (d) => { d.metadata.uid = 'd-2' }],
+  ])('fails closed when a rollout starts during verification: %s', (_label, change) => {
+    const w = world(); const later = structuredClone(w.deployment); change(later)
+    failed(go(w, expected, later), 'deployment changed during verification')
+  })
+
+  it.each([
+    ['absent', undefined], ['null', null], ['wrong type', []], ['empty', {}],
+    ['foreign kind', { 'StatefulSet/ok-console': expected['Deployment/ok-console'] }],
+    ['tag instead of digest', { 'Deployment/ok-console': { ...expected['Deployment/ok-console'], image: 'ghcr.io/openkubes/ok-console:rc.30' } }],
+    ['truncated approved digest', { 'Deployment/ok-console': { ...expected['Deployment/ok-console'], imageIDs: ['sha256:abc'] } }],
+    ['duplicate approved digest', { 'Deployment/ok-console': { ...expected['Deployment/ok-console'], imageIDs: [index, index] } }],
+    ['extra key', { 'Deployment/ok-console': { ...expected['Deployment/ok-console'], platform: 'linux/amd64' } }],
+  ])('rejects %s expected images before any cluster call', (_label, value) => {
+    const h = harness()
+    const flags = value === undefined ? [] : ['--expected', h.input(value)]
+    const r = h.run('runtime-identity', flags, [])
+    expect(r.status).not.toBe(0); expect(r.calls).toEqual([])
   })
 })

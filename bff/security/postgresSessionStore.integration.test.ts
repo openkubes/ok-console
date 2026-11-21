@@ -247,10 +247,10 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
   })
 
   it.each([
-    ['Local disabled', [], 'Local', false],
-    ['Local enabled', ['Local'], 'Local', true],
-    ['an empty set', [], 'OIDC', false],
-  ])('applies %s to a restored %s session', async (_case, allowed, method, accepted) => {
+    ['rejects a restored Local session when Local is disabled', [], 'Local', false],
+    ['keeps a restored Local session when Local is enabled', ['Local'], 'Local', true],
+    ['rejects a restored OIDC session under an empty method set', [], 'OIDC', false],
+  ])('%s', async (_case, allowed, method, accepted) => {
     const issued = await issueAs(method as string)
     const modeStore = storeFor(allowed as string[])
     const resolved = await modeStore.resolve(issued.cookie, { touch: false })

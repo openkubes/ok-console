@@ -6,12 +6,13 @@
 
 | Pair / tooling | Source |
 | --- | --- |
-| C1 Console | ok-console main `0a164e3` plus #139 (trust diagnostics), #142 (local-login throttle fails closed), #140 (per-item freshness verdict), #143 (freshness labels in the UI), to be merged in that order (all four PRs are open) |
-| P1 producer | openkubes `1b0739fc` |
-| CR / PR rollback | ok-console `0a164e3` / openkubes `94ab8d9`; the pair running before C1/P1, freshness-unaware |
+| C1 Console | ok-console main `9cb963e` (contains #139, #140, #142, #143); breakglass profile, tag `dev-breakglass-v0.1.0-rc.30` |
+| C1-R Console recovery | Same source `9cb963e`; bootstrap profile, tag `dev-v0.1.0-rc.20`; bootstrap recovery overlay only |
+| P1 producer | openkubes `96027be`, tag `console-observer-dev-v0.1.0-rc.21` |
+| Rollback | The live C0/P0 pair recorded at G0, used only while the Console is withdrawn fail-closed (decision 3(b), OK-170 comment 15421) |
 | Gate tooling | ok-console #145, independent of C1 |
 
-The [full-session procedure](maintenance-procedure.md) is kept for a later window and needs its own review before use.
+Digests are unpublished: publication is a conditional, separate approval after the prerequisite PRs and build preflight. The upgrade keeps the current session epoch and authorization revision. The [maintenance procedure](maintenance-procedure.md) holds the candidate details, the [identifier ledger](maintenance-procedure.md#identifier-ledger) and the exact change inventory, and must be re-reviewed against the current candidate before use.
 
 ## One working day: 6 h
 
@@ -19,17 +20,17 @@ Caps exclude review time; at a cap or failed exit, stop and report. One review r
 
 | Step | Content | Cap | Exit | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Build C1/P1 once after the C1 PRs merge; record digests and provenance | 20 min | Digests and source revisions recorded | Open (after merge) |
+| 1 | Build C1, C1-R and P1 once after the prerequisite PRs merge; record digests, platform-child digests and provenance | 20 min | Digests and source revisions recorded for all three | Open: C1 PRs merged; publication needs separate approval (decision 1 of OK-170 comment 15421) |
 | 2 | Gate-tooling proof on disposable kind v1.34.1: ownership, permission, admission with real server-side apply adopt/release/conflict and one expected rejection | 60 min | Each check passes its positive and fails its invalid-input case | Done off-cluster, #145 |
 | 3 | Disposable C1/P1 drills: invalid trust, producer down, stale and partial data, rollback and forward, cleanup | 70 min | Baseline/fault/recovery per drill; stale items Unknown end to end | Done off-cluster on locally built C1/P1; results below |
-| 4 | ok-shared: read-only inventory, deploy C1/P1, image ID check, four authenticated read-only views, mutations confirmed disabled; fail-closed abort withdraws the producer route and Console serves its bounded 503 | 180 min live | Image IDs match; views show producer data with observation times | Needs Arash's explicit approval |
+| 4 | ok-shared: read-only inventory, deploy C1/P1, image ID check, four authenticated read-only views, mutations confirmed disabled; fail-closed abort withdraws the producer route and Console serves its bounded 503 | Within the ≤2 h window | Image IDs match; views show producer data with observation times | Needs Arash's explicit approval of the hashed package and a dated window |
 | 5 | One evidence record and disposition (GO / REVISE / STOP) | 30 min | Disposition recorded | Open |
 
-Total: 6 h = 2.5 h off-cluster + 3 h live + 0.5 h record. Step 4 uses existing sign-in configuration, with no OIDC change. Event features stay in C1 only while they need no live change.
+Live work fits the proposed UTC window of at most 2 h ([procedure](maintenance-procedure.md)); building, the disposable rehearsal and the G0 package come first and are not part of the window. Window and owners are deferred (decision 6 of OK-170 comment 15421).
 
 ## Step 3 drill results
 
-Disposable kind v1.34.1; C1 is a local merge of the current heads of #143 and #142, which include #139, #140 and main `0a164e3`. P1 is openkubes `1b0739fc`. Two consecutive green runs of the same checks; all drills recovered.
+Disposable kind v1.34.1, before the current candidate: the drilled C1 was a local merge of the then heads of #143 and #142, which include #139, #140 and main `0a164e3`; the drilled P1 was openkubes `1b0739fc`; CR/PR was ok-console `0a164e3` / openkubes `94ab8d9`. Two consecutive green runs of the same checks; all drills recovered.
 
 | Drill | Result |
 | --- | --- |
@@ -58,13 +59,13 @@ AC text remains in Jira; numbers and short topics below identify it without repr
 | AC1 | Target identified | Existing [Identified target](README.md#identified-target) record; step 4 read-only inventory | Live re-inventory in step 4 |
 | AC2 | Console digest/image ID | Steps 1, 4 | Both steps open |
 | AC3 | Producer revision/image | Steps 1, 4 | Both steps open |
-| AC4 | OIDC login/session/logout | Deferred | Open, not waived (R6) |
+| AC4 | OIDC login/session/logout | Procedure phase 2; adverse tokens only through the isolated protocol setup (decision 4(a)) | Open, not waived (R6) |
 | AC5 | mTLS identity | Step 3 drills 2 and 7 (negatives) off ok-shared; step 4 (positive: producer data served over the mTLS path) | Live negative (R2); step 4 open |
 | AC6 | Four real-state views | Step 4: Overview, Clusters, Cluster Detail, Evidence; UI labels by #143 | Step 4 open |
 | AC7 | No raw objects/secrets in browser | Repository tests + step 4 | Step 4 open |
 | AC8 | Fail-closed | Step 3 Drill 1-Drill 4, Drill 7 | Live negatives (R2) |
 | AC9 | Mutations disabled | Step 4 | Step 4 open |
-| AC10 | Rollback and cleanup | Off-cluster step 3 Drill 5 | Live deferred, open, not waived (R1) |
+| AC10 | Rollback and cleanup | Off-cluster step 3 Drill 5; procedure phase 3 rollback under fail-closed withdrawal (decision 3(b)) | Live open, not waived (R1) |
 | AC11 | Evidence record | Step 5 | Open |
 | AC12 | CI green | Each PR | Required per PR |
 | AC13 | Disposition | Step 5 | Open |
@@ -75,12 +76,12 @@ R1-R9 here are the Scope C register; the R-numbered sections of the maintenance 
 
 | Risk | Current state | Revisit |
 | --- | --- | --- |
-| R1 | Live rollback to CR/PR would show stale data as Current (Drill 5); step 4 abort is fail-closed | A reviewed freshness-aware rollback pair |
+| R1 | Live rollback to the freshness-unaware C0/P0 would show stale data as Current (Drill 5); decision 3(b) allows it only while withdrawn fail-closed | Disposable-cluster proof first; any other serving pair needs freshness qualification |
 | R2 | Live trust/outage drills are not run on ok-shared; AC5/AC8 negatives shown on disposable clusters | Separate live drill window |
 | R3 | decision D8 breakglass not executed | Its own approval |
-| R4 | decision D10 ownership handoff not executed; #145 supplies the tested gate tool a later handoff would use | Its own approval |
-| R5 | decision D6 dry-run URL tracking not executed | Its own approval |
-| R6 | OIDC on the deployed BFF is not shown (AC4) | Arash's decision to deploy OIDC or record a deviation |
+| R4 | D10: field manager ok-172-live, no ownership handoff; #145 supplies the gates | STOP and report if the non-forced dry-run or ownership inventory is not clean |
+| R5 | D6: the live dry-run URL value is tracked in the ok-shared-live overlay, unchanged; no live change yet | Windowed dry-run in the G0 package |
+| R6 | OIDC on the deployed BFF is not shown (AC4) | Procedure phase 2; adverse tokens through the isolated protocol setup, no realm/key/client edits (decision 4(a)) |
 | R7 | Stale wording implying current state addressed in #143 | Listed follow-ups: deploy wizard and Capabilities catalog wording, envelope generation-time field, non-Chromium browsers and macOS |
 | R8 | Failed local login uncounted on throttle lock timeout addressed in #142 (fails closed) | Listed follow-ups: row retention, further SQLSTATE classes, multi-pod/CNPG verification |
 | R9 | Shared CA issues Console identity to any Certificate writer | OK-210 |
@@ -96,11 +97,11 @@ Recorded decisions, not new execution approvals:
 | D3 | No; fixed in code by #140 and #143 (freshness and labels) |
 | D4 | No; fixed in code by #139 (trust diagnostics) |
 | D5 | No; fixed in code by #140 and #143 (freshness and labels) |
-| D6 | Adopt only after documenting/verifying tracked config; no live change |
+| D6 | Adopt: the live value is tracked in the ok-shared-live overlay, unchanged; it reaches ok-shared only with the approved C1 deploy |
 | D7 | Not required |
 | D8 | Only as a separately approved bounded exercise |
 | D9 | Yes; window after the event, needs sign-off |
-| D10 | Yes in principle; not executed |
+| D10 | Prefer ok-172-live (option b) only if the non-forced server-side dry-run and the managedFields ownership inventory are clean; otherwise STOP and report. Never force; never switch silently to ok-170-acceptance (OK-170 comment 15421) |
 
 ## Evidence and redaction
 
@@ -112,4 +113,4 @@ Allowlist safe projections before persistence. Never record Secret values/hashes
 
 - **Applies to:** Scope C and the identified source pairs; live execution remains separately approved.
 - **Shown in:** #145 gate-tooling proof and the step 3 disposable-cluster results above. These are off-cluster results, not observations of deployed C1/P1 on ok-shared.
-- **Follow-ups:** Steps 1, 4 and 5 remain open; deferred ACs and R1-R9 retain their stated disposition. No macOS access was available; Arash, please verify macOS-only behaviour. C1 built in step 1 is checked against the drilled heads (#142 `43b6c28`, #143 `5319534`); any change after these heads repeats the affected drills.
+- **Follow-ups:** Steps 1, 4 and 5 remain open; deferred ACs and R1-R9 retain their stated disposition. No macOS access was available; Arash, please verify macOS-only behaviour. The drills ran on the heads #142 `43b6c28` and #143 `5319534`; C1 `9cb963e` is later, so the disposable rehearsal repeats the affected drills. Window and named owners are deferred until the PRs, digests, hashed manifests and rehearsal evidence are ready (decision 6).

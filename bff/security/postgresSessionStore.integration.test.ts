@@ -44,6 +44,9 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     await pool.query(localAccessMigration)
     const localAuditMigration = await readFile(new URL('./postgres/004_local_access_audit.sql', import.meta.url), 'utf8')
     await pool.query(localAuditMigration)
+    // 005 admits the Local method, so the Local cases do not depend on test-file order.
+    const localIdentityMigration = await readFile(new URL('./postgres/005_local_identity.sql', import.meta.url), 'utf8')
+    await pool.query(localIdentityMigration)
   })
 
   beforeEach(async () => {

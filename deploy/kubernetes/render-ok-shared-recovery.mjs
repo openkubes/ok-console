@@ -1,18 +1,37 @@
 #!/usr/bin/env node
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import { BREAKGLASS_DIGEST, CONSOLE_IMAGE, checkRecoveryProvenance, consoleImageReferences } from './recovery-image.mjs'
 
-const outputArgument = process.argv[2]
-if (!outputArgument) {
-  console.error('Usage: node deploy/kubernetes/render-ok-shared-recovery.mjs <new-output-directory>')
+// Run from the repository root. The Bootstrap image is the one recorded, in a reviewed change, in
+// the overlay's image-provenance.json and pinned by the same digest in its kustomization.yaml.
+const usage = 'Usage: node deploy/kubernetes/render-ok-shared-recovery.mjs <new-output-directory>'
+const args = process.argv.slice(2)
+const provenancePath = 'deploy/kubernetes/overlays/ok-shared-bootstrap-recovery/image-provenance.json'
+if (args.length !== 1 || args[0].startsWith('-')) {
+  console.error(usage)
   process.exit(2)
 }
 
-const outputDirectory = resolve(outputArgument)
-const digest = 'sha256:705edc32be35c935d25414c790cc648649ab3aa3ace24f42423510e3a9e8ccbc'
+const outputDirectory = resolve(args[0])
+let provenance
+try {
+  provenance = JSON.parse(await readFile(provenancePath, 'utf8'))
+} catch {
+  console.error(`Cannot read the recovery image provenance at ${provenancePath}.`)
+  process.exit(2)
+}
+const checked = checkRecoveryProvenance(provenance)
+if (checked.state !== 'released') {
+  console.error(checked.state === 'unreleased'
+    ? 'No bootstrap-built recovery image has been released: image-provenance.json still holds the unreleased sentinel. Publish a dev-v* build under a release authorization, verify it with deploy/kubernetes/verify-recovery-image.sh registry, and record its digest in image-provenance.json and kustomization.yaml first.'
+    : `The recovery image provenance is invalid: ${checked.errors.join('; ')}.`)
+  process.exit(2)
+}
+const bootstrapDigest = provenance.digest
 const values = {
   bootstrapEpoch: `ok-shared-bootstrap-${randomUUID()}`,
   bootstrapAuthorizationRevision: `ok-shared-bootstrap-auth-${randomUUID()}`,
@@ -32,7 +51,7 @@ const replaceExactlyOnce = (manifest, placeholder, value) => {
   return manifest.replace(placeholder, value)
 }
 
-const prepare = (overlay, replacements) => {
+const prepare = (overlay, replacements, digest) => {
   let manifest = render(overlay)
   for (const [placeholder, value] of Object.entries(replacements)) {
     manifest = replaceExactlyOnce(manifest, placeholder, value)
@@ -40,8 +59,8 @@ const prepare = (overlay, replacements) => {
   if (/REPLACE_[A-Z_]+/.test(manifest)) {
     throw new Error(`Rendered ${overlay} contains an unresolved recovery placeholder.`)
   }
-  if (!manifest.includes(`image: ghcr.io/openkubes/ok-console@${digest}`)) {
-    throw new Error(`Rendered ${overlay} does not contain the reviewed rc.3 digest.`)
+  if (consoleImageReferences(manifest).join() !== `${CONSOLE_IMAGE}@${digest}`) {
+    throw new Error(`Rendered ${overlay} does not reference the expected Console digest ${digest}.`)
   }
   return manifest
 }
@@ -49,20 +68,21 @@ const prepare = (overlay, replacements) => {
 const bootstrapManifest = prepare('deploy/kubernetes/overlays/ok-shared-bootstrap-recovery', {
   REPLACE_BOOTSTRAP_RECOVERY_EPOCH: values.bootstrapEpoch,
   REPLACE_BOOTSTRAP_AUTHORIZATION_REVISION: values.bootstrapAuthorizationRevision,
-})
+}, bootstrapDigest)
 const postRecoveryManifest = prepare('deploy/kubernetes/overlays/ok-shared-breakglass', {
   REPLACE_POST_RECOVERY_EPOCH: values.postRecoveryEpoch,
   REPLACE_POST_RECOVERY_AUTHORIZATION_REVISION: values.postRecoveryAuthorizationRevision,
-})
+}, BREAKGLASS_DIGEST)
 
 await mkdir(outputDirectory, { mode: 0o700 })
 await writeFile(`${outputDirectory}/bootstrap.yaml`, bootstrapManifest, { mode: 0o600 })
 await writeFile(`${outputDirectory}/post-recovery.yaml`, postRecoveryManifest, { mode: 0o600 })
 await writeFile(`${outputDirectory}/recovery-evidence.json`, `${JSON.stringify({
   generatedAt: new Date().toISOString(),
-  imageDigest: digest,
+  bootstrapImage: { digest: bootstrapDigest, revision: provenance.revision, releaseTag: provenance.releaseTag, authMode: provenance.authMode },
+  postRecoveryImage: { digest: BREAKGLASS_DIGEST, authMode: 'breakglass' },
   ...values,
   singleUse: true,
 }, null, 2)}\n`, { mode: 0o600 })
 
-console.log(JSON.stringify({ outputDirectory, ...values, imageDigest: digest, singleUse: true }))
+console.log(JSON.stringify({ outputDirectory, ...values, bootstrapImageDigest: bootstrapDigest, postRecoveryImageDigest: BREAKGLASS_DIGEST, singleUse: true }))

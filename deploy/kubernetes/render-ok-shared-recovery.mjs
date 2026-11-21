@@ -113,9 +113,9 @@ const prepare = async (name, replacements) => {
     && (reference === repository || reference.startsWith(`${repository}@`) || reference.startsWith(`${repository}:`))
   const consoleImages = containers.map((c) => c?.image).filter(isConsole)
   // The app container is identified by name, so a sidecar carrying the approved image cannot stand in for it.
-  const app = objects.filter((o) => o?.kind === 'Deployment' && o.metadata?.name === 'ok-console')
-    .flatMap((o) => (o.spec?.template?.spec?.containers ?? []).filter((c) => c?.name === 'console'))
-  if (app.length !== 1 || app[0].image !== image || consoleImages.some((reference) => reference !== image)) {
+  const deployments = objects.filter((o) => o?.kind === 'Deployment' && o.metadata?.name === 'ok-console')
+  const app = deployments.flatMap((o) => (o.spec?.template?.spec?.containers ?? []).filter((c) => c?.name === 'console'))
+  if (deployments.length !== 1 || deployments[0].metadata?.namespace !== 'openkubes-console' || app.length !== 1 || app[0].image !== image || consoleImages.some((reference) => reference !== image)) {
     throw new Error(`Rendered ${overlay} does not run exactly the image in ${expectedDigestsPath}.`)
   }
   return manifest

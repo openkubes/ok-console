@@ -82,6 +82,13 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     refused(root, 'Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image')
   })
 
+  it('refuses a second ok-console Deployment in another namespace running a foreign image', () => {
+    const root = tree()
+    const env = wrapKubectl(root, `"$REAL" "$@" || exit $?
+printf -- '---\\napiVersion: apps/v1\\nkind: Deployment\\nmetadata:\\n  name: ok-console\\n  namespace: other\\nspec:\\n  template:\\n    spec:\\n      containers:\\n      - name: app\\n        image: ghcr.io/other/console@${index('8')}\\n'`)
+    refused(root, 'Rendered deploy/kubernetes/overlays/ok-shared-bootstrap-recovery does not run exactly the image', env)
+  })
+
   it('refuses a render that also carries a Console image with another digest', () => {
     const root = tree()
     const env = wrapKubectl(root, `"$REAL" "$@" || exit $?

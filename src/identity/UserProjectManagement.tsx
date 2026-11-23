@@ -1,70 +1,38 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { accessTargetState, isObservedSource, type AccessInspectionRow, type AccessTargetState } from './accessInspection'
+import { readAccessInspectionFixture } from './accessInspectionFixture'
 import './identity.css'
 
-type Role = 'Viewer' | 'Editor' | 'Project Admin'
-type PreviewUser = { id: number; username: string; role: Role; namespace: string; enabled: boolean }
+const statusClass: Record<AccessTargetState, string> = {
+  Proposed: 'pending', 'Not verified': 'read-only', Unreachable: 'failed', Unknown: 'unknown', Verified: 'ready', Stale: 'pending',
+}
 
-// Illustrative namespaces only: never sourced from cluster inventory or used for authorization.
-const namespaces = ['project-preview', 'developer-workspaces'] as const
+function boundary(rows: readonly AccessInspectionRow[]) {
+  const fixtures = rows.filter((row) => !isObservedSource(row)).length
+  if (rows.length === 0) return 'No targets to inspect'
+  if (fixtures === rows.length) return 'Fixture data · no target-cluster evidence'
+  if (fixtures > 0) return 'Mixed sources · fixture rows are never verified'
+  return 'Console BFF data · each target shows its own evidence state'
+}
 
-/** Intent-only preview: no credentials, API calls, persistence, or permission changes. */
-export default function UserProjectManagement() {
-  const [users, setUsers] = useState<PreviewUser[]>([])
-  const [username, setUsername] = useState('')
-  const [role, setRole] = useState<Role>('Viewer')
-  const [namespace, setNamespace] = useState<string>(namespaces[0])
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
-  const nextId = useRef(0)
-  const usernameInput = useRef<HTMLInputElement>(null)
-
-  const create = (event: FormEvent) => {
-    event.preventDefault()
-    const name = username.trim()
-    if (!/^[a-z][a-z0-9._-]{2,31}$/i.test(name)) {
-      setError('Use 3–32 letters, digits, dots, underscores or hyphens; start with a letter.')
-      usernameInput.current?.focus()
-      return
-    }
-    if (users.some((user) => user.username.toLowerCase() === name.toLowerCase())) {
-      setError('That preview username already exists.')
-      usernameInput.current?.focus()
-      return
-    }
-    setUsers((previous) => [...previous, { id: ++nextId.current, username: name, role, namespace, enabled: true }])
-    setUsername('')
-    setError('')
-    setNotice(`${name} added to this preview. No account or access was created.`)
-    usernameInput.current?.focus()
-  }
-
+export default function UserProjectManagement({ rows = readAccessInspectionFixture() }: { rows?: readonly AccessInspectionRow[] }) {
   return <div className="identity-preview">
-    <header className="page-title"><div><span className="eyebrow">Identity &amp; access</span><h1>User &amp; Project Management</h1><p>Explore user and namespace access proposals before connecting an identity service.</p></div><span className="prototype-badge">Preview</span></header>
-    <aside className="identity-disclosure" aria-label="Preview boundaries"><strong>Simulation only · no effective access</strong><p>All entries stay in page memory and reset on reload or when you leave this page. No accounts, authentication, credentials, Kubernetes RBAC or Developer Workspace access are created or changed. No access-management requests are sent.</p></aside>
-    <section className="panel identity-section" aria-labelledby="identity-users-title">
-      <div className="panel-title"><div><span className="eyebrow">01 · Users</span><h2 id="identity-users-title">Preview users</h2></div><span className="count-badge" aria-label={`${users.length} preview users`}>{users.length}</span></div>
-      <p>Add a username with an illustrative assignment. Role presets describe intent only.</p>
-      <form className="identity-form" onSubmit={create} noValidate aria-label="Add preview user">
-        <div className="identity-field"><label htmlFor="identity-username">Username</label><input ref={usernameInput} id="identity-username" value={username} onChange={(event) => { setUsername(event.target.value); setError('') }} placeholder="developer01" maxLength={32} required autoComplete="off" aria-invalid={Boolean(error)} aria-describedby={`identity-username-hint${error ? ' identity-error' : ''}`}/><small id="identity-username-hint">3–32 characters; start with a letter.</small></div>
-        <div className="identity-field"><label htmlFor="identity-namespace">Example namespace</label><select id="identity-namespace" value={namespace} onChange={(event) => setNamespace(event.target.value)} aria-describedby="identity-target-hint">{namespaces.map((item) => <option key={item}>{item}</option>)}</select><small id="identity-target-hint">Illustrative targets, not cluster inventory.</small></div>
-        <div className="identity-field"><label htmlFor="identity-role">Proposed role</label><select id="identity-role" value={role} onChange={(event) => setRole(event.target.value as Role)}><option>Viewer</option><option>Editor</option><option>Project Admin</option></select><small>No permissions are granted.</small></div>
-        <button className="primary-button" type="submit">Add preview user</button>
-      </form>
-      {error && <p id="identity-error" className="identity-error" role="alert">{error}</p>}
-      <p className="identity-announcement" role="status">{notice}</p>
-      {users.length === 0 ? <div className="identity-empty"><h3>No preview users yet</h3><p>Add your first username to explore proposed access. No sign-in account will be created.</p></div> : <div className="identity-table" role="region" aria-label="Preview users table" tabIndex={0}><table><caption>Users in this preview · not sign-in accounts</caption><thead><tr><th scope="col">Username</th><th scope="col">Preview state</th><th scope="col">Actions</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><th scope="row">{user.username}</th><td><span className={`status ${user.enabled ? 'status-pending' : 'status-unknown'}`}>{user.enabled ? 'Proposed' : 'Disabled in preview'}</span></td><td><div className="identity-actions"><button className="secondary-button" type="button" aria-label={`${user.enabled ? 'Disable' : 'Enable'} ${user.username} in preview`} onClick={() => {
-        setUsers((previous) => previous.map((item) => item.id === user.id ? { ...item, enabled: !item.enabled } : item))
-        setNotice(`${user.username} ${user.enabled ? 'disabled' : 'enabled'} in preview only. Effective access is unchanged.`)
-      }}>{user.enabled ? 'Disable' : 'Enable'}</button><button className="text-button" type="button" aria-label={`Remove ${user.username} from preview`} onClick={() => {
-        setUsers((previous) => previous.filter((item) => item.id !== user.id))
-        setNotice(`${user.username} and the proposed assignment removed from this preview.`)
-        usernameInput.current?.focus()
-      }}>Remove</button></div></td></tr>)}</tbody></table></div>}
-    </section>
-    <section className="panel identity-section identity-projects" aria-labelledby="identity-projects-title"><div><span className="eyebrow">02 · Projects</span><h2 id="identity-projects-title">Project planning</h2><p>Demo only. Projects are not connected in this preview. The example namespaces above let you discuss assignment intent without creating a project or enforcing access across clusters.</p></div><span className="prototype-badge">Not connected</span></section>
-    <section className="panel identity-section" aria-labelledby="identity-assignments-title"><div className="panel-title"><div><span className="eyebrow">03 · Access Assignments</span><h2 id="identity-assignments-title">Proposed access</h2></div></div><p>Each preview user has one illustrative namespace assignment. These are proposals, never effective permissions.</p>
-      {users.length === 0 ? <div className="identity-empty"><h3>No proposed assignments</h3><p>Assignments appear here when you add a preview user.</p></div> : <div className="identity-table" role="region" aria-label="Proposed assignments table" tabIndex={0}><table><caption>In-memory proposals · no cluster binding or RBAC enforcement</caption><thead><tr><th scope="col">Username</th><th scope="col">Example namespace</th><th scope="col">Proposed role</th><th scope="col">Proposal state</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><th scope="row">{user.username}</th><td>{user.namespace}</td><td>{user.role}</td><td><span className={`status ${user.enabled ? 'status-pending' : 'status-unknown'}`}>{user.enabled ? 'Proposed' : 'Paused in preview'}</span></td></tr>)}</tbody></table></div>}
-      <p className="identity-footnote">Real identity verification, sessions and authorized access enforcement require future trusted services and reviewed contracts.</p>
+    <header className="page-title"><div><span className="eyebrow">Access inspection</span><h1>User &amp; Project Management</h1><p>Read-only subjects, Project references and namespace targets.</p></div><span className="prototype-badge">Preview</span></header>
+    <aside className="identity-disclosure" aria-label="Data boundaries"><strong>{boundary(rows)}</strong><p>Rows marked Fixture are illustrative. “Verified” means target-cluster evidence was observed. Target-cluster Kubernetes RBAC is the only authority; Project membership alone grants no permissions.</p></aside>
+    <section className="panel identity-section" aria-labelledby="identity-targets-title">
+      <div className="panel-title"><div><span className="eyebrow">Subjects &amp; targets</span><h2 id="identity-targets-title">Access inspection targets</h2></div></div>
+      <p>Project identifies an ADR-045 Enterprise Workspace by tenantId and projectId.</p>
+      <div className="identity-table" role="region" aria-label="Access inspection targets" tabIndex={0}><table><caption>Per-target state and evidence · read-only</caption><thead><tr><th scope="col">Subject</th><th scope="col">Project reference</th><th scope="col">Namespace target</th><th scope="col">Access state</th><th scope="col">Evidence summary</th></tr></thead><tbody>{rows.length === 0 ? <tr><td colSpan={5}>No targets to inspect.</td></tr> : rows.map((row) => {
+        const state = accessTargetState(row)
+        const fixture = !isObservedSource(row)
+        const reachability = row.clusterReachable === true ? 'Reachable' : row.clusterReachable === false ? 'Unreachable' : 'Unknown'
+        return <tr key={row.id}>
+          <th scope="row">{row.subject.kind}: {row.subject.displayName ?? row.subject.subject}<small>Subject: {row.subject.subject}</small><small>Issuer: {row.subject.issuer}</small></th>
+          <td>tenantId: {row.project.tenantId}<small>projectId: {row.project.projectId}</small></td>
+          <td>{row.target.clusterId} / {row.target.namespace}<small>namespaceUid: {row.target.namespaceUid}</small><small>{fixture ? `Reachability (illustrative): ${reachability}` : `Reachability: ${reachability}`}</small></td>
+          <td><span className={`status status-${statusClass[state]}`} data-access-state={state}>{state}</span><small>Source: {fixture ? 'Fixture' : 'Console BFF'}</small></td>
+          <td>{row.evidence ? <>{fixture && <small>Illustrative evidence (fixture, not observed)</small>}<span>Kind: {row.evidence.kind}</span><small>Observed at: {row.evidence.observedAt ?? 'Unknown'}</small><small>Freshness: {row.evidence.freshness ?? 'Unknown'}</small>{row.evidence.binding && <small>Role reference: {row.evidence.binding.roleRef}</small>}{row.evidence.reasons?.map((reason, index) => <small key={`${reason.code}-${index}`}>Reason: {reason.code}</small>)}</> : 'No target-cluster evidence'}</td>
+        </tr>
+      })}</tbody></table></div>
     </section>
   </div>
 }

@@ -52,22 +52,25 @@ settings above. This gate and the independent `#/wjax` read-only cluster reader
 are unchanged; identity management is excluded from production builds.
 
 The sidebar label is **User & Project Management**, with **Preview · identity &
-access** as its caption. The page is organized into Users, Projects and Access
-Assignments, using the Console's design tokens and responsive module CSS.
+access** as its caption. The page now provides read-only access inspection: User
+and Group subjects, Project references (ADR-045 Enterprise Workspace tenantId +
+projectId), cluster/namespace identities, per-target state and evidence summaries.
 
-1. Add a preview username, an example namespace and a proposed role.
-2. Disable and enable the entry; its proposal becomes paused or proposed. Neither
-   state grants effective access.
-3. Remove the entry; its proposed assignment disappears too.
-4. Refresh, or navigate to Developer Workspaces and back: the entries reset.
+A persistent banner labels all default data as fixture data with no target-cluster
+evidence. No add, disable, remove, role or namespace selection controls remain.
+“Verified” means target-cluster evidence was observed; fixture provenance always
+prevents verification. Proposed fixture targets show Proposed; other fixture
+targets show Not verified, including those with illustrative Unknown or
+Unreachable reachability. Every row names its source (Fixture or Console BFF);
+“Verified” also requires an observed binding and no unresolved reason code. There are two fixture clusters and three namespaces.
 
-Projects are an explanatory demo-only section with no project lifecycle actions.
-Namespace choices are illustrative examples, not discovered cluster inventory or
-cross-cluster bindings. User and assignment state lives only in React memory;
-there are no identity/access requests, credentials, authentication changes,
-persistence, OIDC/Keycloak writes or Kubernetes RBAC changes.
+There are no identity/access requests, credentials, authentication changes,
+persistence, OIDC/Keycloak writes or Kubernetes RBAC changes. Project membership
+alone grants no permissions; target-cluster Kubernetes RBAC remains authoritative.
 
-### UI refinement verification (2026-11-04)
+### Historical UI refinement verification (2026-11-04)
+
+This record describes the removed in-memory controls, before read-only inspection.
 
 - `pnpm lint` and `pnpm build`: passed.
 - `pnpm exec vitest run src/App.test.tsx src/workspaces`: 46 passed.

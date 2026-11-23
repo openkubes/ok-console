@@ -42,7 +42,7 @@ it('K8a real pg driver fake wire C57014 is classified independently of server me
 const boundaries = [ ['create', 'INSERT INTO'], ['rotate', 'SET revoked_at'], ['rotate', 'INSERT INTO'], ['rotate', 'COMMIT'], ['revoke', 'SET revoked_at'], ['revoke', 'COMMIT'], ['purgeExpired', 'DELETE FROM'] ] as const
 it.each(boundaries)('K5 real pg client against protocol-level fake hang %s at %s retains timeout classification', async (operation, target) => {
   const { pool, queries } = await serve((socket, query) => { if (!query.includes(target)) socket.write(/BEGIN|ROLLBACK/.test(query) ? complete : rowReply()) })
-  const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test' })
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   const lifecycle = createLifecycle('corr-00000000-0000-4000-8000-000000000001')
   const error = await withLifecycle(lifecycle, () => target === 'COMMIT' ? handleSessionHttp({ request: { method: operation === 'rotate' ? 'POST' : 'DELETE', headers: { cookie, origin: 'https://console.invalid', 'x-csrf-token': 'token' } }, response: {}, correlationId: 'corr-00000000-0000-4000-8000-000000000001', pathname: '/api/console/v0/auth/session' + (operation === 'rotate' ? '/rotate' : ''), expectedOrigin: 'https://console.invalid', sessionStore: { resolve: async () => ({ csrfDigest: digestSessionValue('token'), subject: { method: 'OIDC' } }), rotate: value => store.rotate(value), revoke: value => store.revoke(value) } }) : operation === 'create' ? store.create(authorization) : operation === 'purgeExpired' ? store.purgeExpired() : store[operation](cookie)).catch(error => error)
@@ -56,14 +56,14 @@ it.each(boundaries)('K5 real pg client against protocol-level fake hang %s at %s
 }, 30000)
 it.each([['23505', 'PG_UNIQUE_VIOLATION'], ['23514', 'PG_CHECK_VIOLATION']])('K7 real pg driver fake wire SQLSTATE %s has bounded distinct code %s', async (code, expected) => {
   const { pool } = await serve(socket => socket.write(Buffer.concat([packet('E', Buffer.from(`SERROR\0VERROR\0C${code}\0Mprivate constraint detail\0\0`)), ready])))
-  const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test' })
   expect(startErrorCode(await store.resolve(cookie).catch(error => error))).toBe(expected)
 })
 it('K7 real store decrypt failure retains DECRYPT_FAILED', async () => {
   const { pool } = await serve(socket => socket.write(rowReply()))
   const { SessionEnvelopeCodec } = await import('./envelope.mjs')
   const missingKeyCodec = new SessionEnvelopeCodec({ primaryKeyId: 'other', keys: { other: Buffer.alloc(32, 9) } })
-  const store = new PostgresSessionStore({ pool, codec: missingKeyCodec, deploymentEpoch: 'epoch-test' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec: missingKeyCodec, deploymentEpoch: 'epoch-test' })
   expect(startErrorCode(await store.resolve(cookie).catch(error => error))).toBe('DECRYPT_FAILED')
 })
 it('K8b real pg driver fake wire rotate INSERT 23505 destroys failed transaction without rollback and next rotate succeeds', async () => {
@@ -72,7 +72,7 @@ it('K8b real pg driver fake wire rotate INSERT 23505 destroys failed transaction
     if (fail && query.includes('INSERT INTO')) { fail = false; socket.write(Buffer.concat([packet('E', Buffer.from('SERROR\0VERROR\0C23505\0Mduplicate\0\0')), ready])); return }
     socket.write(/BEGIN|COMMIT|ROLLBACK/.test(query) ? complete : rowReply())
   })
-  const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test' })
   const error = await store.rotate(cookie).catch(error => error)
   expect(error.code).toBe('SESSION_COLLISION'); expect(startErrorCode(error)).toBe('PG_UNIQUE_VIOLATION')
   expect(pool.totalCount).toBe(0); expect(queries.some(query => query.includes('ROLLBACK'))).toBe(false)

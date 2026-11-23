@@ -42,7 +42,7 @@ it.each(['rotate', 'revoke'])('J3 real pg client against protocol-level fake %s 
     if (number === 1 && !data.includes(Buffer.from('BEGIN'))) return
     socket.write(complete)
   })
-  const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-123' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-123' })
   const began = performance.now()
   await expect(store[operation](cookie)).rejects.toMatchObject({ code: 'STORE_UNAVAILABLE', cause: { code: 'PG_QUERY_TIMEOUT' } })
   expect(performance.now() - began).toBeLessThan(550)
@@ -59,7 +59,7 @@ it('J3 local identity transaction evicts a timed-out session-create client witho
     if (number === 1 && !data.includes(Buffer.from('BEGIN'))) return
     socket.write(complete)
   })
-  const sessions = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-123' })
+  const sessions = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-123' })
   const identity = new LocalIdentity({ pool, sessions })
   const input = {
     subject: { id: 'u1', providerId: 'installation-local', subjectId: 'u1', displayName: 'u1', method: 'Local', assurance: ['Password', 'LocalDevelopment'] },
@@ -136,7 +136,7 @@ it.each(['statement', 'client'])('enabled-check real runtime pg %s timeout retai
 })
 it.each(['GET', 'POST', 'DELETE'])('J6 real session store %s failure emits one bounded correlated line', async method => {
   const { pool } = await serve(() => {})
-  const sessionStore = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-123' })
+  const sessionStore = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-123' })
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   await expect(handleSessionHttp({ request: { method, headers: { cookie } }, response: {}, correlationId: id, pathname: '/api/console/v0/auth/session' + (method === 'POST' ? '/rotate' : ''), sessionStore })).rejects.toMatchObject({ code: 'STORE_UNAVAILABLE' })
   expect(log).toHaveBeenCalledTimes(1)
@@ -193,7 +193,7 @@ it.each(['rotate', 'revoke'])('J5 real pg client against protocol-level fake %s 
   cleanup.push(() => new Promise<void>(done => { for (const socket of sockets) socket.destroy(); server.close(() => done()) }))
   const pool = new Pool({ host: '127.0.0.1', port: (server.address() as { port: number }).port, user: 'x', database: 'x', connectionTimeoutMillis: 250 })
   cleanup.push(() => pool.end())
-  const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-123' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-123' })
   const error = await store[operation](cookie).catch((error: unknown) => error)
   expect(error).toMatchObject({ code: 'STORE_UNAVAILABLE', cause: { code: 'PG_CONNECT_TIMEOUT' } })
   expect(startErrorCode(error)).toBe('PG_CONNECT_TIMEOUT')
@@ -202,13 +202,13 @@ it('J5 real pg client against protocol-level fake duplicate SQLSTATE preserves S
   const body = Buffer.from('SERROR\0VERROR\0C23505\0Mduplicate\0\0')
   const header = Buffer.alloc(5); header.write('E'); header.writeInt32BE(body.length + 4, 1)
   const { pool } = await serve(socket => socket.write(Buffer.concat([header, body, Buffer.from('5a0000000549', 'hex')])))
-  const store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-123' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-123' })
   await expect(store.resolve(cookie)).rejects.toMatchObject({ code: 'SESSION_COLLISION', cause: { code: '23505' } })
 })
 it('J6 session failure reports reached lifecycle stage rather than a fixed default', async () => {
   const { createLifecycle, withLifecycle } = await import('../diagnostics.mjs')
   const { pool } = await serve(() => {})
-  const sessionStore = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-123' })
+  const sessionStore = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-123' })
   const lifecycle = createLifecycle(id); lifecycle.mark('AUTHZ_CHECKED')
   const log = vi.spyOn(console, 'error').mockImplementation(() => {})
   await expect(withLifecycle(lifecycle, () => handleSessionHttp({ request: { method: 'GET', headers: { cookie } }, response: {}, correlationId: id, pathname: '/api/console/v0/auth/session', sessionStore }))).rejects.toThrow()

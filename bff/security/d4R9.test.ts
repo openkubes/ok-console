@@ -193,7 +193,7 @@ it.each(['missing', 'unmapped'])('H3 callback denial response failure is OTHER a
 
 it('J5 H3 callback real PostgresSessionStore preserves query failure cause', async () => {
   const port = await serve(socket => socket.once('data', () => socket.write(Buffer.from('5200000008000000005a0000000549', 'hex'))))
-  const store = new PostgresSessionStore({ pool: poolFor(port, { query_timeout: 2000 }), codec, deploymentEpoch: 'epoch-123' })
+  const store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool: poolFor(port, { query_timeout: 2000 }), codec, deploymentEpoch: 'epoch-123' })
   const authorization = { subject: { id: 'user', providerId: 'provider', subjectId: 'subject', displayName: 'User', method: 'OIDC', assurance: ['Federated'] }, scope: { environmentId: 'env', tenantIds: ['platform'] }, permissions: ['platform.read'], authorizationRevision: 'rev' }
   const result = await invoke(handlerFor({ sessionStore: store, identityMapper: async () => authorization }))
   expect(result.status).toBe(401)

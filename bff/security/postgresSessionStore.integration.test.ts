@@ -44,12 +44,15 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
     await pool.query(localAccessMigration)
     const localAuditMigration = await readFile(new URL('./postgres/004_local_access_audit.sql', import.meta.url), 'utf8')
     await pool.query(localAuditMigration)
+    // 005 admits the Local method, so the Local cases do not depend on test-file order.
+    const localIdentityMigration = await readFile(new URL('./postgres/005_local_identity.sql', import.meta.url), 'utf8')
+    await pool.query(localIdentityMigration)
   })
 
   beforeEach(async () => {
     await pool.query('TRUNCATE ok_console.sessions, ok_console.oidc_transactions, ok_console.local_access_throttle, ok_console.local_access_audit')
     codec = new SessionEnvelopeCodec({ primaryKeyId: 'key-1', keys: { 'key-1': keyOne } })
-    store = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    store = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test-1' })
   })
 
   afterAll(async () => {
@@ -98,7 +101,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   it('propagates revocation across independent BFF store instances', async () => {
     const issued = await issue()
-    const secondReplica = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-test-1' })
+    const secondReplica = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-test-1' })
 
     expect(await secondReplica.resolve(issued.cookie, { touch: false })).not.toBeNull()
     expect(await store.revoke(issued.cookie, 'ADMIN_REVOKE')).toBe(true)
@@ -140,6 +143,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   it('uses database-time expiry and bounded terminal-row cleanup', async () => {
     const shortStore = new PostgresSessionStore({
+      allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'],
       pool,
       codec,
       deploymentEpoch: 'epoch-test-1',
@@ -155,15 +159,127 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
 
   it('invalidates sessions across deployment epochs', async () => {
     const issued = await issue()
-    const recoveredDeployment = new PostgresSessionStore({ pool, codec, deploymentEpoch: 'epoch-after-restore' })
+    const recoveredDeployment = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec, deploymentEpoch: 'epoch-after-restore' })
 
     expect(await recoveredDeployment.resolve(issued.cookie, { touch: false })).toBeNull()
+  })
+
+  const storeFor = (allowedMethods: string[]) => new PostgresSessionStore({
+    allowedMethods,
+    pool,
+    codec,
+    deploymentEpoch: 'epoch-test-1',
+    authorizationRevisionValidator: async () => true,
+  })
+  const issueAs = (method: string) => store.create({
+    subject: { ...subject, id: `subject-${method}`, method },
+    scope,
+    permissions,
+    authorizationRevision: 'mapping-revision-7',
+  })
+  const request = { permission: 'platform.read', environmentId: scope.environmentId }
+
+  it('fails closed for an OIDC session after a switch to bootstrap-only without an epoch change', async () => {
+    const issued = await issue()
+    const bootstrapOnly = storeFor(['Bootstrap'])
+    const before = await pool.query('SELECT idle_expires_at FROM ok_console.sessions')
+    await waitForDatabaseTimePast('SELECT issued_at FROM ok_console.sessions')
+
+    expect(await bootstrapOnly.resolve(issued.cookie, { touch: false })).toBeNull()
+    expect(await bootstrapOnly.resolve(issued.cookie)).toBeNull()
+    expect(await bootstrapOnly.authorize(issued.cookie, request)).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
+    expect(await bootstrapOnly.rotate(issued.cookie)).toBeNull()
+
+    const after = await pool.query('SELECT idle_expires_at, revoked_at, deployment_epoch FROM ok_console.sessions')
+    expect(after.rowCount).toBe(1)
+    expect(after.rows[0].idle_expires_at.getTime()).toBe(before.rows[0].idle_expires_at.getTime())
+    expect(after.rows[0].revoked_at).toBeNull()
+    expect(after.rows[0].deployment_epoch).toBe('epoch-test-1')
+    // Positive control: the same row still resolves where OIDC is enabled, so only the method rule rejected it.
+    expect(await storeFor(['OIDC', 'BreakGlass']).resolve(issued.cookie, { touch: false })).toMatchObject({ subject: { method: 'OIDC' } })
+  })
+
+  it.each([
+    ['bootstrap-only', ['Bootstrap'], { Bootstrap: true, BreakGlass: false, OIDC: false }],
+    ['OIDC with break-glass', ['OIDC', 'BreakGlass'], { Bootstrap: false, BreakGlass: true, OIDC: true }],
+    ['OIDC only', ['OIDC'], { Bootstrap: false, BreakGlass: false, OIDC: true }],
+  ])('honours exactly the methods the %s mode enables', async (_mode, allowed, expected) => {
+    const modeStore = storeFor(allowed)
+    for (const [method, accepted] of Object.entries(expected)) {
+      const issued = await issueAs(method)
+      const resolved = await modeStore.resolve(issued.cookie, { touch: false })
+      const decision = await modeStore.authorize(issued.cookie, request)
+      if (accepted) {
+        expect(resolved, method).toMatchObject({ subject: { method } })
+        expect(decision.allowed, method).toBe(true)
+        const rotated = await modeStore.rotate(issued.cookie)
+        expect(rotated, method).not.toBeNull()
+        expect(await modeStore.resolve(rotated!.cookie, { touch: false }), method).toMatchObject({ subject: { method } })
+      } else {
+        expect(resolved, method).toBeNull()
+        expect(decision, method).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
+        expect(await modeStore.rotate(issued.cookie), method).toBeNull()
+      }
+    }
+  })
+
+  it.each([[{ touch: false }], [{ touch: true }]])('revokes a row whose recorded method disagrees with its encrypted context (%j)', async (options) => {
+    const issued = await issue()
+    await pool.query("UPDATE ok_console.sessions SET authentication_method = 'Bootstrap'")
+    const bootstrapOnly = storeFor(['Bootstrap'])
+
+    await expect(bootstrapOnly.resolve(issued.cookie, options))
+      .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'SESSION_METHOD_MISMATCH' })
+    const row = await pool.query('SELECT revoked_at, revoke_reason FROM ok_console.sessions')
+    expect(row.rows[0].revoked_at).not.toBeNull()
+    expect(row.rows[0].revoke_reason).toBe('METHOD_MISMATCH')
+    expect(await bootstrapOnly.resolve(issued.cookie, options)).toBeNull()
+    expect(await bootstrapOnly.rotate(issued.cookie)).toBeNull()
+  })
+
+  it('revokes a mismatched row when rotation is the first read', async () => {
+    const issued = await issue()
+    await pool.query("UPDATE ok_console.sessions SET authentication_method = 'Bootstrap'")
+    const bootstrapOnly = storeFor(['Bootstrap'])
+
+    await expect(bootstrapOnly.rotate(issued.cookie)).rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'SESSION_METHOD_MISMATCH' })
+    const row = await pool.query('SELECT revoked_at, revoke_reason FROM ok_console.sessions')
+    expect(row.rowCount).toBe(1)
+    expect(row.rows[0].revoked_at).not.toBeNull()
+    expect(row.rows[0].revoke_reason).toBe('METHOD_MISMATCH')
+  })
+
+  it.each([
+    ['rejects a restored Local session when Local is disabled', [], 'Local', false],
+    ['keeps a restored Local session when Local is enabled', ['Local'], 'Local', true],
+    ['rejects a restored OIDC session under an empty method set', [], 'OIDC', false],
+  ])('%s', async (_case, allowed, method, accepted) => {
+    const issued = await issueAs(method as string)
+    const modeStore = storeFor(allowed as string[])
+    const resolved = await modeStore.resolve(issued.cookie, { touch: false })
+    const decision = await modeStore.authorize(issued.cookie, request)
+    const rotated = await modeStore.rotate(issued.cookie)
+    if (accepted) {
+      expect(resolved).toMatchObject({ subject: { method } })
+      expect(decision.allowed).toBe(true)
+      expect(rotated).not.toBeNull()
+    } else {
+      expect(resolved).toBeNull()
+      expect(decision).toMatchObject({ allowed: false, reason: 'INVALID_CONTEXT' })
+      expect(rotated).toBeNull()
+    }
+  })
+
+  it('refuses to issue a session for a method the mode does not enable', async () => {
+    await expect(storeFor(['Bootstrap']).create({ subject, scope, permissions, authorizationRevision: 'mapping-revision-7' }))
+      .rejects.toMatchObject<Partial<SessionStoreError>>({ code: 'INVALID_INPUT' })
+    expect((await pool.query('SELECT count(*)::int AS count FROM ok_console.sessions')).rows[0].count).toBe(0)
   })
 
   it('fails closed when the envelope key is unavailable', async () => {
     const issued = await issue()
     const wrongCodec = new SessionEnvelopeCodec({ primaryKeyId: 'key-2', keys: { 'key-2': keyTwo } })
-    const wrongKeyStore = new PostgresSessionStore({ pool, codec: wrongCodec, deploymentEpoch: 'epoch-test-1' })
+    const wrongKeyStore = new PostgresSessionStore({ allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'], pool, codec: wrongCodec, deploymentEpoch: 'epoch-test-1' })
 
     await expect(wrongKeyStore.resolve(issued.cookie, { touch: false })).rejects.toMatchObject<Partial<SessionStoreError>>({
       code: 'DECRYPT_FAILED',
@@ -180,6 +296,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       environmentId: scope.environmentId,
     })
     const staleStore = new PostgresSessionStore({
+      allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'],
       pool,
       codec,
       deploymentEpoch: 'epoch-test-1',
@@ -190,6 +307,7 @@ suite('ADR-038 PostgreSQL Session Store conformance', () => {
       environmentId: scope.environmentId,
     })
     const currentStore = new PostgresSessionStore({
+      allowedMethods: ['OIDC', 'BreakGlass', 'Bootstrap', 'Local'],
       pool,
       codec,
       deploymentEpoch: 'epoch-test-1',

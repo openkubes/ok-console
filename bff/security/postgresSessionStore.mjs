@@ -20,7 +20,14 @@ const ACTIVE_PREDICATE = `
   AND deployment_epoch = $2
   AND revoked_at IS NULL
   AND idle_expires_at > clock_timestamp()
-  AND absolute_expires_at > clock_timestamp()`
+  AND absolute_expires_at > clock_timestamp()
+  AND authentication_method = ANY($3::text[])`
+
+export const SESSION_METHODS = Object.freeze(['OIDC', 'BreakGlass', 'Bootstrap', 'Local'])
+
+const validAllowedMethods = (value) => Array.isArray(value)
+  && Array.from(value).every(method => SESSION_METHODS.includes(method))
+  && new Set(value).size === value.length
 
 export class SessionStoreError extends Error {
   constructor(code, cause) {
@@ -71,6 +78,8 @@ const rowContext = (row, codec) => {
     }
     throw error
   }
+  // The SQL filter trusts the authentication_method column; the encrypted context must agree.
+  if (payload.subject.method !== row.authentication_method) throw new SessionStoreError('SESSION_METHOD_MISMATCH')
   return {
     apiVersion: SECURITY_CONTRACT_VERSION,
     kind: 'AuthorizationContext',
@@ -111,16 +120,19 @@ export class PostgresSessionStore {
     pool,
     codec,
     deploymentEpoch,
+    allowedMethods,
     authorizationRevisionValidator = null,
     contextValidator = null,
     random = randomBytes,
     lifetimesFor = sessionLifetimesFor,
     now = () => new Date(),
   }) {
-    if (!pool?.query || !pool?.connect || !codec?.encrypt || !codec?.decrypt || !validSessionString(deploymentEpoch)) {
+    if (!pool?.query || !pool?.connect || !codec?.encrypt || !codec?.decrypt || !validSessionString(deploymentEpoch)
+      || !validAllowedMethods(allowedMethods)) {
       throw new SessionStoreError('INVALID_CONFIGURATION')
     }
     this.pool = pool
+    this.allowedMethods = Object.freeze([...allowedMethods])
     this.codec = codec
     this.deploymentEpoch = deploymentEpoch
     this.authorizationRevisionValidator = authorizationRevisionValidator
@@ -132,6 +144,7 @@ export class PostgresSessionStore {
 
   async create({ subject, scope, permissions, authorizationRevision }, database = this.pool) {
     validateSessionCreationInput({ subject, scope, permissions })
+    if (!this.allowedMethods.includes(subject.method)) throw new SessionStoreError('INVALID_INPUT')
     assertStoreInput({ authorizationRevision, deploymentEpoch: this.deploymentEpoch })
     try {
       const clock = await pgQuery(database, 'SELECT clock_timestamp() AS database_now')
@@ -177,16 +190,35 @@ export class PostgresSessionStore {
             absolute_expires_at
           )
           WHERE ${ACTIVE_PREDICATE}
-          RETURNING *`, [digest, this.deploymentEpoch])
+          RETURNING *`, [digest, this.deploymentEpoch, this.allowedMethods])
         : await pgQuery(this.pool, `
           SELECT * FROM ok_console.sessions
-          WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch])
-      const context = result.rows[0] ? rowContext(result.rows[0], this.codec) : null
+          WHERE ${ACTIVE_PREDICATE}`, [digest, this.deploymentEpoch, this.allowedMethods])
+      const context = result.rows[0] ? await this.contextOrRevoke(result.rows[0]) : null
       if (context && this.contextValidator && !await this.contextValidator(context)) return null
       return context
     } catch (error) {
       throw normalizeStoreFailure(error)
     }
+  }
+
+  // A row whose column and encrypted method disagree is revoked, so a touch that already
+  // extended it cannot leave a live session behind.
+  async contextOrRevoke(row) {
+    try {
+      return rowContext(row, this.codec)
+    } catch (error) {
+      if (error?.code === 'SESSION_METHOD_MISMATCH') await this.revokeMismatched(row.session_digest)
+      throw error
+    }
+  }
+
+  async revokeMismatched(digest) {
+    await pgQuery(this.pool, `
+      UPDATE ok_console.sessions
+      SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
+          revoke_reason = COALESCE(revoke_reason, 'METHOD_MISMATCH')
+      WHERE session_digest = $1`, [digest])
   }
 
   async transaction(operation) {
@@ -220,19 +252,26 @@ export class PostgresSessionStore {
   async rotate(cookieHeader) {
     const oldSessionId = readSessionCookie(cookieHeader)
     if (!oldSessionId) return null
+    let mismatched = null
     return this.transaction(async client => {
       await pgQuery(client, 'BEGIN')
       const selected = await pgQuery(client, `
         SELECT *, clock_timestamp() AS database_now
         FROM ok_console.sessions
         WHERE ${ACTIVE_PREDICATE}
-        FOR UPDATE`, [digestSessionValue(oldSessionId), this.deploymentEpoch])
+        FOR UPDATE`, [digestSessionValue(oldSessionId), this.deploymentEpoch, this.allowedMethods])
       const row = selected.rows[0]
       if (!row) {
         await pgQuery(client, 'ROLLBACK')
         return null
       }
-      const oldContext = rowContext(row, this.codec)
+      let oldContext
+      try {
+        oldContext = rowContext(row, this.codec)
+      } catch (error) {
+        if (error?.code === 'SESSION_METHOD_MISMATCH') mismatched = row.session_digest
+        throw error
+      }
       if (this.contextValidator && !await this.contextValidator(oldContext, client)) {
         await client.query('ROLLBACK')
         return null
@@ -282,6 +321,10 @@ export class PostgresSessionStore {
       }
       const remainingSeconds = Math.max(0, Math.floor((asDate(row.absolute_expires_at).getTime() - asDate(row.database_now).getTime()) / 1_000))
       return publicIssue({ values, context, maxAgeSeconds: remainingSeconds })
+    }).catch(async (error) => {
+      // The aborted transaction cannot revoke the row, so revoke it once the lock is released.
+      if (mismatched) await this.revokeMismatched(mismatched).catch(() => {})
+      throw error
     })
   }
 

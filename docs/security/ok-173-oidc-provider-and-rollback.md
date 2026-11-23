@@ -41,8 +41,10 @@ equal the environment the observed-state source serves, otherwise every projecti
 
 1. Set `OK_CONSOLE_OIDC_ENABLED` to `false` (or remove it) and `OK_CONSOLE_LOCAL_ACCESS_MODE` to
    `bootstrap`, with a Bootstrap account file.
-2. **Set a new, never-used `OK_CONSOLE_SESSION_EPOCH`.** Without it, OIDC sessions issued before
-   the rollback stay valid until they expire; the epoch change is what rejects them.
+2. **Set a new, never-used `OK_CONSOLE_SESSION_EPOCH`.** The BFF already rejects any session
+   whose sign-in method the current mode does not enable, so OIDC and BreakGlass sessions fail
+   closed under bootstrap-only even with the old epoch. The new epoch is defense in depth: it
+   also ends every pre-rollback session for good, so a later roll-forward cannot revive one.
 3. Deploy an image whose SPA was built with `VITE_CONSOLE_AUTH_MODE=bootstrap` (image label
    `io.openkubes.console.auth-mode=bootstrap`). The SPA mode is fixed at build time: a
    break-glass build keeps offering the identity provider even when the BFF runs bootstrap-only.

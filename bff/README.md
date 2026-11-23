@@ -95,12 +95,17 @@ session-table DML. Construct `PostgresSessionStore` with:
 - a `pg.Pool` connected to the read/write primary through verified TLS;
 - a `SessionEnvelopeCodec` whose 32-byte keys come from the accepted Secret
   Contract;
-- the current deployment session epoch; and
+- the current deployment session epoch;
+- `allowedMethods`, the sign-in methods the current mode enables (required; the
+  runtime derives it from `OK_CONSOLE_OIDC_ENABLED`, `OK_CONSOLE_LOCAL_ACCESS_MODE`
+  and the local identity profile, and an empty set honours no session); and
 - an authorization-revision validator backed by the current identity mapping.
 
 The adapter never falls back to memory. Missing envelope keys, stale or
-unverified authorization revisions, database errors, invalid epochs and
-ambiguous rotation outcomes fail closed. PostgreSQL replicas must not serve
+unverified authorization revisions, database errors, invalid epochs, sessions
+whose sign-in method the current mode does not enable, and ambiguous rotation
+outcomes fail closed. A row whose recorded method disagrees with its encrypted
+context is revoked. PostgreSQL replicas must not serve
 session authorization reads.
 
 ### Secure runtime selection

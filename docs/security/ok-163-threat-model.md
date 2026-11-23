@@ -31,7 +31,7 @@ assembled reviewer evidence is in
 | Session fixation or stolen cookie | Rotate after authentication/privilege change; opaque revocable reference; Secure/HttpOnly/SameSite; expiry tests |
 | CSRF on future mutations | Origin validation plus session-bound CSRF token; missing/mismatched token denied |
 | XSS steals provider tokens | Provider tokens never reach browser JavaScript or browser storage; CSP remains a defense-in-depth follow-up |
-| Forged or confused-provider identity | Server-configured issuer only; signature/algorithm/audience/azp/time/nonce/state/PKCE validation |
+| Forged or confused-provider identity | Server-configured issuer only; audience, nbf/exp, nonce, state and PKCE validation; TLS to the token endpoint with explicit trust (OIDC Core 3.1.3.7). Current-library characterization (openid-client 6.8.7): single-audience foreign azp accepted; future iat accepted; ID-token signature not verified and JWKS not fetched in the code flow — policy decision pending (OK-163 security-hardening follow-up). Tests are evidence, not approval. |
 | Email/group claim privilege escalation | Stable provider-scoped subject mapping; explicit reviewed mapping; unknown or conflicting membership denied |
 | Cross-tenant/environment access | Scope is bound into the server context and rechecked at point of use |
 | Expired, revoked or stale membership continues | Idle and absolute expiry plus server revocation; no outage-based extension |

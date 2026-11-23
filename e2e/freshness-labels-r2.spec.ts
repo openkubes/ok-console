@@ -79,7 +79,7 @@ for (const mechanism of ['server ageing', 'browser ceiling'] as const) {
         await noCurrency(page)
       }
       await navigate(page, 'overview')
-      await expect(page.getByRole('heading', { name: 'Hello Arash' })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Welcome to OpenKubes' })).toBeVisible()
       await page.getByRole('button', { name: 'Platform status', exact: true }).click()
       await noCurrency(page)
       await navigate(page, 'clusters')

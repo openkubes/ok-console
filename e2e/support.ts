@@ -6,7 +6,8 @@ export const signInPrototype = async (page: Page) => {
   await page.getByRole('button', { name: 'Continue with OpenKubes Identity' }).click()
   await page.getByRole('button', { name: 'Simulate identity provider return' }).click()
   await page.getByRole('button', { name: 'Enter Console' }).click()
-  await expect(page.getByRole('heading', { name: 'Hello Arash' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Welcome to OpenKubes' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Sign out of/ })).toBeVisible()
 }
 
 export const openPrimaryNavigation = async (page: Page) => {

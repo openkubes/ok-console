@@ -87,10 +87,14 @@ describe('OpenKubes Console', () => {
     } finally { vi.unstubAllEnvs() }
   })
 
-  it('keeps regular prototype greetings unchanged without public demo build', async () => {
+  it('welcomes signed-in users with the product name without public demo build', async () => {
     await renderSignedIn()
     expect(screen.queryByRole('note', { name: 'Simulated demo' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Hello Arash' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+    expect(screen.getByText('Arash Kaffamanesh')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Hello Arash/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Hello Arash/)).not.toBeInTheDocument()
+    expect(screen.getByText('One evidence-backed view across your sovereign OpenKubes platforms.')).toBeInTheDocument()
   })
 
   it('restores a live BFF session before exposing platform data and logs out server-side', async () => {
@@ -104,9 +108,11 @@ describe('OpenKubes Console', () => {
     render(<App auth={auth}/>)
 
     expect(screen.getByText('Checking secure Console session…')).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Hello Live' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+    expect(screen.getByText('Live User')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Sign out of OpenKubes Console/i }))
     await waitFor(() => expect(auth.logout).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Sign out of OpenKubes Console/i })).not.toBeInTheDocument())
     expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Local account not enabled/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Use a local account/i })).not.toBeInTheDocument()
@@ -140,6 +146,7 @@ describe('OpenKubes Console', () => {
     await renderSignedIn()
     expect(screen.getByText('Federated identity')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Sign out of OpenKubes Console/i }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Sign out of OpenKubes Console/i })).not.toBeInTheDocument())
     expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
     expect(screen.queryByText('ok-mgmt')).not.toBeInTheDocument()
   })
@@ -182,7 +189,8 @@ describe('OpenKubes Console', () => {
     await waitFor(() => expect(authenticateLocal).toHaveBeenCalledWith({
       username: 'recovery-admin', password: 'one-time-secret', reason: 'Federation provider is unavailable',
     }))
-    expect(await screen.findByRole('heading', { name: 'Hello Recovery' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Welcome to OpenKubes' })).toBeInTheDocument()
+    expect(screen.getByText('Recovery Admin')).toBeInTheDocument()
     expect(screen.queryByDisplayValue('one-time-secret')).not.toBeInTheDocument()
   })
 

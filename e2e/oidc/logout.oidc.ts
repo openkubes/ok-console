@@ -21,6 +21,7 @@ test('AC8: sign-out revokes the server-side session and clears the session and C
   for (const name of [SESSION_COOKIE, CSRF_COOKIE]) {
     expect(cleared.some((value) => value.startsWith(`${name}=;`) && /Max-Age=0/i.test(value))).toBe(true)
   }
+  await expect(page.getByRole('button', { name: /^Sign out of / })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: /Welcome to/ })).toBeVisible()
   expect(await cookie(context, SESSION_COOKIE)).toBeUndefined()
   expect(await cookie(context, CSRF_COOKIE)).toBeUndefined()

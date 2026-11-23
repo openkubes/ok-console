@@ -26,7 +26,7 @@ image, OIDC callback, subject mapping, and browser evidence have been checked.
 
 This is an operator-run recovery procedure, not an automatic runtime fallback.
 Before applying it, stop ingress exposure and verify custody of the approved
-bootstrap credential. Generate a new single-use Bootstrap/post-recovery pair:
+bootstrap credential. The bootstrap record is an unreleased sentinel: complete the separately authorized [bootstrap recovery image release](../../../../docs/evidence/ok-170/maintenance-procedure.md#bootstrap-recovery-image-release) before rendering; the renderer refuses the sentinel. Generate a new single-use Bootstrap/post-recovery pair:
 
 ```bash
 node deploy/kubernetes/render-ok-shared-recovery.mjs \

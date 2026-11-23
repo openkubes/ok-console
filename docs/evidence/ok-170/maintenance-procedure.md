@@ -20,7 +20,7 @@ Approved sequence (OK-170 comment 15421): (a) prerequisite PRs reviewed; (b) bui
 | Rollback | Decision 3(b): C0/P0 is used only while the Console is withdrawn fail-closed, so stale data is never served as Current. C0/P0 is not an authorized serving state. Return to verified C1/P1 on GO; otherwise remain withdrawn until an explicitly approved safe recovery. Proven on a disposable cluster first. |
 | Identifiers | Same-epoch upgrade: C1 keeps E0/A0. Every later transition takes an unused value from the [identifier ledger](#identifier-ledger). |
 | Identity/origin | Owner-attested mapped/unmapped test identities, exact HTTPS callback, PKCE, trusted issuer and working emergency access. Approve the browser origin/callback at G0; prove reachability at G1 before browser tests. No edits to the shared Keycloak realm, signing keys or client configuration. |
-| Recovery readiness | The bootstrap recovery overlay pins C1-R; the breakglass (post-recovery) overlay pins C1. `deploy/kubernetes/overlays/expected-digests.json` holds, per recovery overlay, the index digest and platform-child digests; `deploy/kubernetes/render-ok-shared-recovery.mjs` fails unless each overlay's pin and rendered image equal that file. Both entries stay at the rc.3 digest until the pin PR updates overlays and file together. |
+| Recovery readiness | The bootstrap recovery overlay pins C1-R; the breakglass (post-recovery) overlay pins C1. `deploy/kubernetes/overlays/expected-digests.json` holds, per recovery overlay, the index digest and platform-child digests; `deploy/kubernetes/render-ok-shared-recovery.mjs` fails unless each overlay's pin and rendered image equal that file. The bootstrap entry is an unreleased all-zero sentinel; the breakglass entry currently retains rc.3 pending the separate reviewed C1 pin change below. Rendering refuses until the separately authorized bootstrap recovery image release step below updates its record and pin together. |
 | Budgets | Proposed: initial Console rollout ≤300 s; other Deployments ≤180 s each; browser lifecycle ≤10 min; withdrawal convergence ≤30 s; individual source request ≤10 s. Pending-flow rejection must finish <300 s from flow start, including rollout. Approve an adequate total window. |
 
 ### Candidate pair
@@ -264,3 +264,42 @@ Record UTC, step, approval, operator/observer, exact sanitized commands/status/e
 - **Applies to:** candidate C1/C1-R/P1, the same-epoch upgrade, rollback under decision 3(b), and field manager ok-172-live under decision 5.
 - **Shown in:** the recorded phase observations of a separately approved window; baseline facts are planning inputs from the 2026-10-22 read-only inspection.
 - **Follow-ups:** publication approval, digest pins, disposable rehearsal, the G0 package, window and owners, and AC4/AC10 evidence with independent review; open items stay in the [acceptance plan](acceptance-plan.md).
+
+## C1 break-glass pin change
+
+After separately authorized C1 publication (`dev-breakglass-v0.1.0-rc.30` above),
+prepare its own reviewed change: update the `ok-shared-breakglass` record entry
+(index and platform-child digests) and that overlay's pin together to C1. The
+currently tracked rc.3 entry is not C1. Review the coordinated C1 change before
+freezing the recovery artifacts in the G0 package. This is separate from the
+bootstrap release step below.
+
+## Bootstrap recovery image release
+
+This is a separate, separately authorized change; this PR publishes no image and does
+not release the sentinel. After publication is authorized, use the existing trusted
+`dev-v*` workflow for a bootstrap/bff build. Retain the immutable index digest,
+platform-child digests, full source revision and release tag with the signed provenance.
+
+Stage the candidate release in a review tree: update only the bootstrap entry in
+`deploy/kubernetes/overlays/expected-digests.json` with the released image, platform
+children and provenance `{authMode: bootstrap, dataMode: bff, releaseTag, revision}`,
+and update its overlay pin to the same digest. State is derived from the digest;
+there is no stored state. Preserve the breakglass entry and overlay pin. No bootstrap
+index or child digest may overlap the recorded breakglass index or children.
+
+Offline checks prove the record is well-formed, distinct from the recorded break-glass image and that the unreleased sentinel blocks rendering. They do not prove which build an image is. Bootstrap build identity (auth-mode=bootstrap label, GitHub build attestation from publish-dev-image, exact platform map) is established only by `verify-recovery-image.sh registry` against the staged release tree, and its output is attached to the reviewed release PR.
+
+`verify-recovery-image.sh local <rev>` validates the working tree’s record and overlay pins, then builds a clean archive of `<rev>`. This allows review of a staged release record before committing it; a released record must name that revision.
+
+
+From that staged tree, run `bash deploy/kubernetes/verify-recovery-image.sh registry
+<image@sha256:...>` against the exact candidate. It validates the shared schema and
+both pins, then requires the raw index platform-to-child map to equal the record exactly and checks every platform's labels and the publish-dev-image attestation
+binding the source revision and tag. Registry verification must pass before the
+coordinated record and overlay pin change is accepted. Re-run the recovery renderer
+and deployment tests and review the generated evidence, which includes bootstrap
+provenance. Obtain separate release approval for that change; never substitute the
+break-glass image or bypass the sentinel. The offline synthetic released fixture proves
+release-readiness of the tooling only. Existing maintenance and live execution gates
+still apply after release.

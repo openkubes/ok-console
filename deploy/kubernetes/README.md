@@ -187,7 +187,14 @@ audit Evidence to PostgreSQL.
 The recovery overlays (`ok-shared-bootstrap-recovery`, `ok-shared-breakglass`)
 take their Console image from `overlays/expected-digests.json`: the index digest
 and the platform-child digests per overlay. The recovery renderer refuses an
-overlay whose pin or rendered image differs from that file.
+overlay whose pin or rendered image differs from that file. Only the bootstrap entry
+contains provenance (`authMode`, `dataMode`, `releaseTag`, `revision`). Its all-zero
+digest is an unreleased sentinel with empty platforms and null provenance values;
+rendering refuses before output until the separately authorized
+[release step](../../docs/evidence/ok-170/maintenance-procedure.md#bootstrap-recovery-image-release).
+`verify-recovery-image.sh local <commit>` checks two clean bootstrap builds without
+publishing; `RECOVERY_VERIFY_BUILD_AUTH_MODE=breakglass` must fail at the auth-mode
+label. Registry mode verifies a coordinated staged release tree against its record.
 
 ## Development image publication
 

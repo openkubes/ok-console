@@ -147,7 +147,7 @@ function OverviewMetric({ suppressed, ...props }: Parameters<typeof Metric>[0] &
   return <Metric {...props} value={suppressed ? 'Unavailable' : props.value} note={suppressed ? 'Not available while observations are incomplete' : props.note}/>
 }
 
-function Overview({ data, identity, openCluster, openEvidence, publicDemo = false }: { data: PlatformSnapshot; identity: string; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void; publicDemo?: boolean }) {
+function Overview({ data, openCluster, openEvidence, publicDemo = false }: { data: PlatformSnapshot; openCluster: (c: Cluster) => void; openEvidence: (e: EvidenceRef) => void; publicDemo?: boolean }) {
   const branding = useBranding()
   const terms = useBrandTerms()
   const ready = data.clusters.filter((cluster) => cluster.readiness === 'Ready').length
@@ -155,7 +155,7 @@ function Overview({ data, identity, openCluster, openEvidence, publicDemo = fals
   const overview = data.overview
   const observedMetric = (value: number | null) => value ?? 'Unavailable'
   return <>
-    <PageTitle eyebrow="Platform posture" title={publicDemo ? `Welcome to ${branding.productShortName}` : `Hello ${identity.trim().split(/\s+/)[0]}`} description={publicDemo ? `Explore a simulated sovereign ${terms.platformNoun} platform through contracts, clusters, and evidence.` : `One evidence-backed view across your sovereign ${terms.platformNoun} platforms.`} action={<span className="snapshot"><ObservationLabel presentation={presentation}/> · {data.source === 'bff' ? 'BFF observation · ' : ''}{formatObservedAt(data.generatedAt)}</span>}/>
+    <PageTitle eyebrow="Platform posture" title={`Welcome to ${branding.productShortName}`} description={publicDemo ? `Explore a simulated sovereign ${terms.platformNoun} platform through contracts, clusters, and evidence.` : `One evidence-backed view across your sovereign ${terms.platformNoun} platforms.`} action={<span className="snapshot"><ObservationLabel presentation={presentation}/> · {data.source === 'bff' ? 'BFF observation · ' : ''}{formatObservedAt(data.generatedAt)}</span>}/>
     <ObservationWarning data={data}/>
     {data.source === 'bff' && data.evidence.some(item => item.immutable) && <p className="receipt-note">Immutable Evidence receipts are retained separately from mutable observations.</p>}
     <section className="metrics-grid" aria-label="Platform metrics">
@@ -733,7 +733,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
       ? <Suspense fallback={<p role="status">Loading local Kubernetes view…</p>}><WjaxClusterView/></Suspense>
     : page === 'users' && wjaxLocalPreviewEnabled && UserProjectManagement
       ? <Suspense fallback={<p role="status">Loading identity & access preview…</p>}><UserProjectManagement/></Suspense>
-    : page === 'overview' ? <Overview data={data} identity={session.identity} publicDemo={publicDemo} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
+    : page === 'overview' ? <Overview data={data} publicDemo={publicDemo} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
     : page === 'clusters' ? <Clusters data={data} openCluster={openCluster} openEvidence={setSelectedEvidence}/>
     : page === 'workloads' ? <Workloads claims={data.claims} data={data} openEvidence={setSelectedEvidence}/>
     : page === 'workspaces' ? <DeveloperWorkspaces/>

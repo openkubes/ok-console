@@ -39,6 +39,8 @@ describe('white-label branding in the Console', () => {
     fireEvent.click(screen.getByRole('button', { name: /Simulate identity provider return/i }))
     fireEvent.click(await screen.findByRole('button', { name: /Enter Console/i }))
     await screen.findByRole('button', { name: 'Sign out of Example Ops Console' })
+    expect(screen.getByRole('heading', { level: 1, name: `Welcome to ${example.productShortName}` })).toBeInTheDocument()
+    expect(screen.queryByText('Welcome to OpenKubes')).not.toBeInTheDocument()
     expect(container.querySelector('.brand img')).toHaveAttribute('src', './branding/example-mark.svg')
     expect(container.querySelector('.brand')).toHaveTextContent('Example OpsSynthetic test brand')
     expect(container.querySelector('.breadcrumbs')).toHaveTextContent('Example Ops')

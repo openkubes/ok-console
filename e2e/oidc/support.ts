@@ -27,6 +27,7 @@ export const authenticationAuditSince = (since: Date) => query<{ authentication_
 export const openSignIn = async (page: Page) => {
   await page.goto(`${harness().origin}/`)
   await expect(page.getByRole('heading', { name: /Welcome to/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Sign out of/ })).toHaveCount(0)
 }
 
 /** Starts the federated flow from the Console UI and returns the authorization request URL. */

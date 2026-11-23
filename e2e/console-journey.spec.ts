@@ -63,7 +63,7 @@ test('keyboard path exposes focus and reaches the main landmark', async ({ page 
   await page.keyboard.press('Enter')
   await page.getByRole('button', { name: 'Simulate identity provider return' }).click()
   await page.getByRole('button', { name: 'Enter Console' }).click()
-  await expect(page.getByRole('heading', { name: 'Hello Arash' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Welcome to OpenKubes' })).toBeVisible()
 
   await page.keyboard.press('Tab')
   const skip = page.getByRole('link', { name: 'Skip to content' })

@@ -30,7 +30,7 @@ test('U1 bottom clearance keeps actions, last Evidence chevron and footer above 
   await signInPrototype(page)
   for (const name of ['overview', 'evidence']) {
     if (name !== 'overview') await page.goto(`/#/${name}`)
-    await expect(page.getByRole('heading', { name: name === 'overview' ? 'Hello Arash' : 'Evidence & Audit', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: name === 'overview' ? 'Welcome to OpenKubes' : 'Evidence & Audit', exact: true })).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
     const target = name === 'overview' ? page.getByRole('button', { name: 'View all clusters' }) : page.locator('.evidence-row').last().locator(':scope > svg').last()
     await expect(page.locator('.diagnostic-launcher')).toBeVisible()
@@ -83,6 +83,7 @@ test('B4 compact navigation keeps Sign out clickable and mobile launcher at 16px
   await page.getByRole('button', { name: 'Open navigation' }).click()
   await expect(page.locator('.diagnostic-launcher')).toBeHidden()
   await page.getByRole('button', { name: 'Sign out of OpenKubes Console' }).click()
+  await expect(page.getByRole('button', { name: 'Sign out of OpenKubes Console' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Welcome to OpenKubes' })).toBeVisible()
 })
 test('U9 detail observation pill clears Transition immutable receipt label', async ({ page }) => {
@@ -139,7 +140,7 @@ test('capture c15353 preview page set', async ({ page }, testInfo) => {
       await expect(page.getByRole('dialog')).toBeVisible()
     }
     const heading = name.startsWith('detail') ? name === 'detail-mgmt' ? 'ok-mgmt' : 'ok-shared'
-      : name === 'overview' || name === 'stale-overview' ? 'Hello Arash'
+      : name === 'overview' || name === 'stale-overview' ? 'Welcome to OpenKubes'
       : name === 'clusters' || name === 'stale-clusters' ? 'Clusters'
       : name === 'agents' ? 'AI Agents' : name === 'evidence' ? 'Evidence & Audit'
       : name === 'workspaces' ? 'Developer Workspaces' : name[0].toUpperCase() + name.slice(1)

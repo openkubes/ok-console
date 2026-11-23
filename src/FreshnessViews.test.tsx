@@ -85,7 +85,8 @@ async function mount(view = 'overview', verdict: Freshness = 'Current', options:
   vi.spyOn(consoleData, 'getCluster').mockImplementation(id => adapter.getCluster(id))
   const result = render(<App auth={auth}/>)
   await act(async () => {})
-  screen.getByRole('heading', { name: view === 'overview' ? 'Hello Freshness' : view === 'agents' ? 'AI Agents' : view === 'clusters' || view === 'detail' ? 'Clusters' : view === 'workloads' ? 'Workloads' : 'Evidence & Audit' })
+  screen.getByRole('heading', { name: view === 'overview' ? 'Welcome to OpenKubes' : view === 'agents' ? 'AI Agents' : view === 'clusters' || view === 'detail' ? 'Clusters' : view === 'workloads' ? 'Workloads' : 'Evidence & Audit' })
+  screen.getByRole('button', { name: /Sign out of/ })
   if (view === 'detail') {
     fireEvent.click(screen.getByRole('button', { name: `Open ${c.data.items[0].name}` }))
     await act(async () => {})
@@ -641,7 +642,7 @@ it('R2 S2 failed refresh retains aged data and shows a bounded reason, correlati
   expect(alert).toHaveTextContent('Producer refresh unavailable.')
   expect(alert).toHaveTextContent('Correlation ID r2-correlation')
   expect(alert.textContent!.length).toBeLessThan(400)
-  expect(screen.getByRole('heading', { name: 'Hello Freshness' })).toBeVisible()
+  expect(screen.getByRole('heading', { name: 'Welcome to OpenKubes' })).toBeVisible()
   noCurrency(document.querySelector('.snapshot')!)
   fireEvent.click(screen.getByRole('button', { name: 'Retry safely' }))
   await act(async () => {})

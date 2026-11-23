@@ -167,10 +167,14 @@ restart storms.
 
 Apply `security/postgres/002_oidc_transactions.sql` and enable
 `OK_CONSOLE_OIDC_ENABLED=true` only with the PostgreSQL runtime. The BFF uses
-the pinned `openid-client` library for issuer discovery, JWKS/signature and
-token-claim validation, Authorization Code exchange, PKCE S256, State, and
-Nonce validation. Discovery starts from the configured issuer identifier over
-HTTPS with a bounded timeout.
+the pinned `openid-client` 6.8.7 library for issuer discovery, Authorization
+Code exchange, and ID-token claim validation (`iss`, `aud`, `azp` for
+multi-audience tokens, `exp`/`nbf`, and `nonce`). ID-token signatures are not
+verified and JWKS is not fetched in the code flow; trust in the token comes
+from verified TLS to the configured token endpoint. The policy decision is
+pending (ADR-Platform-037 section 1; OK-163). The BFF checks State and sends
+PKCE S256, which the provider enforces. Discovery starts from the configured
+issuer identifier over HTTPS with a bounded timeout.
 
 PKCE verifier, State, and Nonce are encrypted in PostgreSQL for five minutes.
 The browser receives only a digest-backed `Secure`, `HttpOnly`, `SameSite=Lax`
@@ -195,8 +199,11 @@ bounded mounted files. The mapping file shape is:
 }
 ```
 
-Only the cryptographically validated `sub` selects a reviewed mapping. Email,
-display-name, role, and group claims never grant authority. Unmapped subjects,
+Only the issuer-scoped `sub` from the ID token received over verified TLS,
+after the claim checks above, selects a reviewed mapping. This does not imply
+ID-token signature verification; the policy decision remains pending
+(ADR-Platform-037 section 1; OK-163). Email, display-name, role, and group claims
+never grant authority. Unmapped subjects,
 duplicate mappings, missing ID Tokens, stale transactions, provider errors,
 and configuration ambiguity fail closed with bounded errors. Register the exact
 callback `${OK_CONSOLE_ORIGIN}/api/console/v0/auth/oidc/callback` at the provider.

@@ -96,7 +96,10 @@ test('stale Current Evidence renders the affected cluster Unknown', async ({ pag
     await expect(drawer.getByText('Last observed: Ready', { exact: true })).toBeVisible()
     await expect(drawer.locator('.status-ready')).toHaveCount(0)
   } finally {
-    server.closeAllConnections()
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    try { if (!page.isClosed()) await page.unrouteAll({ behavior: 'ignoreErrors' }) }
+    finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
   }
 })

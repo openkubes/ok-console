@@ -171,10 +171,13 @@ the pinned `openid-client` 6.8.7 library for issuer discovery, Authorization
 Code exchange, and ID-token claim validation (`iss`, `aud`, `azp` for
 multi-audience tokens, `exp`/`nbf`, and `nonce`). ID-token signatures are not
 verified and JWKS is not fetched in the code flow; trust in the token comes
-from verified TLS to the configured token endpoint. The policy decision is
-pending (ADR-Platform-037 section 1; OK-163). The BFF checks State and sends
-PKCE S256, which the provider enforces. Discovery starts from the configured
-issuer identifier over HTTPS with a bounded timeout.
+from verified TLS to the configured issuer (discovery) and to the token
+endpoint that discovery names. The policy decision is pending
+(ADR-Platform-037 section 1; OK-163). The BFF checks State and sends PKCE S256;
+PKCE enforcement is a provider registration requirement (Required, S256; see
+docs/security/ok-173-oidc-provider-and-rollback.md) and is not verified by the
+BFF. Discovery starts from the configured issuer identifier over HTTPS with a
+bounded timeout.
 
 PKCE verifier, State, and Nonce are encrypted in PostgreSQL for five minutes.
 The browser receives only a digest-backed `Secure`, `HttpOnly`, `SameSite=Lax`

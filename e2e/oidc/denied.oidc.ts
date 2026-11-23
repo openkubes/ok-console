@@ -6,8 +6,9 @@ import {
 } from './support'
 
 // Browser-level denied flows against the real issuer. API-level negatives for a forged issuer,
-// audience, nonce or signature live in the OK-163 callback suite; this file covers what only a
-// real browser + real provider can show.
+// audience and nonce live in the OK-163 callback suite. ID-token signature behaviour is
+// characterized there: not verified by the current library; policy decision pending (OK-163).
+// This file covers what only a real browser + real provider can show.
 
 const auditTrail = async (since: Date) => (await authenticationAuditSince(since)).map((row) => `${row.authentication_method}:${row.outcome}:${row.cause}`)
 const isCallback = (url: URL) => url.pathname === CALLBACK_PATH

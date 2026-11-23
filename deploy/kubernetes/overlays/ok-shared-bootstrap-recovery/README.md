@@ -4,8 +4,8 @@ This is a deliberately explicit, reversible recovery profile for a controlled
 maintenance window. It is not a startup fallback and must never be applied
 automatically.
 
-The checked-in overlays are templates pinned to the reviewed Console rc.3
-digest. Generate a new single-use manifest pair for every recovery:
+The checked-in overlays are templates pinned to the Console digest recorded for
+each overlay in `../expected-digests.json`. Generate a new single-use manifest pair for every recovery:
 
 ```bash
 node deploy/kubernetes/render-ok-shared-recovery.mjs \

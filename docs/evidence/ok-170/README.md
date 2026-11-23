@@ -4,13 +4,13 @@
 
 ## Post-event review package — planning only
 
-The event has ended. Scope C is one working day of 6 h; this planning record grants no execution approval. Historical records below remain dated evidence, not current deployment assertions.
+This planning record grants no execution approval. OK-170 comment 15421 approves bounded preparation only; no live step is approved. Historical records below remain dated evidence, not current deployment assertions.
 
 | Review entry | Contract |
 | --- | --- |
-| [Scope C acceptance plan](acceptance-plan.md) | The 6 h plan, completed off-cluster drills, AC map, deferred risks and recorded decisions |
-| [Deferred full-window procedure](maintenance-procedure.md) | Outside Scope C; kept for a later full window and must be re-reviewed against the current candidate before use |
-| Live approval | Step 4 requires Arash's explicit approval of each live write: deploy C1, deploy P1 and fail-closed abort. Existing sign-in configuration; no OIDC change. |
+| [Acceptance plan](acceptance-plan.md) | Current candidate, AC map, deferred risks and recorded decisions |
+| [Maintenance procedure](maintenance-procedure.md) | Same-epoch upgrade procedure for the current candidate, identifier ledger and change inventory; must be re-reviewed against the frozen candidate before any use |
+| Live approval | Every live write needs Arash's separate explicit approval of the hashed artifact package and a dated window; window and owners are deferred (OK-170 comment 15421). |
 
 Historical status: **STOP — Phase B development deployment observed; acceptance/promotion not approved**
 

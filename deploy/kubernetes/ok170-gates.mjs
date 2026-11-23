@@ -16,7 +16,11 @@ const modes = {
   'ownership-release': ['snapshot', 'selected', 'artifact', 'manager', 'apply'],
   permissions: ['matrix'],
   admission: ['snapshot', 'artifact', 'manager', 'delta', 'expect-rejection', 'expect-paths', 'expect-conflict-manager'],
+  'runtime-identity': ['expected'],
 };
+const name = (x) => typeof x === 'string' && /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(x);
+const digest = (x) => typeof x === 'string' && /^sha256:[a-f0-9]{64}$/.test(x);
+const pinned = /^([a-z0-9][a-z0-9._/:-]*)@(sha256:[a-f0-9]{64})$/;
 function json(text, reason) { try { return JSON.parse(text); } catch { fail(reason); } }
 function file(path) { try { return json(readFileSync(path, 'utf8'), 'invalid JSON input'); } catch { fail('missing or invalid JSON input'); } }
 function identity(x, ns, snapshot = false) {
@@ -162,6 +166,7 @@ function parse(argv) {
   for (const k of ['context', 'namespace']) check(string(flags[k]), `missing --${k}`);
   check(process.env.KUBECTL_KUBERC === 'false', 'KUBECTL_KUBERC must be false');
   const required = mode === 'ownership-inventory' ? ['allowlist'] : mode === 'permissions' ? ['matrix']
+    : mode === 'runtime-identity' ? ['expected']
     : mode === 'admission' ? ['snapshot', 'artifact', 'manager'] : ['snapshot', 'selected', 'artifact'];
   if (mode === 'ownership-release') required.push('manager');
   for (const k of required) check(string(flags[k]), `missing --${k}`);
@@ -177,7 +182,17 @@ function parse(argv) {
     else check(!flags['expect-conflict-manager'], 'unexpected conflict manager');
   } else check(!flags['expect-paths'] && !flags['expect-conflict-manager'], 'unexpected rejection flags');
   const input = {};
-  for (const k of ['allowlist', 'matrix', 'snapshot', 'selected', 'artifact', 'delta']) if (flags[k]) input[k] = file(flags[k]);
+  for (const k of ['allowlist', 'matrix', 'snapshot', 'selected', 'artifact', 'delta', 'expected']) if (flags[k]) input[k] = file(flags[k]);
+  if (mode === 'runtime-identity') {
+    check(record(input.expected) && Object.keys(input.expected).length > 0, 'invalid expected images');
+    for (const [id, e] of Object.entries(input.expected)) {
+      const [kind, deployment, extra] = id.split('/');
+      check(kind === 'Deployment' && name(deployment) && extra === undefined, 'invalid expected deployment');
+      check(record(e) && equal(Object.keys(e).sort(), ['container', 'image', 'imageIDs']) && name(e.container)
+        && pinned.test(e.image) && Array.isArray(e.imageIDs) && e.imageIDs.length > 0 && e.imageIDs.every(digest)
+        && new Set(e.imageIDs).size === e.imageIDs.length, 'invalid expected image');
+    }
+  }
   if (input.snapshot) {
     input.id = identity(input.snapshot, flags.namespace, true);
     check(identity(input.artifact, flags.namespace) === input.id, 'artifact identity mismatch');
@@ -321,6 +336,64 @@ function main() {
         }
       }
       for (const pair of matrix.deny) can(pair, true);
+    }
+  } else if (mode === 'runtime-identity') {
+    const revision = (x) => x.metadata?.annotations?.['deployment.kubernetes.io/revision'];
+    const controller = (x) => (x.metadata?.ownerReferences ?? []).filter((o) => o?.controller === true);
+    const ownedBy = (x, kind, uid) => { const c = controller(x); return c.length === 1 && c[0].kind === kind && c[0].uid === uid; };
+    const app = (spec, container) => {
+      check(record(spec) && Array.isArray(spec.containers), 'invalid pod template');
+      const c = spec.containers.filter((x) => x?.name === container);
+      check(c.length === 1, 'app container missing'); return c[0];
+    };
+    function list(kind, selector) {
+      const x = object(run(['get', kind, '-l', selector, '-o', 'json']));
+      check(Array.isArray(x.items) && x.items.every(record), 'invalid kubectl list'); return x.items;
+    }
+    for (const [id, e] of Object.entries(i.expected)) {
+      const deploymentName = id.split('/')[1];
+      const d = object(run(['get', 'deployment', deploymentName, '-o', 'json']));
+      check(d.kind === 'Deployment' && d.metadata?.name === deploymentName && d.metadata?.namespace === f.namespace
+        && string(d.metadata?.uid), 'missing or mismatched deployment');
+      check(d.metadata.deletionTimestamp === undefined && Number.isInteger(d.metadata.generation)
+        && d.status?.observedGeneration === d.metadata.generation, 'deployment rollout not observed');
+      const replicas = d.spec?.replicas;
+      check(Number.isInteger(replicas) && replicas > 0 && ['replicas', 'updatedReplicas', 'readyReplicas', 'availableReplicas']
+        .every((k) => d.status?.[k] === replicas) && !d.status?.unavailableReplicas, 'deployment rollout incomplete');
+      check(app(d.spec?.template?.spec, e.container).image === e.image, 'deployment image mismatch');
+      check(string(revision(d)) && /^\d+$/.test(revision(d)), 'missing deployment revision');
+      const labels = d.spec?.selector?.matchLabels;
+      check(record(labels) && Object.keys(labels).length > 0 && Object.values(labels).every(string)
+        && d.spec.selector.matchExpressions === undefined && Object.keys(d.spec.selector).length === 1, 'unsupported deployment selector');
+      const selector = Object.entries(labels).map(([k, v]) => `${k}=${v}`).join(',');
+      const sets = list('replicasets', selector);
+      check(sets.every((rs) => ownedBy(rs, 'Deployment', d.metadata.uid)), 'foreign ReplicaSet');
+      const current = sets.filter((rs) => revision(rs) === revision(d));
+      check(current.length === 1 && string(current[0].metadata?.uid)
+        && app(current[0].spec?.template?.spec, e.container).image === e.image, 'current ReplicaSet mismatch');
+      check(sets.every((rs) => rs === current[0] || (rs.spec?.replicas === 0 && !rs.status?.replicas)), 'old ReplicaSet has Pods');
+      const pods = list('pods', selector);
+      check(pods.length === replicas, 'unexpected Pod count');
+      const reported = [];
+      for (const p of pods) {
+        check(p.metadata?.deletionTimestamp === undefined, 'terminating Pod');
+        check(ownedBy(p, 'ReplicaSet', current[0].metadata.uid), 'Pod not owned by current ReplicaSet');
+        check(app(p.spec, e.container).image === e.image, 'Pod image mismatch');
+        check(p.status?.phase === 'Running' && (p.status?.conditions ?? []).some((c) => c?.type === 'Ready' && c?.status === 'True'), 'Pod not ready');
+        const s = (p.status?.containerStatuses ?? []).filter((c) => c?.name === e.container);
+        check(s.length === 1 && s[0].ready === true, 'app container not ready');
+        // Docker-shim runtimes report docker-pullable://<repo>@<digest>; containerd reports <repo>@<digest>.
+        const m = pinned.exec(typeof s[0].imageID === 'string' ? s[0].imageID.replace(/^docker-pullable:\/\//, '') : '');
+        check(m && m[1] === pinned.exec(e.image)[1] && e.imageIDs.includes(m[2]), 'running imageID not approved');
+        reported.push(m[2]);
+      }
+      // A rollout that started after the first read would leave the old revision looking healthy: reread and compare.
+      const again = object(run(['get', 'deployment', deploymentName, '-o', 'json']));
+      const pin = (x) => JSON.stringify([x.metadata?.uid, x.metadata?.generation, revision(x), x.status?.observedGeneration,
+        ...['replicas', 'updatedReplicas', 'readyReplicas', 'availableReplicas', 'unavailableReplicas'].map((k) => x.status?.[k] ?? null),
+        app(x.spec?.template?.spec, e.container).image]);
+      check(pin(again) === pin(d), 'deployment changed during verification');
+      result.push({ object: id, revision: revision(d), replicaSet: current[0].metadata.name, imageIDs: [...new Set(reported)].sort(), verdict: 'pass' });
     }
   } else {
     const live = get(i.id);

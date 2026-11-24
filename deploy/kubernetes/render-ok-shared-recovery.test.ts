@@ -4,7 +4,10 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { setImmediate } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { releaseRecord, releasedEntry } from './fixtures/releasedRecovery'
 
 // Each case renders two overlays with kubectl in a scratch copy of deploy/kubernetes.
 vi.setConfig({ testTimeout: 60_000 })
@@ -14,14 +17,20 @@ const file = 'deploy/kubernetes/overlays/expected-digests.json'
 const index = (c: string) => `sha256:${c.repeat(64)}`
 const amd64 = index('1'); const arm64 = index('2')
 const dirs: string[] = []
-afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
+// Rendering cases use spawnSync; let Vitest deliver worker RPC updates between cases.
+afterEach(async () => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  await setImmediate()
+})
 
 function tree() {
   const root = mkdtempSync(join(tmpdir(), 'ok170-recovery-digests-')); dirs.push(root)
   cpSync(source, join(root, 'deploy/kubernetes'), { recursive: true })
+  writeFileSync(join(root, file), JSON.stringify(original()))
+  pin(root, 'ok-shared-bootstrap-recovery', releasedEntry.image.split('@')[1])
   return root
 }
-const original = () => JSON.parse(readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8')) as Record<string, { image: string; platforms: Record<string, string> }>
+const original = () => releaseRecord(JSON.parse(readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8'))) as Record<string, { image: string; platforms: Record<string, string>; provenance?: unknown }>
 function render(root: string, env: NodeJS.ProcessEnv = process.env) {
   const out = join(root, 'out')
   const r = spawnSync('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', out], { cwd: root, encoding: 'utf8', timeout: 55_000, env })
@@ -43,7 +52,7 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
   it('records two differing per-overlay digests and their platform children', () => {
     const root = tree(); const e = original()
     const other = `ghcr.io/openkubes/ok-console@${index('a')}`
-    e['ok-shared-bootstrap-recovery'] = { image: other, platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 } }
+    e['ok-shared-bootstrap-recovery'] = { image: other, platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 }, provenance: releasedEntry.provenance }
     write(root, e); pin(root, 'ok-shared-bootstrap-recovery', index('a'))
     const r = render(root)
     expect(r.stderr).toBe(''); expect(r.status).toBe(0)
@@ -51,7 +60,7 @@ describe('render-ok-shared-recovery.mjs reads its images from expected-digests.j
     expect(readFileSync(join(r.out, 'post-recovery.yaml'), 'utf8')).toContain(`image: ${bg(e).image}`)
     const evidence = JSON.parse(readFileSync(join(r.out, 'recovery-evidence.json'), 'utf8'))
     expect(evidence.imageDigests).toEqual({
-      bootstrap: { overlay: 'ok-shared-bootstrap-recovery', image: other, platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 } },
+      bootstrap: { overlay: 'ok-shared-bootstrap-recovery', image: other, platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 }, provenance: releasedEntry.provenance },
       postRecovery: { overlay: 'ok-shared-breakglass', ...e['ok-shared-breakglass'] },
     })
   })
@@ -107,7 +116,7 @@ printf -- '---\\napiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: extra\\nspec:\
   })
 
   it('refuses a duplicated overlay key that JSON.parse would silently collapse', () => {
-    const root = tree(); const text = readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8')
+    const root = tree(); const text = JSON.stringify(original(), null, 2)
     const entry = JSON.stringify(original()['ok-shared-breakglass'])
     write(root, text.replace(/\n}\s*$/, `,\n  "ok-shared-breakglass": ${entry}\n}\n`))
     refused(root, `${file} is not valid JSON or repeats a key`)
@@ -117,7 +126,7 @@ printf -- '---\\napiVersion: v1\\nkind: Pod\\nmetadata:\\n  name: extra\\nspec:\
     ['image', (t: string) => t.replace(/("image": "[^"]+",)/, `$1\n    "image": "ghcr.io/openkubes/ok-console@${index('d')}",`)],
     ['linux/amd64', (t: string) => t.replace(/("linux\/amd64": "[^"]+",)/, `$1\n      "linux/amd64": "${index('e')}",`)],
   ])('refuses a nested duplicate %s key', (_key, change) => {
-    const root = tree(); const text = readFileSync(join(source, 'overlays/expected-digests.json'), 'utf8')
+    const root = tree(); const text = JSON.stringify(original(), null, 2)
     const changed = change(text); expect(changed).not.toBe(text); write(root, changed)
     refused(root, `${file} is not valid JSON or repeats a key`)
   })

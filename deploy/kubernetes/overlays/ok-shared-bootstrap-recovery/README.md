@@ -5,7 +5,13 @@ maintenance window. It is not a startup fallback and must never be applied
 automatically.
 
 The checked-in overlays are templates pinned to the Console digest recorded for
-each overlay in `../expected-digests.json`. Generate a new single-use manifest pair for every recovery:
+each overlay in `../expected-digests.json`. The bootstrap entry is deliberately unreleased: an all-zero digest, empty platforms,
+and null provenance values. The renderer refuses before creating output. The break-glass
+entry retains its reviewed image and cannot substitute for a bootstrap build.
+
+Complete the separately authorized [bootstrap recovery image release step](../../../../docs/evidence/ok-170/maintenance-procedure.md#bootstrap-recovery-image-release)
+first. No bypass or provenance override is supported. After release, generate a new
+single-use manifest pair for every recovery:
 
 ```bash
 node deploy/kubernetes/render-ok-shared-recovery.mjs \
@@ -16,6 +22,10 @@ The renderer refuses an existing output directory and generates distinct random
 Bootstrap and post-recovery deployment epochs and authorization revisions. Do
 not apply the template overlays directly. Do not reuse a generated manifest
 pair in a later recovery.
+
+Offline checks prove the record is well-formed, distinct from the recorded break-glass image and that the unreleased sentinel blocks rendering. They do not prove which build an image is. Bootstrap build identity (auth-mode=bootstrap label, GitHub build attestation from publish-dev-image, exact platform map) is established only by `verify-recovery-image.sh registry` against the staged release tree, and its output is attached to the reviewed release PR.
+
+`verify-recovery-image.sh local <rev>` validates the working tree’s record and overlay pins, then builds a clean archive of `<rev>`. This allows review of a staged release record before committing it; a released record must name that revision.
 
 ## Rehearsal gate
 

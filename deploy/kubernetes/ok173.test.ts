@@ -1,22 +1,19 @@
 // @vitest-environment node
 
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const exec = promisify(execFile)
+import { recoveryTree, runRenderer } from './fixtures/releasedRecovery'
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 import expectedDigests from './overlays/expected-digests.json'
 
 const digest = expectedDigests['ok-shared-breakglass'].image.split('@')[1]
 
 const generatedRecovery = async () => {
-  const parent = await mkdtemp(join(tmpdir(), 'ok-console-recovery-test-'))
+  const parent = await recoveryTree()
   const output = join(parent, 'generated')
-  await exec('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', output])
+  await runRenderer(parent, output)
   return {
     parent,
     restored: await readFile(join(output, 'post-recovery.yaml'), 'utf8'),

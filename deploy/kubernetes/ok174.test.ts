@@ -1,13 +1,11 @@
 // @vitest-environment node
 
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const exec = promisify(execFile)
+import { recoveryTree, runRenderer, releasedEntry } from './fixtures/releasedRecovery'
+
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8')
 import expectedDigests from './overlays/expected-digests.json'
 
@@ -20,9 +18,9 @@ const envValue = (manifest: string, name: string) => {
 }
 
 const generate = async () => {
-  const parent = await mkdtemp(join(tmpdir(), 'ok-console-recovery-test-'))
+  const parent = await recoveryTree()
   const output = join(parent, 'generated')
-  await exec('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', output])
+  await runRenderer(parent, output)
   return {
     parent,
     bootstrap: await readFile(join(output, 'bootstrap.yaml'), 'utf8'),
@@ -38,6 +36,8 @@ describe('bootstrap recovery profile', () => {
     const restoredPatch = await read('./overlays/ok-shared-breakglass/deployment-breakglass.yaml')
 
     expect(bootstrapOverlay).toContain(bootstrapDigest)
+    expect(bootstrapOverlay).not.toContain(digest)
+    expect(bootstrapDigest).toBe(`sha256:${'0'.repeat(64)}`)
     expect(bootstrapPatch).toContain('value: "false"')
     expect(bootstrapPatch).toContain('value: bootstrap')
     expect(bootstrapPatch).toContain('REPLACE_BOOTSTRAP_RECOVERY_EPOCH')
@@ -50,7 +50,7 @@ describe('bootstrap recovery profile', () => {
     const generated = await generate()
     try {
       const output = join(generated.parent, 'generated')
-      await expect(exec('node', ['deploy/kubernetes/render-ok-shared-recovery.mjs', output]))
+      await expect(runRenderer(generated.parent, output))
         .rejects.toMatchObject({ code: 1 })
     } finally {
       await rm(generated.parent, { recursive: true, force: true })
@@ -76,11 +76,12 @@ describe('bootstrap recovery profile', () => {
 
       expect(new Set(firstValues).size).toBe(4)
       expect(new Set([...firstValues, ...secondValues]).size).toBe(8)
-      expect(first.bootstrap).toContain(`image: ghcr.io/openkubes/ok-console@${bootstrapDigest}`)
+      expect(first.bootstrap).toContain(`image: ghcr.io/openkubes/ok-console@${releasedEntry.image.split('@')[1]}`)
+      expect(first.bootstrap).not.toContain(digest)
       expect(first.restored).toContain(`image: ghcr.io/openkubes/ok-console@${digest}`)
       expect(`${first.bootstrap}${first.restored}`).not.toMatch(/REPLACE_(?:BOOTSTRAP|POST_RECOVERY)_/)
       expect(first.evidence).toMatchObject({ singleUse: true, imageDigests: {
-        bootstrap: { overlay: 'ok-shared-bootstrap-recovery', image: expectedDigests['ok-shared-bootstrap-recovery'].image, platforms: expectedDigests['ok-shared-bootstrap-recovery'].platforms },
+        bootstrap: { overlay: 'ok-shared-bootstrap-recovery', ...releasedEntry },
         postRecovery: { overlay: 'ok-shared-breakglass', image: expectedDigests['ok-shared-breakglass'].image, platforms: expectedDigests['ok-shared-breakglass'].platforms },
       } })
       expect(first.evidence).not.toHaveProperty('imageDigest')

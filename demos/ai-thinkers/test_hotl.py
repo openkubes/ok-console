@@ -145,7 +145,8 @@ class SupervisorTests(unittest.TestCase):
 
     def test_runtime_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            # macOS temp paths may begin with /var -> /private/var.
+            root = Path(directory).resolve()
             real = root / "private"
             real.mkdir(mode=0o700)
             link = root / "linked"

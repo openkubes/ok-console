@@ -66,7 +66,7 @@ export default function WjaxClusterView() {
 
   const data = observation.snapshot
   return <section className="wjax-view" aria-labelledby="wjax-title">
-    <header className="page-title"><div><span className="eyebrow">AI Thinkers Local Lab · Read-only Kubernetes</span><h1 id="wjax-title">Local Kubernetes</h1><p>Cluster <strong>AI Thinkers Demo</strong> · Namespace <strong>AI Thinkers Lab</strong></p><p className="wjax-timestamp">Presentation aliases · <details><summary>Show Kubernetes resource IDs</summary><code>kind-wjax-demo</code> · <code>wjax-demo</code> · <code>wjax-nginx</code></details></p></div><button className="secondary-button" disabled={observation.status === 'loading'} onClick={() => setAttempt((value) => value + 1)}>Refresh observation</button></header>
+    <header className="page-title"><div><span className="eyebrow">AI Thinkers Local Lab · Read-only Kubernetes</span><h1 id="wjax-title">Local Kubernetes</h1><p>Cluster <strong>AI Thinkers Demo</strong> · Namespace <strong>AI Thinkers Lab</strong></p><details className="wjax-timestamp"><summary>Show technical Kubernetes resource IDs</summary><p>Cluster <code>kind-wjax-demo</code> · Namespace <code>wjax-demo</code> · Deployment <code>wjax-nginx</code></p></details></div><button className="secondary-button" disabled={observation.status === 'loading'} onClick={() => setAttempt((value) => value + 1)}>Refresh observation</button></header>
     <div className="panel">
       <p>This view reads the local Kubernetes Reader. It does not grant approval or execute recovery.</p>
       <a className="text-button" href="http://127.0.0.1:8788/" target="_blank" rel="noopener noreferrer">Open AI Thinkers HITL ↗</a>

@@ -66,10 +66,11 @@ export default function WjaxClusterView() {
 
   const data = observation.snapshot
   return <section className="wjax-view" aria-labelledby="wjax-title">
-    <header className="page-title"><div><span className="eyebrow">W-JAX 2026 · Local demo only · Read-only</span><h1 id="wjax-title">Local Kubernetes</h1><p>Cluster <strong>kind-wjax-demo</strong> · Namespace <strong>wjax-demo</strong></p></div><button className="secondary-button" disabled={observation.status === 'loading'} onClick={() => setAttempt((value) => value + 1)}>Refresh observation</button></header>
+    <header className="page-title"><div><span className="eyebrow">AI Thinkers Local Lab · Read-only Kubernetes</span><h1 id="wjax-title">Local Kubernetes</h1><p>Cluster <strong>kind-wjax-demo</strong> · Namespace <strong>wjax-demo</strong></p></div><button className="secondary-button" disabled={observation.status === 'loading'} onClick={() => setAttempt((value) => value + 1)}>Refresh observation</button></header>
     <div className="panel">
       <p>This view reads the local Kubernetes Reader. It does not grant approval or execute recovery.</p>
-      <a className="text-button" href="http://127.0.0.1:8788/" target="_blank" rel="noopener noreferrer">Open Agentic Operations demo ↗</a>
+      <a className="text-button" href="http://127.0.0.1:8788/" target="_blank" rel="noopener noreferrer">Open AI Thinkers HITL ↗</a>
+      <a className="text-button" href="http://127.0.0.1:8794/" target="_blank" rel="noopener noreferrer">Open AI Thinkers HOTL ↗</a>
       <p className="wjax-timestamp">Last successful observation (browser received): {observation.receivedAt ? <time dateTime={observation.receivedAt}>{observation.receivedAt}</time> : 'None yet'}. Refresh explicitly to observe changes.</p>
       {observation.status === 'loading' && <p role="status">Refreshing — no current workload data shown.</p>}
       {observation.status === 'unavailable' && <p role="alert">Reader unavailable or response invalid. No current workload data is shown; any last-success timestamp above is historical. Check the local Reader and refresh.</p>}

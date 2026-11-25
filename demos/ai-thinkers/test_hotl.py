@@ -1,6 +1,8 @@
 """Non-mutating checks for local HOTL evidence projection and policy defaults."""
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -74,6 +76,30 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.hotl.EXPECTED, {
             "operation": "deploy", "workload": "nginx", "replicas": 2, "target": "demo"
         })
+
+    def test_modes_are_mutually_exclusive(self):
+        script = str(BASE / "hotl.py")
+        for flags, expected in [
+            (["--once", "--always"], "not allowed with argument"),
+            ([], "one of the arguments"),
+        ]:
+            with self.subTest(flags=flags):
+                completed = subprocess.run(
+                    [sys.executable, script, "--runtime-dir", "/tmp", *flags],
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn(expected, completed.stderr)
+
+    def test_always_requires_explicit_consent(self):
+        script = str(BASE / "hotl.py")
+        completed = subprocess.run(
+            [sys.executable, script, "--enable-hotl", "--always",
+             "--runtime-dir", "/tmp"],
+            capture_output=True, text=True, timeout=10, env={},
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("explicit AI_THINKERS_HOTL consent", completed.stderr)
 
     def test_trusted_target_pinned(self):
         self.assertEqual((self.hotl.NS, self.hotl.NAME, self.hotl.IMAGE),

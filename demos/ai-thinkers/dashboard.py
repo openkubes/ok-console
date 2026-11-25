@@ -12,23 +12,61 @@ HTML = r"""<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-HOTL_DEMO'; style-src 'nonce-HOTL_DEMO'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <title>OpenKubes AI Thinkers | HOTL</title>
 <style nonce="HOTL_DEMO">
-:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#080f20;color:#edf3ff}
-*{box-sizing:border-box}body{margin:0}main{max-width:1060px;margin:0 auto;padding:34px 22px 70px}
-h1{font-size:clamp(30px,5vw,49px);margin:10px 0}h1 em{font-style:normal;color:#4de1e9}
-p,.muted{color:#a9bad3}h2{font-size:18px;margin:0 0 18px}.eyebrow{letter-spacing:.17em;font-weight:700;font-size:12px;color:#58e6e5}
-.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin:24px 0}
-.card{background:#111f36;border:1px solid #2c405f;border-radius:16px;padding:22px;min-width:0}
-.big{font-size:28px;font-weight:800;overflow-wrap:anywhere}.green{color:#5ae1af}.cyan{color:#51dfef}.amber{color:#ffc878}
-.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin:23px 0}
-.step{border:1px solid #344b67;border-radius:12px;padding:14px 8px;text-align:center;background:#13243c;font-size:13px}
-.step.done{background:#113a37;border-color:#2d9d87}.step.fail{background:#412331;border-color:#ff7598}
-.step span{display:block;font-size:22px;font-weight:800;margin-bottom:8px;color:#56e4ef}
-.timeline{display:flex;flex-direction:column;gap:10px}.event{padding:14px 16px;border-radius:11px;background:#0b172b;border:1px solid #263951}
-.event b{font-size:13px;letter-spacing:.03em}.event time{color:#9fb0c6;font-size:12px;float:right}
-.event small{display:block;color:#a8b9cf;margin-top:7px;overflow-wrap:anywhere}
-.banner{padding:13px 16px;background:#14233a;border:1px solid #2d415e;border-radius:12px;margin:14px 0}
-footer{margin-top:24px;font-size:12px;color:#93a7c1}a{color:#56e4ef}
-@media(max-width:720px){.grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}.event time{float:none;display:block;margin-top:6px}}
+:root{
+  color-scheme:light;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  color:#172033;background:#f7f8fa;
+  --blue:#064fc8;--blue-dark:#073b92;--blue-soft:#e8f0ff;
+  --brand-deep:#061d46;--brand-panel:#092b68;--accent:#f28b12;
+  --green:#189b50;--green-soft:#e9f7ef;--orange:#f28b12;--orange-soft:#fff4e4;
+  --red:#d8393e;--red-soft:#fff0f0;--ink:#172033;--muted:#657086;
+  --line:#dfe3ea;--surface:#fff;
+}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px}
+main{max-width:1140px;margin:0 auto;padding:34px 26px 70px}
+h1{font-size:clamp(30px,4vw,45px);letter-spacing:-.035em;margin:10px 0}
+h1 em{font-style:normal;color:var(--blue)}
+p,.muted{color:var(--muted)}
+h2{font-size:19px;letter-spacing:-.02em;margin:0 0 18px}
+.eyebrow{letter-spacing:.14em;font-weight:800;font-size:11px;color:var(--blue)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:24px 0}
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:22px;min-width:0;box-shadow:0 3px 12px rgba(35,49,72,.035)
+}
+.grid .card{border-left:3px solid var(--blue)}
+.grid .card:nth-child(2){border-left-color:var(--green)}
+.grid .card:nth-child(3){border-left-color:var(--orange)}
+.big{font-size:28px;font-weight:800;letter-spacing:-.03em;overflow-wrap:anywhere}
+.green{color:var(--green)}.cyan{color:var(--blue)}.amber{color:#965a00}
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:20px 0 0}
+.step{
+  border:1px solid #c6d7ed;border-radius:11px;padding:16px 9px;text-align:center;
+  background:var(--blue-soft);color:var(--blue-dark);font-size:13px;font-weight:650
+}
+.step.done{background:var(--green-soft);border-color:#a3d7b6;color:#146a38}
+.step.fail{background:var(--red-soft);border-color:#f1b5b5;color:#a42c31}
+.step span{display:block;font-size:23px;font-weight:800;margin-bottom:8px;color:var(--blue)}
+.step.done span{color:var(--green)}.step.fail span{color:var(--red)}
+.timeline{display:flex;flex-direction:column;gap:10px}
+.event{
+  padding:14px 16px;border-radius:10px;background:#fafcff;
+  border:1px solid #e0e7f0;border-left:3px solid var(--blue)
+}
+.event b{font-size:13px;letter-spacing:.02em;color:var(--ink)}
+.event time{color:var(--muted);font-size:12px;float:right}
+.event small{display:block;color:#596375;margin-top:7px;overflow-wrap:anywhere}
+.banner{
+  padding:13px 16px;background:#eff5ff;border:1px solid #c9daf4;
+  border-radius:11px;margin:16px 0;color:var(--blue-dark);font-size:13px
+}
+footer{margin-top:24px;font-size:12px;line-height:1.7;color:var(--muted)}
+a{color:var(--blue)}
+@media(max-width:720px){
+ main{padding:25px 16px 48px}
+ .grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}
+ .event time{float:none;display:block;margin-top:6px}
+}
 </style></head><body><main>
 <div class="eyebrow">OPENKUBES · LOCAL KIND EXPERIMENT</div>
 <h1>AI Thinkers <em>HOTL</em></h1>
@@ -47,7 +85,7 @@ footer{margin-top:24px;font-size:12px;color:#93a7c1}a{color:#56e4ef}
 <div class="step" data-event="HOTL_EXECUTED"><span>04</span>Bounded patch</div>
 <div class="step" data-event="HOTL_RECOVERY_VERIFIED"><span>05</span>Verify 2/2</div>
 </div></section>
-<section class="card" style="margin-top:16px"><h2>Evidence timeline <span class="muted">(newest first)</span></h2><div class="timeline" id="timeline">No events yet</div></section>
+<section class="card" style="margin-top:20px"><h2>Evidence timeline <span class="muted">(newest first)</span></h2><div class="timeline" id="timeline">No events yet</div></section>
 <footer>Read-only display on 127.0.0.1. No Kubernetes credentials in this browser. JSONL is a local, mutable demo log, not signed evidence. This display cannot enable, pause or stop the supervisor. Use Ctrl-C in its terminal to prevent future actions. Once-only completion is not an ongoing authorization.</footer>
 </main>
 <script nonce="HOTL_DEMO">

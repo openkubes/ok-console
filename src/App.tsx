@@ -198,7 +198,7 @@ function Clusters({ data, openCluster, openEvidence }: { data: PlatformSnapshot;
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div>
             <strong style={{ color: '#15375b' }}>AI Thinkers · Local Kubernetes Lab</strong>
-            <div style={{ marginTop: 5, color: '#37546c', fontSize: 13 }}>Read-only observation · kind-wjax-demo / wjax-demo · Not included in fixture cluster totals</div>
+            <div style={{ marginTop: 5, color: '#37546c', fontSize: 13 }}>Read-only observation · AI Thinkers demo cluster · Not included in fixture cluster totals</div>
           </div>
           <a href="#/wjax" style={{ borderRadius: 8, padding: '10px 14px', color: '#fff', background: '#1059b2', textDecoration: 'none', fontWeight: 600 }}>Explore AI Thinkers →</a><a href="http://127.0.0.1:8788/" target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, padding: '10px 14px', color: '#064fc8', background: '#fff', border: '1px solid #bed2ed', borderRadius: 8, textDecoration: 'none', fontWeight: 600 }}>HITL Recovery ↗</a><a href="http://127.0.0.1:8794/" target="_blank" rel="noopener noreferrer" style={{ marginLeft: 8, padding: '10px 14px', color: '#064fc8', background: '#fff', border: '1px solid #bed2ed', borderRadius: 8, textDecoration: 'none', fontWeight: 600 }}>HOTL Supervisor ↗</a>
         </div>

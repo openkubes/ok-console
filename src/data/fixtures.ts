@@ -73,7 +73,7 @@ export const platformFixture: PlatformSnapshot = {
   ],
   agents: [
     {
-      id: 'agent-ok-ai-diagnostic-preview', name: 'OK AI Diagnostic Agent', category: 'Platform Operations',
+      id: 'agent-ok-ai-diagnostic-preview', name: 'AI Diagnostic Agent', category: 'Platform Operations',
       description: 'Demo preview that summarizes observed cluster health and links to supporting evidence. Read-only; it does not change clusters or workloads.',
       version: 'Demo preview', publisher: 'OpenKubes', verified: false, demoOnly: true, artifactDigest: 'demo-only',
       requiredCapabilities: ['cap-observability'], resourceProfile: 'Read-only preview · no runtime', deployments: 0,
@@ -92,6 +92,18 @@ export const platformFixture: PlatformSnapshot = {
       tools: [
         { id: 'diagnostics.read', label: 'Observed Kubernetes drift', authority: 'Read only' },
         { id: 'remediation.propose', label: 'Bounded remediation proposal', authority: 'Approval required' },
+      ],
+    },
+    {
+      id: 'agent-ai-security-preview', name: 'AI Security Agent', category: 'Platform Operations',
+      description: 'OpenKubes security analysis concept: correlates security findings and Kubernetes observations, explains risks, and proposes policy-governed follow-up. Preview only; no live scanners, remediation authority, or verified runtime.',
+      version: 'Demo preview', publisher: 'OpenKubes', verified: false, demoOnly: true, artifactDigest: 'demo-only',
+      requiredCapabilities: ['cap-observability'], resourceProfile: 'Read-only preview · no runtime', deployments: 0,
+      recommendedCluster: 'Preview only · not deployed',
+      tools: [
+        { id: 'security.findings.read', label: 'Security findings review (concept)', authority: 'Read only' },
+        { id: 'security.evidence.read', label: 'Security evidence correlation (concept)', authority: 'Read only' },
+        { id: 'security.action.propose', label: 'Policy-governed follow-up proposal (concept)', authority: 'Approval required' },
       ],
     },
     {

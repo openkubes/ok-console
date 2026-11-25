@@ -8,7 +8,7 @@ fi
 for tool in kind kubectl node; do
   if ! command -v "$tool" >/dev/null; then echo "missing tool: $tool" >&2; exit 1; fi
 done
-script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(dirname -- "$(dirname -- "$script_dir")")"
 mkdir -p "$repo_dir/test-results/ok170-gates"
 proof_dir="$(mktemp -d "$repo_dir/test-results/ok170-gates/kind.XXXXXXXX")"
@@ -62,10 +62,12 @@ server_version="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process
 fixture() {
   node --input-type=module - "$proof_dir" "$namespace" "$@" <<'JS'
 import fs from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 const [dir, ns, action, proof] = process.argv.slice(2);
 const write = (name, obj) => fs.writeFileSync(`${dir}/${name}.json`, JSON.stringify(obj));
 const read = (name) => JSON.parse(fs.readFileSync(`${dir}/${name}.json`));
 const service = { apiVersion: 'v1', kind: 'Service', metadata: { name: 'observed-state-producer', namespace: ns, labels: { app: 'proof' } }, spec: { selector: { app: 'proof' }, ports: [{ port: 80, targetPort: 8080, protocol: 'TCP' }], type: 'ClusterIP' } };
+const serviceId = 'Service/observed-state-producer';
 if (action === 'initial') {
   write('namespace', { apiVersion: 'v1', kind: 'Namespace', metadata: { name: ns } });
   write('service', service);
@@ -87,6 +89,9 @@ if (action === 'initial') {
   write('named-role', { ...read('extra-role'), rules: [{ apiGroups: [''], resources: ['secrets'], verbs: ['get'], resourceNames: ['one'] }] });
   write('extra-binding', { ...read('binding-ok-console'), metadata: { name: 'deliberate-extra', namespace: ns }, roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name: 'deliberate-extra' } });
   write('allowlist', { 'Deployment/ok-console': [{ manager: 'ok-172-live', operation: 'Apply', required: true }, { manager: 'kubectl-set', operation: 'Update' }, { manager: 'kube-controller-manager', operation: 'Update', subresource: 'status' }], 'Service/observed-state-producer': [{ manager: 'ok-172-live', operation: 'Apply', required: true }, { manager: 'ok-173-breakglass', operation: 'Apply', required: true }], 'ConfigMap/observed-state-producer-cluster-observations': [{ manager: 'ok-173-breakglass', operation: 'Apply', required: true }] });
+  const serviceManagers = read('allowlist')[serviceId];
+  write('pre-h-allowlist', { [serviceId]: serviceManagers });
+  write('post-h-allowlist', { [serviceId]: [serviceManagers[0]] });
 } else if (action === 'permissions-r3') {
   for (const [resource, plural, group, verb, name] of [
     ['secret', 'secrets', '', 'get', 'one'], ['sa', 'serviceaccounts', '', 'get', 'ok-console'],
@@ -114,7 +119,14 @@ if (action === 'initial') {
   walk(entry.fieldsV1, []);
   if (!paths.length) throw Error('fixture does not own selected fields');
   if (action === 'handover') {
-    write(`${proof}-selected`, { 'Service/observed-state-producer': { manager: 'ok-172-live', paths } });
+    write(`${proof}-selected`, { [serviceId]: { manager: 'ok-172-live', paths } });
+    if (proof === 'pre-h') {
+      const remaining = live.metadata.managedFields.find(e => e.manager === 'ok-172-live' && e.operation === 'Apply');
+      if (!isDeepStrictEqual(remaining?.fieldsV1, entry.fieldsV1)) {
+        throw Error('H fixture: the two Apply managers must own identical field sets');
+      }
+      write('undo-selected', { [serviceId]: { manager, paths } });
+    }
     process.exit(0);
   }
   write('unowned-selected', { 'Service/observed-state-producer': { manager: 'ok-170-acceptance', paths: [['f:spec', 'f:sessionAffinity']] } });
@@ -124,6 +136,24 @@ if (action === 'initial') {
   const release = structuredClone(service); delete release.spec.selector; write('release', release);
   delete release.spec.ports; write('over-release', release);
   const allow = read('allowlist'); allow['Service/observed-state-producer'].push({ manager: 'ok-170-acceptance', operation: 'Apply' }); write('adopted-allowlist', allow);
+} else if (action === 'assert-released') {
+  if (read('undo-snapshot').metadata.managedFields.some(e => e.manager === 'ok-173-breakglass')) {
+    throw Error('H fixture: ok-173-breakglass managedFields entry remains after release');
+  }
+} else if (action === 'assert-stale') {
+  const snapshot = read('stale-snapshot');
+  const live = read('stale-before-release');
+  const beforeRV = snapshot.metadata.resourceVersion;
+  const afterRV = live.metadata.resourceVersion;
+  if (!beforeRV || !afterRV || beforeRV === afterRV) {
+    throw Error('stale fixture: annotation add/remove did not advance resourceVersion');
+  }
+  // Compare the full object, including the gate projection and each fieldsV1.
+  delete snapshot.metadata.resourceVersion;
+  delete live.metadata.resourceVersion;
+  if (!isDeepStrictEqual(snapshot, live)) {
+    throw Error('stale fixture: Service changed beyond resourceVersion after annotation add/remove');
+  }
 } else if (action === 'admission') {
   const cm = read('configmap'); cm.immutable = true; write('immutable', cm);
   write('empty-delta', []); write('immutable-delta', [{ path: '/immutable', value: true }]);
@@ -206,19 +236,36 @@ reset_service
 gate 4 readopt PASS ownership-adopt --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/adopt.json" --apply
 snapshot_service
 gate 4 over-release FAIL ownership-release --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/over-release.json" --manager ok-172-live
+
+reset_service
+gate 4 pre-h-inventory PASS ownership-inventory --allowlist "$proof_dir/pre-h-allowlist.json"
+snapshot_service pre-h-snapshot
+fixture handover pre-h
+gate 4 handover-dry-run PASS ownership-release --snapshot "$proof_dir/pre-h-snapshot.json" --selected "$proof_dir/pre-h-selected.json" --artifact "$proof_dir/handover.json" --manager ok-173-breakglass
+gate 4 handover-apply PASS ownership-release --snapshot "$proof_dir/pre-h-snapshot.json" --selected "$proof_dir/pre-h-selected.json" --artifact "$proof_dir/handover.json" --manager ok-173-breakglass --apply
+gate 4 post-h-inventory PASS ownership-inventory --allowlist "$proof_dir/post-h-allowlist.json" --forbid-manager ok-173-breakglass
+snapshot_service undo-snapshot
+fixture assert-released
+gate 4 undo-dry-run PASS ownership-adopt --snapshot "$proof_dir/undo-snapshot.json" --selected "$proof_dir/undo-selected.json" --artifact "$proof_dir/service.json" --manager ok-173-breakglass
+gate 4 undo-apply PASS ownership-adopt --snapshot "$proof_dir/undo-snapshot.json" --selected "$proof_dir/undo-selected.json" --artifact "$proof_dir/service.json" --manager ok-173-breakglass --apply
+gate 4 undo-inventory PASS ownership-inventory --allowlist "$proof_dir/pre-h-allowlist.json"
+
 reset_service
 snapshot_service stale-snapshot
 fixture handover stale
-rv_before="$(k get service observed-state-producer -o jsonpath='{.metadata.resourceVersion}')"
-k label service observed-state-producer handover-stale=present --field-manager=foreign >"$proof_dir/stale-label.log"
-rv_after="$(k get service observed-state-producer -o jsonpath='{.metadata.resourceVersion}')"
-if [[ -z "$rv_before" || -z "$rv_after" || "$rv_before" == "$rv_after" ]]; then
-  echo 'stale fixture did not advance resourceVersion' >&2; exit 1
-fi
+# The fixture starts without annotations. Removing the entire map also removes
+# the temporary manager's only owned field set.
+k patch service observed-state-producer --field-manager=ok170-proof-rv --type=json \
+  -p '[{"op":"add","path":"/metadata/annotations","value":{"openkubes.io/ok170-proof-rv":"present"}}]' >"$proof_dir/stale-annotation-add.log"
+k patch service observed-state-producer --field-manager=ok170-proof-rv --type=json \
+  -p '[{"op":"remove","path":"/metadata/annotations"}]' >"$proof_dir/stale-annotation-remove.log"
 snapshot_service stale-before-release
+fixture assert-stale
 gate 4 stale-release FAIL ownership-release --snapshot "$proof_dir/stale-snapshot.json" --selected "$proof_dir/stale-selected.json" --artifact "$proof_dir/handover.json" --manager ok-173-breakglass --apply
 snapshot_service stale-after-release
-cmp "$proof_dir/stale-before-release.json" "$proof_dir/stale-after-release.json"
+cmp -s "$proof_dir/stale-before-release.json" "$proof_dir/stale-after-release.json" || {
+  echo 'stale release changed the Service snapshot' >&2; exit 1
+}
 
 reset_service
 apply_fixture ok-173-breakglass exclusive-service
@@ -226,7 +273,9 @@ snapshot_service exclusive-snapshot
 fixture handover exclusive
 gate 4 exclusive-release FAIL ownership-release --snapshot "$proof_dir/exclusive-snapshot.json" --selected "$proof_dir/exclusive-selected.json" --artifact "$proof_dir/handover.json" --manager ok-173-breakglass
 snapshot_service exclusive-after-release
-cmp "$proof_dir/exclusive-snapshot.json" "$proof_dir/exclusive-after-release.json"
+cmp -s "$proof_dir/exclusive-snapshot.json" "$proof_dir/exclusive-after-release.json" || {
+  echo 'exclusive release changed the Service snapshot' >&2; exit 1
+}
 reset_service
 snapshot_deployment
 fixture admission
@@ -239,7 +288,7 @@ gate 5 expected-conflict PASS admission --snapshot "$proof_dir/deployment-snapsh
 if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=unowned -f "$proof_dir/conflict-two.json" -o json >"$proof_dir/conflict-two-producer.stdout" 2>"$proof_dir/conflict-two-producer.stderr"; then
   echo 'two-field conflict unexpectedly accepted' >&2; exit 1
 fi
-cmp "$proof_dir/conflict-two-producer.stderr" "$script_dir/fixtures/ok170-conflict-two.stderr"
+cmp -s "$proof_dir/conflict-two-producer.stderr" "$script_dir/fixtures/ok170-conflict-two.stderr" || { echo 'two-field conflict diagnostic differs from the retained fixture' >&2; exit 1; }
 gate 5 expected-conflict-two PASS admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict-two.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas",".spec.template.spec.containers[name=\"console\"].image"]' --expect-conflict-manager ok-172-live
 gate 5 wrong-conflict-path FAIL admission --snapshot "$proof_dir/deployment-snapshot.json" --artifact "$proof_dir/conflict.json" --manager unowned --expect-rejection conflict --expect-paths '[".spec.replicas"]' --expect-conflict-manager ok-172-live
 if k apply --server-side --force-conflicts=false --dry-run=server --field-manager=ok-172-live --show-managed-fields -f "$proof_dir/invalid.json" -o json >"$proof_dir/invalid-producer.stdout" 2>"$proof_dir/invalid-producer.stderr"; then

@@ -115,9 +115,20 @@ Every change is a non-forced server-side apply of a reviewed, SHA-256-bound per-
 
 ## Phase 0 — read-only pre-flight and ownership handover; G0
 
-Obtain and verify kubectl **v1.34.1 before G0**, matching the observed server **v1.34.1**; absence blocks G0. All `k` commands assume approved cluster access and this wrapper:
+Obtain and verify kubectl **v1.34.1 before G0**, matching the observed server **v1.34.1**. Absence blocks G0. Set `REVIEWED_CHECKOUT` to the absolute path of the reviewed checkout named by source revision in the G0 package. Record the SHA-256 of its `deploy/kubernetes/ok170-gates.mjs` in that package and set `GATE_SHA256` to the approved digest. Use the same shell for the following setup and all later blocks. The kuberc setting applies to both wrappers throughout the procedure.
 
 ```bash
+export KUBECTL_KUBERC=false
+GATE_SCRIPT="${REVIEWED_CHECKOUT:?Set the absolute path of the reviewed checkout}/deploy/kubernetes/ok170-gates.mjs"
+gate() {
+  local digest
+  digest=$(sha256sum <"$GATE_SCRIPT") || return 1
+  if [[ "${digest%% *}" != "${GATE_SHA256:?Set the approved gate SHA-256}" ]]; then
+    echo 'STOP: ok170-gates.mjs SHA-256 differs from the approved G0 package' >&2
+    return 1
+  fi
+  node "$GATE_SCRIPT" "$1" --context ok-shared-admin@ok-shared --namespace openkubes-console "${@:2}"
+}
 k() { kubectl --context ok-shared-admin@ok-shared -n openkubes-console "$@"; }
 kubectl version -o json
 kubectl config current-context
@@ -163,18 +174,36 @@ done <<< "$RESOURCES"
 )
 ```
 
-Before H, confirm that C1/C1-R/P1 are published and verified, the handover, undo, rollback, withdrawal and recovery artifacts match their approved hashes, and the Keycloak route and callback are reachable. Confirm all decisions are in force, the window is announced and the independent observer is active.
+Before H, confirm that C1/C1-R/P1 are published and verified, the gate script and the handover, undo, rollback, withdrawal and recovery artifacts match their approved hashes, and the Keycloak route and callback are reachable. Confirm all decisions are in force, the window is announced and the independent observer is active.
 
-**G0 order.** Obtain Arash's advance approval of both hashed verifier packages and the dated UTC window. First run the pre-H package, with both producer Service Apply managers required and an empty Service value delta. Pass Q1–Q9 and every non-forced admission unaffected by H: `P1_MANIFEST`, `C1_UPGRADE`, their restorations, all Recovery E Deployment artifacts (including the two Console recovery renders), and the Ingress and ConfigMap checks. The pre-H package excludes `WITHDRAW`, `WITHDRAW_RESTORE` and the Recovery E admission sequence that depends on them. For a conflict on either Deployment, the Ingress or the ConfigMap, including a field co-owned by `ok-173-breakglass`, STOP and report before H. H is scoped to the producer Service. After pre-H G0 passes, record Arash's live GO for H and its undo in the window before the H dry-run. Run H, then run the post-H package. It requires `ok-172-live` as the sole producer Service owner and includes non-forced admission of `WITHDRAW`, `WITHDRAW_RESTORE` and Recovery E. Use the verifier for checkpoint renders and `ok170-gates.mjs admission` for additional per-object artifacts against their approved deltas. Advance only after post-H G0 passes and Arash gives GO.
+**G0 order.** Obtain Arash's advance approval of both hashed verifier packages and the dated UTC window. First run the pre-H package, with both producer Service Apply managers required and an empty Service value delta. Pass Q1–Q9 and every non-forced admission unaffected by H: `P1_MANIFEST`, `C1_UPGRADE`, their restorations, all Recovery E Deployment artifacts (including the two Console recovery renders), and the Ingress and ConfigMap checks. The pre-H package excludes `WITHDRAW`, `WITHDRAW_RESTORE` and the Recovery E admission sequence that depends on them. For a conflict on either Deployment, the Ingress or the ConfigMap, including a field co-owned by `ok-173-breakglass`, STOP and report before H. H is scoped to the producer Service.
+
+The live namespace sets PodSecurity `warn: restricted` in `deploy/kubernetes/overlays/ok-shared-live/namespace.yaml`. The gate fails closed on any admission warning. G0 admission of every Deployment artifact must be warning-free. On any warning, STOP and report.
+
+**Pre-H undo admission.** While both Service managers still own the approved fields, capture the Service and dry-run the approved undo artifact. Set `G0_SERVICE_SNAPSHOT` and `UNDO_DRY_RUN` to distinct files in private scratch.
+
+```bash
+k get service observed-state-producer --show-managed-fields -o json >"$G0_SERVICE_SNAPSHOT"
+k apply --server-side --dry-run=server --field-manager=ok-173-breakglass \
+  -f "$HANDOVER_UNDO_ARTIFACT" --show-managed-fields -o json >"$UNDO_DRY_RUN"
+```
+
+Require a warning-free dry-run response on the snapshot UID and resourceVersion. Compare `spec`, `data`, `binaryData`, `immutable` and metadata labels, annotations, finalizers and owner references as JSON, including presence and array order, and require zero value delta. The `fieldsV1` of the `ok-173-breakglass` v1 Apply entry with no subresource must exactly equal the snapshot's corresponding field set. A missing entry, mismatch, warning or command failure is a STOP before H. Remove both private files at closing.
+
+After pre-H G0 passes, record Arash's live GO for H and its undo in the window before the H dry-run. Run H, then run the post-H package. It requires `ok-172-live` as the sole producer Service owner and includes non-forced admission of `WITHDRAW`, `WITHDRAW_RESTORE` and Recovery E. Use the verifier for checkpoint renders and `gate admission` for additional per-object artifacts against their approved deltas. Advance only after post-H G0 passes and Arash gives GO.
 
 **H — CHANGES ok-shared (≤10 min).** Confirm the writer freeze and the recorded live GO. The hashed G0 package binds `RELEASE_SELECTED` (the release `selected.json`) and `UNDO_SELECTED`. Each is JSON keyed only by `Service/observed-state-producer`, with a `manager` and a `paths` array of token arrays (for example, `["f:spec","f:selector"]`). Both list every path in the reviewed pre-H `ok-173-breakglass` Apply field set. The release selects `ok-172-live` as the remaining owner and the undo selects `ok-173-breakglass` as the adopter. Include paths represented by leaf nodes or a `.` marker in `fieldsV1`, using Kubernetes field tokens including keyed-list tokens where present. The snapshot is one raw Service JSON object with managedFields, UID and resourceVersion. `HANDOVER_ARTIFACT` stays identity-only. The gate injects the snapshot resourceVersion into its request artifact when invoked with `--apply`.
 
 Run these commands in order, requiring each to pass before proceeding. `PRE_H_ALLOWLIST` and `POST_H_ALLOWLIST` are hashed Service-only allowlist JSON files keyed by `Service/observed-state-producer`. The pre-H list contains exactly `ok-172-live` and `ok-173-breakglass`, and the post-H list contains exactly `ok-172-live`. Each entry has `operation: "Apply"` and `required: true`, with no subresource. Write `PRE_H_SNAPSHOT` and, if needed, `UNDO_SNAPSHOT` to private scratch. Remove the raw snapshots at closing and retain only sanitized evidence.
 
 ```bash
-gate() { node deploy/kubernetes/ok170-gates.mjs "$1" --context ok-shared-admin@ok-shared --namespace openkubes-console "${@:2}"; }
 gate ownership-inventory --allowlist "$PRE_H_ALLOWLIST"
 k get service observed-state-producer --show-managed-fields -o json >"$PRE_H_SNAPSHOT"
+```
+
+Require the fresh H snapshot to match the pre-H G0 snapshot in UID, resourceVersion, approved values and both Apply field sets. On mismatch, STOP before the release. Then run:
+
+```bash
 gate ownership-release --snapshot "$PRE_H_SNAPSHOT" --selected "$RELEASE_SELECTED" --artifact "$HANDOVER_ARTIFACT" --manager ok-173-breakglass
 gate ownership-release --snapshot "$PRE_H_SNAPSHOT" --selected "$RELEASE_SELECTED" --artifact "$HANDOVER_ARTIFACT" --manager ok-173-breakglass --apply
 gate ownership-inventory --allowlist "$POST_H_ALLOWLIST" --forbid-manager ok-173-breakglass
@@ -277,7 +306,7 @@ Column/expiry contracts: `bff/security/postgres/001_console_sessions.sql:11-22`;
 | 4.1 | Count-only queries, fixed-header rejection and expiry timing. | Retired contexts rejected; unexpired counts reach zero after expiry. Unexpected count keeps evidence pending; no cleanup mutation. |
 | 4.2 | Repeat Q7; compare with the G0 name/UID/owner set. | Only attributed controller churn (Pod, ReplicaSet, CertificateRequest, CiliumEndpoint, Endpoints/EndpointSlice). Inventory equals G0 plus the approved changes. |
 | 4.3 | Repeat Q1–Q9, TLS/204 checks and final views; normal logout of all task sessions; wait the 300 s flow TTL. | C1/P1 stable at the final ledger value; route restored; unauthenticated reads 403/session 401. |
-| 4.4 closing | Before unfreezing, land a reviewed overlay aligned to the exit state (digests, active epoch/revision, profile, retained config); run the verifier against it with an empty delta. | Clean non-forced admission, ownership inventory and runtime identity. Never run `verify-ok-shared-live.sh`: it would force-apply the tracked overlay. Any failure keeps the freeze and escalates. On success OK-172 owners release the freeze. |
+| 4.4 closing | Before unfreezing, land a reviewed overlay aligned to the exit state (digests, active epoch/revision, profile, retained config) and run the verifier with an empty delta. On GO, use the post-H Service allowlist entry in the closing package. On abort before deploy, use the pre-H Service allowlist entry once H has been undone or confirmed unapplied. | Clean non-forced admission, ownership inventory and runtime identity. Never run `verify-ok-shared-live.sh`: it would force-apply the tracked overlay. Any failure keeps the freeze and escalates. On success OK-172 owners release the freeze. |
 
 Hash the complete sanitized record with `sha256sum docs/evidence/ok-170/*.json docs/evidence/ok-170/*.md` after closing evidence is captured.
 
@@ -294,7 +323,7 @@ Record UTC, step, approval, operator/observer, exact sanitized commands/status/e
 ## Scope of this procedure
 
 - **Applies to:** candidate C1/C1-R/P1, the producer Service ownership handover, the same-epoch upgrade, rollback under decision 3(b), and field manager ok-172-live under decision 5.
-- **Shown in:** a disposable Talos cluster running Kubernetes v1.34.1 with Service field ownership identical to the 2026-11-23 live managedFields read. The non-forced handover released `ok-173-breakglass` ownership and left the Service unchanged. `WITHDRAW` and `WITHDRAW_RESTORE` then admitted on the same UID. Re-applying the breakglass Service brought the conflict back. Live execution evidence belongs to the recorded phase observations of a separately approved window.
+- **Shown in** the earlier disposable Talos Kubernetes v1.34.1 rehearsal, which used Service field ownership identical to the 2026-11-23 live managedFields read. The non-forced handover released `ok-173-breakglass` ownership and left the Service unchanged. `WITHDRAW` and `WITHDRAW_RESTORE` then admitted on the same UID. Re-applying the breakglass Service brought the conflict back. For the exact gate commands, retain the output of [`verify-gates-kind.sh`](../../../deploy/kubernetes/verify-gates-kind.sh) run against a disposable Talos Kubernetes v1.34.1 cluster. That proof uses a fixture Service and covers the complete H and undo sequence, the stale resourceVersion and the exclusive-field rejection. Require the recorded `KIND-PROOF PASS` before citing the gate proof. Live execution evidence belongs to the recorded phase observations of a separately approved window.
 - **Follow-ups:** publication approval, digest pins, disposable rehearsal of the remaining procedure, the G0 package, window and owners, and AC4/AC10 evidence with independent review. After the window, the OK-173 owner removes the producer Service from `overlays/ok-shared-breakglass` or accepts re-co-ownership and plans to re-run H in the next approved window. Open items stay in the [acceptance plan](acceptance-plan.md).
 
 ## C1 break-glass pin change

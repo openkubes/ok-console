@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, loopback-only AI Thinkers HOTL event dashboard (local demo only)."""
+"""Read-only, loopback-only AI Thinkerers HOTL event dashboard (local demo only)."""
 import argparse
 import json
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 HTML = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-HOTL_DEMO'; style-src 'nonce-HOTL_DEMO'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
-<title>OpenKubes AI Thinkers | HOTL</title>
+<title>OpenKubes AI Thinkerers | HOTL</title>
 <style nonce="HOTL_DEMO">
 :root{
   color-scheme:light;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -71,7 +71,7 @@ a{color:var(--blue)}
 }
 </style></head><body><main>
 <div class="eyebrow">OPENKUBES · LOCAL KIND EXPERIMENT</div>
-<h1>AI Thinkers <em>HOTL</em></h1>
+<h1>AI Thinkerers <em>HOTL</em></h1>
 <p>Human-on-the-Loop · AI proposes · Policy constrains · Kubernetes recovers · Evidence records</p>
 <div class="banner" id="notice">Waiting for local events. Start the HOTL supervisor in a separate terminal.</div>
 <div class="grid">
@@ -268,7 +268,7 @@ def serve(runtime, port):
         def log_message(self, format, *args):
             return
 
-    print(f"AI Thinkers read-only dashboard: http://127.0.0.1:{port}/", flush=True)
+    print(f"AI Thinkerers read-only dashboard: http://127.0.0.1:{port}/", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 

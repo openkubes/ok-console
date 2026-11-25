@@ -637,11 +637,42 @@ function EvidenceDrawer({ item, close, fixture, observedStale = false }: { item:
   return <div className="drawer-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><header><div><span className="eyebrow">{item.type}</span><h2 id="evidence-title">{evidenceTitle(item)}</h2></div><button className="icon-button" onClick={close} aria-label="Close evidence"><Icon name="x"/></button></header><EvidenceOutcome item={item} fixture={fixture}/><p className="drawer-summary">{observedText(evidenceSummary(item), presentation.current)}</p><dl className="evidence-details"><div><dt>Cluster</dt><dd>{item.cluster}</dd></div><div><dt>Contract</dt><dd>{item.contract}</dd></div><div><dt>Revision / digest</dt><dd>{item.revision}</dd></div><div><dt>Source</dt><dd>{item.source}</dd></div><div><dt>Observed at</dt><dd>{formatObservedAt(item.observedAt)}</dd></div><div><dt>Durability</dt><dd>{durability}</dd></div></dl><div className="provenance-box"><Icon name="shield"/><div><strong>Provenance visible</strong><p>This projection is redaction-safe fixture data. It does not expose credentials, kubeconfigs, or raw private evidence.</p></div></div><button className="secondary-button full-button" onClick={close}>Close</button></aside></div>
 }
 
+// This restores only the simulated, unprivileged OIDC preview within one dev browser tab.
+// Real BFF/OIDC sessions are ALWAYS restored and validated server-side.
+const PROTOTYPE_DEMO_SESSION = 'openkubes.prototype-demo-oidc.v1'
+
+function restoredPrototypeDemoSession(auth: ConsoleAuthClient): PrototypeSession | undefined {
+  if (!import.meta.env.DEV || auth.mode !== 'prototype') return undefined
+  try {
+    if (window.sessionStorage.getItem(PROTOTYPE_DEMO_SESSION) !== '1') return undefined
+    return {
+      method: 'oidc',
+      identity: import.meta.env.VITE_CONSOLE_PUBLIC_DEMO === 'true' ? 'Demo Visitor' : 'Arash Kaffamanesh',
+      source: 'OpenKubes Identity',
+      assurance: 'OIDC · MFA',
+      expiresIn: '60 minutes · in-memory prototype',
+    }
+  } catch { return undefined }
+}
+
+function rememberPrototypeDemoSession(auth: ConsoleAuthClient, session: PrototypeSession) {
+  if (!import.meta.env.DEV || auth.mode !== 'prototype') return
+  try {
+    // Never store a password, token, local-access reason, or privileged session.
+    if (session.method === 'oidc') window.sessionStorage.setItem(PROTOTYPE_DEMO_SESSION, '1')
+    else window.sessionStorage.removeItem(PROTOTYPE_DEMO_SESSION)
+  } catch { /* Browsers may disable storage; login continues without persistence. */ }
+}
+
+function clearPrototypeDemoSession() {
+  try { window.sessionStorage.removeItem(PROTOTYPE_DEMO_SESSION) } catch { /* Storage unavailable. */ }
+}
+
 export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }) {
   const branding = useBranding()
   const terms = useBrandTerms()
   const policy = useDeploymentPolicy()
-  const [session, setSession] = useState<PrototypeSession>()
+  const [session, setSession] = useState<PrototypeSession | undefined>(() => restoredPrototypeDemoSession(auth))
   const [authStatus, setAuthStatus] = useState<'checking' | 'ready'>(auth.mode === 'prototype' ? 'ready' : 'checking')
   const [authError, setAuthError] = useState<string>()
   const [authAttempt, setAuthAttempt] = useState(0)
@@ -672,6 +703,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
     setSignOutError(undefined)
     try {
       await auth.logout()
+      clearPrototypeDemoSession()
       setSelectedCluster(undefined)
       setSelectedEvidence(undefined)
       setShellCluster(undefined)
@@ -685,6 +717,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   }
 
   const endSession = () => {
+    clearPrototypeDemoSession()
     setSelectedCluster(undefined); setSelectedEvidence(undefined); setShellCluster(undefined)
     setSession(undefined); setAuthError('Your session ended. Sign in again.')
   }
@@ -722,7 +755,7 @@ export default function App({ auth = consoleAuth }: { auth?: ConsoleAuthClient }
   useEffect(() => { document.title = `${title} · ${branding.productName}` }, [title, branding.productName])
 
   if (authStatus === 'checking') return <AuthLoading/>
-  if (!session) return <AuthEntry onAuthenticated={setSession} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
+  if (!session) return <AuthEntry onAuthenticated={(next) => { rememberPrototypeDemoSession(auth, next); setSession(next) }} authMode={auth.mode} onStartOidc={auth.startOidc} onAuthenticateLocal={auth.authenticateLocal} serviceError={authError} onRetry={() => setAuthAttempt((attempt) => attempt + 1)}/>
   if (observation.error && !data) return <LoadFailure error={observation.error} retry={observation.retry}/>
   if (!data) return <EmptyLoading/>
   const latestShellCluster = shellCluster && (effectiveDetail?.id === shellCluster.id ? effectiveDetail : data.clusters.find(item => item.id === shellCluster.id) ?? { ...shellCluster, freshness: 'Unknown' as const })

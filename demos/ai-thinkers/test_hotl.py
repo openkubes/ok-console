@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -141,6 +142,39 @@ class SupervisorTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 2)
         self.assertIn("explicit AI_THINKERS_HOTL consent", completed.stderr)
+
+    def test_runtime_symlink_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real = root / "private"
+            real.mkdir(mode=0o700)
+            link = root / "linked"
+            link.symlink_to(real, target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "UNSAFE_RUNTIME_SYMLINK"):
+                self.hotl.checked_runtime_dir(link)
+            self.assertEqual(self.hotl.checked_runtime_dir(real), real)
+
+    def test_secure_audit_append_refuses_symlinks_and_public_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "audit.jsonl"
+            link = root / "audit-link"
+            target.write_text("safe\\n")
+            link.symlink_to(target)
+            with self.assertRaises(OSError):
+                self.hotl.record(link, "HOTL_ENABLED")
+            self.assertEqual(target.read_text(), "safe\\n")
+            with self.assertRaisesRegex(RuntimeError, "UNSAFE_DEMO_FILE"):
+                self.hotl.record(target, "HOTL_ENABLED")
+            target.chmod(0o600)
+            self.hotl.record(target, "HOTL_ENABLED")
+            self.assertIn("HOTL_ENABLED", target.read_text())
+
+    def test_secure_append_rejects_non_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError):
+                with self.hotl.secure_append(Path(directory)):
+                    pass
 
     def test_trusted_target_pinned(self):
         self.assertEqual((self.hotl.NS, self.hotl.NAME, self.hotl.IMAGE),

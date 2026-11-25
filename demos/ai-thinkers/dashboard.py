@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Read-only, loopback-only AI Thinkerers HOTL event dashboard (local demo only)."""
+import argparse
+import json
+import os
+import stat
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-HOTL_DEMO'; style-src 'nonce-HOTL_DEMO'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>OpenKubes AI Thinkerers | HOTL</title>
+<style nonce="HOTL_DEMO">
+:root{
+  color-scheme:light;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  color:#172033;background:#f7f8fa;
+  --blue:#064fc8;--blue-dark:#073b92;--blue-soft:#e8f0ff;
+  --brand-deep:#061d46;--brand-panel:#092b68;--accent:#f28b12;
+  --green:#189b50;--green-soft:#e9f7ef;--orange:#f28b12;--orange-soft:#fff4e4;
+  --red:#d8393e;--red-soft:#fff0f0;--ink:#172033;--muted:#657086;
+  --line:#dfe3ea;--surface:#fff;
+}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px}
+main{max-width:1140px;margin:0 auto;padding:34px 26px 70px}
+h1{font-size:clamp(30px,4vw,45px);letter-spacing:-.035em;margin:10px 0}
+h1 em{font-style:normal;color:var(--blue)}
+p,.muted{color:var(--muted)}
+h2{font-size:19px;letter-spacing:-.02em;margin:0 0 18px}
+.eyebrow{letter-spacing:.14em;font-weight:800;font-size:11px;color:var(--blue)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:24px 0}
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:22px;min-width:0;box-shadow:0 3px 12px rgba(35,49,72,.035)
+}
+.grid .card{border-left:3px solid var(--blue)}
+.grid .card:nth-child(2){border-left-color:var(--green)}
+.grid .card:nth-child(3){border-left-color:var(--green)}
+.grid .card:nth-child(4){border-left-color:var(--orange)}
+.big{font-size:28px;font-weight:800;letter-spacing:-.03em;overflow-wrap:anywhere}
+.green{color:var(--green)}.cyan{color:var(--blue)}.amber{color:#965a00}
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:20px 0 0}
+.step{
+  border:1px solid #c6d7ed;border-radius:11px;padding:16px 9px;text-align:center;
+  background:var(--blue-soft);color:var(--blue-dark);font-size:13px;font-weight:650
+}
+.step.done{background:var(--green-soft);border-color:#a3d7b6;color:#146a38}
+.step.fail{background:var(--red-soft);border-color:#f1b5b5;color:#a42c31}
+.step span{display:block;font-size:23px;font-weight:800;margin-bottom:8px;color:var(--blue)}
+.step.done span{color:var(--green)}.step.fail span{color:var(--red)}
+.timeline{display:flex;flex-direction:column;gap:10px}
+.event{
+  padding:14px 16px;border-radius:10px;background:#fafcff;
+  border:1px solid #e0e7f0;border-left:3px solid var(--blue)
+}
+.event b{font-size:13px;letter-spacing:.02em;color:var(--ink)}
+.event time{color:var(--muted);font-size:12px;float:right}
+.event small{display:block;color:#596375;margin-top:7px;overflow-wrap:anywhere}
+.banner{
+  padding:13px 16px;background:#eff5ff;border:1px solid #c9daf4;
+  border-radius:11px;margin:16px 0;color:var(--blue-dark);font-size:13px
+}
+footer{margin-top:24px;font-size:12px;line-height:1.7;color:var(--muted)}
+a{color:var(--blue)}
+@media(max-width:720px){
+ main{padding:25px 16px 48px}
+ .grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}
+ .event time{float:none;display:block;margin-top:6px}
+}
+</style></head><body><main>
+<div class="eyebrow">OPENKUBES · LOCAL KIND EXPERIMENT</div>
+<h1>AI Thinkerers <em>HOTL</em></h1>
+<p>Human-on-the-Loop · AI proposes · Policy constrains · Kubernetes recovers · Evidence records</p>
+<div class="banner" id="notice">Waiting for local events. Start the HOTL supervisor in a separate terminal.</div>
+<div class="grid">
+<div class="card"><div class="muted">Recorded session mode</div><div class="big cyan" id="mode">—</div></div>
+<div class="card"><div class="muted">Current state</div><div class="big" id="current">UNKNOWN</div><div class="muted" id="current-detail">No live status yet</div></div>
+<div class="card"><div class="muted">Last recovery</div><div class="big" id="result">—</div></div>
+<div class="card"><div class="muted">Events recorded</div><div class="big" id="count">0</div></div>
+</div>
+<section class="card"><h2>Recovery sequence</h2>
+<div class="flow" id="flow">
+<div class="step" data-event="HOTL_ENABLED"><span>01</span>Enable HOTL</div>
+<div class="step" data-event="DRIFT_CONFIRMED"><span>02</span>Detect drift</div>
+<div class="step" data-event="AI_PROPOSAL"><span>03</span>AI proposal</div>
+<div class="step" data-event="HOTL_EXECUTED"><span>04</span>Bounded patch</div>
+<div class="step" data-event="HOTL_RECOVERY_VERIFIED"><span>05</span>Verify 2/2</div>
+</div></section>
+<section class="card" style="margin-top:20px"><h2>Evidence timeline <span class="muted">(newest first)</span></h2><div class="timeline" id="timeline">No events yet</div></section>
+<footer>Read-only display on 127.0.0.1. No Kubernetes credentials in this browser. Heartbeat and JSONL are local, mutable demo data, not signed evidence. A fresh heartbeat does not attest an authorized or healthy Kubernetes workload. This display cannot enable, pause or stop the supervisor. Use Ctrl-C in its terminal to prevent future actions. Once-only completion is not an ongoing authorization.</footer>
+</main>
+<script nonce="HOTL_DEMO">
+const $=id=>document.getElementById(id);
+const names=['HOTL_ENABLED','DRIFT_CONFIRMED','AI_PROPOSAL','HOTL_EXECUTED','HOTL_RECOVERY_VERIFIED'];
+const title=e=>e.replaceAll('_',' ');
+function render(data){
+ const es=data.events||[];
+ // In continuous mode each new confirmed drift begins a fresh recovery attempt.
+ // An earlier READY_VERIFIED must not certify the new attempt.
+ const lastDrift=es.findLastIndex(e=>e.event==='DRIFT_CONFIRMED');
+ const current=lastDrift<0?es:[...es.filter(e=>e.event==='HOTL_ENABLED').slice(-1),...es.slice(lastDrift)];
+ const kinds=new Set(current.map(e=>e.event));
+ const lastVerified=[...es].reverse().find(e=>e.event==='HOTL_RECOVERY_VERIFIED');
+ $('count').textContent=String(data.total);
+ const enabled=es.find(e=>e.event==='HOTL_ENABLED');
+ $('mode').textContent=enabled?(enabled.mode==='one-shot'?'ONE SHOT':enabled.mode==='always'?'ALWAYS':'WATCH MODE'):'NOT ENABLED';
+ const state=data.status||{state:'UNKNOWN',detail:'No live status available'};
+ const labels={MONITORING:'MONITORING',DRIFT_DETECTED:'DRIFT DETECTED',AI_ANALYZING:'AI ANALYZING',EXECUTING:'EXECUTING',VERIFYING:'VERIFYING',STOPPED:'STOPPED',FAILED_CLOSED:'FAILED CLOSED',UNKNOWN:'UNKNOWN'};
+ $('current').textContent=labels[state.state]||'UNKNOWN';
+ $('current').className='big '+(state.state==='MONITORING'?'cyan':state.state==='STOPPED'?'amber':state.state==='FAILED_CLOSED'?'amber':'amber');
+ $('current-detail').textContent=state.detail||'';
+ $('result').textContent=lastVerified?'VERIFIED':'NO RECOVERY YET';
+ $('result').className='big '+(lastVerified?'green':'amber');
+ $('notice').textContent='Read-only local status (heartbeat freshness checked) and historical recovery evidence. A heartbeat is not a Kubernetes health check.';
+ document.querySelectorAll('.step').forEach(s=>{s.className='step'+(kinds.has(s.dataset.event)?' done':'');});
+ if(kinds.has('HOTL_FAILED_CLOSED')){for(const s of document.querySelectorAll('.step')){if(!kinds.has(s.dataset.event))s.className='step fail';}}
+ const root=$('timeline');root.replaceChildren();
+ if(!es.length){root.textContent='No events yet';return}
+ for(const e of [...es].reverse()){
+  const box=document.createElement('div');box.className='event';
+  const b=document.createElement('b');b.textContent=title(e.event);box.appendChild(b);
+  const t=document.createElement('time');t.textContent=e.at||'';box.appendChild(t);
+  const small=document.createElement('small');
+  if(e.event==='AI_PROPOSAL')small.textContent='Model '+(e.model||'')+' · exact nginx/2 demo proposal';
+  else if(e.event==='HOTL_EXECUTED')small.textContent=e.action||'';
+  else if(e.event==='HOTL_RECOVERY_VERIFIED')small.textContent=(e.result||'')+' · desired '+(e.desired??2)+' / ready '+(e.ready??2);
+  else if(e.event==='HOTL_FAILED_CLOSED')small.textContent=e.reason||'Execution stopped';
+  else if(e.event==='DRIFT_CONFIRMED')small.textContent='Drift observed twice with consistent UID and generation';
+  else if(e.event==='HOTL_ENABLED')small.textContent='Operator enabled '+(e.mode||'')+' mode for local kind only';
+  box.appendChild(small);root.appendChild(box);
+ }
+}
+async function refresh(){
+ try{const r=await fetch('/api/events',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);render(await r.json());}
+ catch(e){$('notice').textContent='Evidence feed unavailable: '+String(e.message)}
+}
+refresh();setInterval(refresh,2000);
+</script></body></html>"""
+
+ALLOWED = {
+    "HOTL_ENABLED", "DRIFT_CONFIRMED", "AI_PROPOSAL", "HOTL_EXECUTED",
+    "HOTL_RECOVERY_VERIFIED", "HOTL_FAILED_CLOSED", "HOTL_STOPPED_BY_OPERATOR",
+}
+
+
+def read_events(audit):
+    if not audit.exists():
+        return [], 0
+    if audit.is_symlink() or not audit.is_file() or audit.stat().st_size > 2_000_000:
+        raise ValueError("AUDIT_FILE_UNSAFE_OR_TOO_LARGE")
+    parsed = []
+    with audit.open(encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # Partial event while writer flushes.
+            if isinstance(obj, dict) and obj.get("event") in ALLOWED:
+                e = {"event": obj["event"], "at": str(obj.get("at", ""))[:40]}
+                if e["event"] == "HOTL_ENABLED":
+                    e["mode"] = str(obj.get("mode", ""))[:24]
+                    e["session"] = str(obj.get("session", ""))[:40]
+                elif e["event"] == "AI_PROPOSAL":
+                    e["model"] = str(obj.get("model", ""))[:48]
+                elif e["event"] == "HOTL_EXECUTED":
+                    e["action"] = str(obj.get("action", ""))[:40]
+                elif e["event"] == "HOTL_RECOVERY_VERIFIED":
+                    e["result"] = str(obj.get("result", ""))[:40]
+                    state = obj.get("observed") or {}
+                    if isinstance(state, dict):
+                        for key in ("ready", "desired"):
+                            if type(state.get(key)) is int:
+                                e[key] = state[key]
+                elif e["event"] == "HOTL_FAILED_CLOSED":
+                    e["reason"] = str(obj.get("reason", ""))[:100]
+                parsed.append(e)
+    # Presentation always follows the newest enabled HOTL session. Historical
+    # successes must not make a fresh run appear already verified.
+    starts = [i for i, item in enumerate(parsed) if item["event"] == "HOTL_ENABLED"]
+    latest = parsed[starts[-1]:] if starts else parsed
+    return latest[-80:], len(latest)
+
+
+STATUS_STATES = {
+    "MONITORING", "DRIFT_DETECTED", "AI_ANALYZING", "EXECUTING",
+    "VERIFYING", "STOPPED", "FAILED_CLOSED",
+}
+
+
+def read_status(path, events, now=None):
+    """Display-only: heartbeat must belong to the latest recorded session."""
+    fallback = {"state": "UNKNOWN", "detail": "No fresh supervisor heartbeat"}
+    if not events:
+        return fallback
+    enabled = next((e for e in events if e["event"] == "HOTL_ENABLED"), None)
+    if enabled is None or not enabled.get("session"):
+        return fallback
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
+            return fallback
+        with path.open(encoding="utf-8") as stream:
+            obj = json.load(stream)
+        if not isinstance(obj, dict) or obj.get("session") != enabled["session"]:
+            return fallback
+        state = obj.get("state")
+        if state not in STATUS_STATES:
+            return fallback
+        stamp = datetime.fromisoformat(obj["heartbeat"])
+        if stamp.tzinfo is None:
+            return fallback
+        now = now or datetime.now(timezone.utc)
+        age = (now - stamp).total_seconds()
+        if age < -3:
+            return fallback
+        # Terminal state remains historical but explicit. Live states expire.
+        if state in ("STOPPED", "FAILED_CLOSED"):
+            return {"state": state, "detail": "Last reported terminal state (not live)"}
+        if age > 8:
+            return {"state": "UNKNOWN", "detail": "Heartbeat stale or invalid"}
+        if state == "MONITORING":
+            detail = "Awaiting next drift (heartbeat observed)"
+        else:
+            detail = "Supervisor reported " + state.lower().replace("_", " ")
+        return {"state": state, "detail": detail}
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+        return fallback
+
+
+def serve(runtime, port):
+    audit = runtime / "ai-thinkers-evidence.jsonl"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/":
+                body = HTML.encode("utf-8")
+                mime = "text/html; charset=utf-8"
+                status = 200
+            elif self.path == "/api/events":
+                try:
+                    events, total = read_events(audit)
+                    status_info = read_status(runtime / "ai-thinkers-status.json", events)
+                    body = json.dumps({"events": events, "total": total, "status": status_info}).encode("utf-8")
+                    status = 200
+                except (OSError, ValueError):
+                    body = b'{"error":"AUDIT_UNAVAILABLE"}'
+                    status = 503
+                mime = "application/json; charset=utf-8"
+            else:
+                body = b'{"error":"NOT_FOUND"}'
+                mime = "application/json; charset=utf-8"
+                status = 404
+            self.send_response(status)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.send_error(405, "Read-only dashboard")
+
+        def log_message(self, format, *args):
+            return
+
+    print(f"AI Thinkerers read-only dashboard: http://127.0.0.1:{port}/", flush=True)
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runtime-dir", required=True)
+    parser.add_argument("--port", type=int, default=8794)
+    args = parser.parse_args()
+    if not 1024 <= args.port <= 65535:
+        parser.error("invalid TCP port")
+    runtime = Path(args.runtime_dir).expanduser()
+    if runtime.is_symlink():
+        parser.error("runtime symlinks not supported")
+    runtime = runtime.resolve(strict=True)
+    if not runtime.is_dir() or stat.S_IMODE(runtime.stat().st_mode) & 0o077:
+        parser.error("runtime directory must be private")
+    serve(runtime, args.port)
+
+
+if __name__ == "__main__":
+    main()

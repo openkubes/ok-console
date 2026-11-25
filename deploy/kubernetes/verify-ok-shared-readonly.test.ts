@@ -131,7 +131,7 @@ if (!r) { process.stderr.write('unexpected call'); process.exit(98); }
 process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? ''); process.exitCode = r.status ?? 0;
 `
 
-type Opts = { outExists?: boolean; raw?: Record<string, string>; symlink?: string; env?: Record<string, string>; args?: (pkg: string, out: string) => string[] }
+type Opts = { outExists?: boolean; raw?: Record<string, string>; symlink?: string; env?: Record<string, string>; args?: (pkg: string, out: string) => string[]; scriptPath?: string }
 function run(s = scenario(), opts: Opts = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ok170-ro-')); dirs.push(dir)
   writeFileSync(join(dir, 'kubectl'), fake); chmodSync(join(dir, 'kubectl'), 0o755)
@@ -147,7 +147,7 @@ function run(s = scenario(), opts: Opts = {}) {
   const tmp = join(dir, 'tmp'); mkdirSync(tmp)
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, CALL_LOG: log, REPLIES: join(dir, 'replies.json'),
     TMPDIR: tmp, ...opts.env }
-  const r = spawnSync('bash', [script, ...(opts.args ? opts.args(pkg, out) : [pkg, out])], { encoding: 'utf8', env, timeout: 55_000 })
+  const r = spawnSync('bash', [opts.scriptPath ?? script, ...(opts.args ? opts.args(pkg, out) : [pkg, out])], { encoding: 'utf8', env, timeout: 55_000 })
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { args?: string[]; violation?: string[]; kuberc?: string })
   return { ...r, calls, out, tmp }
 }
@@ -158,6 +158,42 @@ function stopped(r: ReturnType<typeof run>, reason: string) {
   expect(r.calls.filter((c) => c.violation)).toEqual([])
   expect(readdirSync(r.tmp)).toEqual([])
 }
+
+const cnpg = 'Cluster.v1.postgresql.cnpg.io/console-db'
+const deploymentList = 'DeploymentList.v1.apps/quantity-fixture'
+const unadmittedDrift = 'an object the gates do not admit differs from the live cluster'
+const driftReport = (r: ReturnType<typeof run>) => readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')
+
+function quantityCluster(resources: Record<string, unknown>) {
+  return { apiVersion: 'postgresql.cnpg.io/v1', kind: 'Cluster', metadata: { name: 'console-db', namespace: ns },
+    spec: { resources } }
+}
+
+function quantityDeployment(resources: Record<string, unknown>, env = '0.5') {
+  // A standalone Deployment is admitted. A list fixture exercises its container shape in the drift check.
+  const item = deployment(newImage)
+  const container = { ...item.spec.template.spec.containers[0], resources, env: [{ name: 'THRESHOLD', value: env }] }
+  return { apiVersion: 'apps/v1', kind: 'DeploymentList', metadata: { name: 'quantity-fixture', namespace: ns },
+    items: [{ ...item, spec: { ...item.spec, template: { ...item.spec.template, spec: { containers: [container] } } } }] }
+}
+
+function withUnadmitted(ref: string, want: object, have: object) {
+  const s = scenario()
+  s.replies.kustomize = { stdout: rendered(newImage, `---\n${JSON.stringify(want)}\n`) }
+  s.replies[`get ${ref} -o json`] = json(have)
+  return s
+}
+
+const quantityNormalisations = [
+  ['Deployment container', deploymentList,
+    quantityDeployment({ requests: { cpu: '0.5', memory: '1024Mi' }, limits: { cpu: '1' } }),
+    quantityDeployment({ requests: { cpu: '500m', memory: '1Gi' }, limits: { cpu: 1 } }),
+    '/items/0/spec/template/spec/containers/0/resources/requests/cpu'],
+  ['CNPG Cluster', cnpg,
+    quantityCluster({ requests: { cpu: 0.5, memory: '1.5Gi' }, limits: { cpu: '1e0', 'example.com/resource': '0.5' } }),
+    quantityCluster({ requests: { cpu: '500m', memory: '1536Mi' }, limits: { cpu: 1, 'example.com/resource': 0.5 } }),
+    '/spec/resources/requests/cpu'],
+] as const
 
 describe('verify-ok-shared-readonly.sh', () => {
   it('passes on the approved delta with dry-run only, records hashes, and lists objects it does not admit', () => {
@@ -222,6 +258,73 @@ describe('verify-ok-shared-readonly.sh', () => {
     const r = run(s)
     stopped(r, 'an object the gates do not admit differs from the live cluster')
     expect(readFileSync(join(r.out, 'results/unadmitted-drift.txt'), 'utf8')).toBe(`${netpol}\tDRIFT /spec/x\n`)
+  })
+
+  it.each(quantityNormalisations)('accepts server-normalised quantities in a %s', (_label, ref, want, have) => {
+    const r = run(withUnadmitted(ref, want, have))
+    expect(r.status).toBe(0)
+    expect(r.stderr).toBe('')
+    expect(r.stdout).toContain('VERIFY_READONLY=PASS')
+    expect(driftReport(r)).toContain(`${ref}\tunchanged\n`)
+  })
+
+  it('reports drift for both normalisation fixtures when quantity comparison falls back to exact equality', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ok170-ro-exact-')); dirs.push(dir)
+    const mutant = join(dir, 'verify-ok-shared-readonly.sh')
+    const original = readFileSync(script, 'utf8')
+    const exact = original.replace('if not same_quantity(want, have):', 'if want != have or type(want) is not type(have):')
+    expect(exact).not.toBe(original)
+    writeFileSync(mutant, exact)
+    symlinkSync(fileURLToPath(new URL('./ok170-gates.mjs', import.meta.url)), join(dir, 'ok170-gates.mjs'))
+    for (const [, ref, want, have, path] of quantityNormalisations) {
+      const r = run(withUnadmitted(ref, want, have), { scriptPath: mutant })
+      stopped(r, unadmittedDrift)
+      expect(driftReport(r)).toContain(`${ref}\tDRIFT ${path}`)
+    }
+  })
+
+  it.each([
+    ['a changed quantity', { cpu: '500m' }, { cpu: '600m' }],
+    ['decimal SI versus binary SI', { cpu: '1G' }, { cpu: '1Gi' }],
+    ['an invalid live quantity', { cpu: '500m' }, { cpu: 'abc' }],
+    ['an invalid rendered quantity', { cpu: 'abc' }, { cpu: '500m' }],
+    ['identical invalid quantities', { cpu: 'abc' }, { cpu: 'abc' }],
+    ['a missing quantity', { cpu: '500m' }, {}],
+    ['a null quantity', { cpu: '0' }, { cpu: null }],
+    ['a boolean quantity', { cpu: '1' }, { cpu: true }],
+    ['a list used as a quantity', { cpu: [] }, { cpu: [] }],
+  ])('reports quantity drift for %s', (_label, want, have) => {
+    const r = run(withUnadmitted(cnpg, quantityCluster({ limits: want }), quantityCluster({ limits: have })))
+    stopped(r, unadmittedDrift)
+    expect(driftReport(r)).toContain(`${cnpg}\tDRIFT /spec/resources/limits/cpu\n`)
+  })
+
+  it.each([
+    ['rendered', '0.50000000000000000000000000001', '0.5'],
+    ['live', '0.5', '0.50000000000000000000000000001'],
+  ])('reports quantity drift when rounding the %s decimal would hide it', (_label, renderedNumber, liveNumber) => {
+    const want = quantityCluster({ requests: { cpu: 'RENDERED_NUMBER' } })
+    const have = quantityCluster({ requests: { cpu: 'LIVE_NUMBER' } })
+    const s = withUnadmitted(cnpg, want, have)
+    s.replies.kustomize.stdout = s.replies.kustomize.stdout!.replace('"RENDERED_NUMBER"', renderedNumber)
+    const reply = s.replies[`get ${cnpg} -o json`]
+    reply.stdout = reply.stdout!.replace('"LIVE_NUMBER"', liveNumber)
+    const r = run(s)
+    stopped(r, unadmittedDrift)
+    expect(driftReport(r)).toContain(`${cnpg}\tDRIFT /spec/resources/requests/cpu\n`)
+  })
+
+  it.each([
+    ['a quantity-like env value', quantityDeployment({}, '0.5'), quantityDeployment({}, '500m'),
+      '/items/0/spec/template/spec/containers/0/env/0/value'],
+    ['a quantity-like claim name', quantityDeployment({ claims: [{ name: '0.5' }] }),
+      quantityDeployment({ claims: [{ name: '500m' }] }), '/items/0/spec/template/spec/containers/0/resources/claims/0/name'],
+    ['an extra list item', quantityDeployment({}), { ...quantityDeployment({}), items: [...quantityDeployment({}).items, deployment(newImage)] },
+      '/items'],
+  ] as const)('reports deployment drift for %s', (_label, want, have, path) => {
+    const r = run(withUnadmitted(deploymentList, want, have))
+    stopped(r, unadmittedDrift)
+    expect(driftReport(r)).toContain(`${deploymentList}\tDRIFT ${path}\n`)
   })
 
   it('stops when an object the gates do not admit is absent from the live cluster', () => {

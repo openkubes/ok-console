@@ -104,9 +104,14 @@ def secure_append(path):
     fd = os.open(path, flags, 0o600)
     try:
         info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                or stat.S_IMODE(info.st_mode) & 0o077):
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
             raise RuntimeError("UNSAFE_DEMO_FILE")
+        # Older demo versions created files using the process umask.
+        # Restrict only own, single-link regular files before using them.
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            os.fchmod(fd, 0o600)
+            if stat.S_IMODE(os.fstat(fd).st_mode) & 0o077:
+                raise RuntimeError("UNSAFE_DEMO_FILE_PERMISSIONS")
         return os.fdopen(fd, "a", encoding="utf-8")
     except BaseException:
         os.close(fd)

@@ -37,6 +37,26 @@ python3 demos/ai-thinkers/hotl.py --enable-hotl --always \
   --runtime-dir "$WJAX_DEMO_RUNTIME_DIR"
 ```
 
+## Makefile shortcuts (foreground only)
+
+From the repository root, set the existing private runtime and explicitly consent:
+
+```bash
+export DOCKER_CONTEXT=colima
+export WJAX_DEMO_RUNTIME_DIR="$PWD/.wjax-local-runtime/recreated-20261125-044033"
+export AI_THINKERS_HOTL=I_ACCEPT_LOCAL_KIND_ONLY
+
+# Choose ONE:
+make ai-thinkers-hotl-once
+# or: make ai-thinkers-hotl-always
+```
+
+These targets invoke the same guarded Python supervisor, do not bypass its checks,
+do not launch a background process, and do not create or reset the kind cluster.
+Run only one supervisor per runtime; the existing process lock rejects another.
+Use Ctrl-C in the foreground terminal to stop future attempts. The dashboard
+is separate and remains at http://127.0.0.1:8794/.
+
 ## Show HOTL in two terminals
 
 In terminal **A**, run the supervisor with explicit consent (only on local kind):

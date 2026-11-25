@@ -164,10 +164,9 @@ class SupervisorTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.hotl.record(link, "HOTL_ENABLED")
             self.assertEqual(target.read_text(), "safe\\n")
-            with self.assertRaisesRegex(RuntimeError, "UNSAFE_DEMO_FILE"):
-                self.hotl.record(target, "HOTL_ENABLED")
-            target.chmod(0o600)
+            target.chmod(0o644)  # Historical demo files may have used umask 022.
             self.hotl.record(target, "HOTL_ENABLED")
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
             self.assertIn("HOTL_ENABLED", target.read_text())
 
     def test_secure_append_rejects_non_regular_file(self):

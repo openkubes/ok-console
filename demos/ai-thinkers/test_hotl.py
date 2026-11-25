@@ -3,6 +3,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone, timedelta
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +52,46 @@ class DashboardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.dashboard.read_events(link)
 
+
+    def test_heartbeat_status_lifecycle_and_session_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai-thinkers-status.json"
+            now = datetime(2026, 11, 25, tzinfo=timezone.utc)
+            events = [{"event": "HOTL_ENABLED", "session": "active"}]
+            payload = {
+                "session": "active",
+                "state": "MONITORING",
+                "heartbeat": now.isoformat(),
+            }
+            path.write_text(json.dumps(payload))
+            self.assertEqual(self.dashboard.read_status(path, events, now)["state"], "MONITORING")
+            payload["heartbeat"] = (now - timedelta(seconds=20)).isoformat()
+            path.write_text(json.dumps(payload))
+            self.assertEqual(self.dashboard.read_status(path, events, now)["state"], "UNKNOWN")
+            payload["state"] = "STOPPED"
+            path.write_text(json.dumps(payload))
+            self.assertEqual(self.dashboard.read_status(path, events, now)["state"], "STOPPED")
+            payload["state"] = "FAILED_CLOSED"
+            path.write_text(json.dumps(payload))
+            self.assertEqual(self.dashboard.read_status(path, events, now)["state"], "FAILED_CLOSED")
+            payload["session"] = "previous"
+            path.write_text(json.dumps(payload))
+            self.assertEqual(self.dashboard.read_status(path, events, now)["state"], "UNKNOWN")
+
+    def test_status_symlink_and_invalid_state_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "ai-thinkers-status.json"
+            link = Path(directory) / "status-link"
+            now = datetime(2026, 11, 25, tzinfo=timezone.utc)
+            events = [{"event": "HOTL_ENABLED", "session": "active"}]
+            path.write_text(json.dumps({
+                "session": "active", "state": "AUTHORIZED",
+                "heartbeat": now.isoformat(),
+                "token": "SECRET",
+            }))
+            self.assertEqual(self.dashboard.read_status(path, events, now)["state"], "UNKNOWN")
+            link.symlink_to(path)
+            self.assertEqual(self.dashboard.read_status(link, events, now)["state"], "UNKNOWN")
 
     def test_latest_session_hides_old_verified_result(self):
         with tempfile.TemporaryDirectory() as directory:

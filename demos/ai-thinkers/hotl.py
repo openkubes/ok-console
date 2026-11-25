@@ -7,6 +7,8 @@ preconditions; separate evidence; Ctrl-C stops future attempts.
 import argparse
 import fcntl
 import json
+import threading
+import uuid
 import os
 import subprocess
 import sys
@@ -21,6 +23,78 @@ NAME = "wjax-nginx"
 IMAGE = "nginx:1.27.5-alpine"
 EXPECTED = {"operation": "deploy", "workload": "nginx", "replicas": 2, "target": "demo"}
 CONSENT = "I_ACCEPT_LOCAL_KIND_ONLY"
+HEARTBEAT_SECONDS = 2
+
+
+class SupervisorStatus:
+    """Best-effort local status only: no credentials or authorization semantics."""
+
+    def __init__(self, runtime, mode):
+        self.path = runtime / "ai-thinkers-status.json"
+        self.session = uuid.uuid4().hex
+        self.mode = mode
+        self.pid = os.getpid()
+        self.started = datetime.now(timezone.utc).isoformat()
+        self.state = "MONITORING"
+        self.lock = threading.Lock()
+        self.done = threading.Event()
+        self.error = None
+        self.thread = None
+
+    def write(self):
+        with self.lock:
+            item = {
+                "session": self.session,
+                "mode": self.mode,
+                "pid": self.pid,
+                "started": self.started,
+                "heartbeat": datetime.now(timezone.utc).isoformat(),
+                "state": self.state,
+            }
+            # Never follow a symlink or overwrite an unrelated existing file.
+            if self.path.is_symlink():
+                raise RuntimeError("UNSAFE_STATUS_SYMLINK")
+            temp = self.path.parent / ("." + self.path.name + "." + self.session + ".tmp")
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(item, stream, sort_keys=True)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temp, self.path)
+            finally:
+                if temp.exists():
+                    temp.unlink()
+
+    def set(self, state):
+        with self.lock:
+            self.state = state
+        self.write()
+
+    def start(self):
+        self.write()
+        self.thread = threading.Thread(target=self._heartbeat, daemon=True)
+        self.thread.start()
+
+    def _heartbeat(self):
+        while not self.done.wait(HEARTBEAT_SECONDS):
+            try:
+                self.write()
+            except Exception as exc:
+                self.error = exc
+                return
+
+    def check(self):
+        if self.error is not None:
+            raise RuntimeError("STATUS_HEARTBEAT_FAILED") from self.error
+
+    def stop(self, state):
+        self.done.set()
+        if self.thread:
+            self.thread.join(timeout=3)
+        self.set(state)
+
+
 
 
 def record(path, event, **kwargs):
@@ -164,14 +238,18 @@ def main():
             fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             ap.error("another HOTL supervisor already holds this runtime lock")
+        status = SupervisorStatus(home, "one-shot" if args.once else "always")
+        status.start()
         record(audit, "HOTL_ENABLED", scope="local-kind/wjax-demo/wjax-nginx",
-               mode="one-shot" if args.once else "always")
+               mode=status.mode, session=status.session)
         seen = None
         completed = set()
         print("AI Thinkers HOTL: watching. Ctrl-C stops future actions.", flush=True)
         try:
             while True:
                 try:
+                    status.check()
+                    status.set("MONITORING")
                     state = observe(config)
                     key = (state["uid"], state["generation"])
                     # Require two consecutive observed 0/0 states for the SAME UID+generation.
@@ -181,8 +259,10 @@ def main():
                             print("Drift observed; awaiting stable second observation", flush=True)
                         else:
                             completed.add(key)  # No retries even after errors.
+                            status.set("DRIFT_DETECTED")
                             record(audit, "DRIFT_CONFIRMED", uid=state["uid"],
                                    generation=state["generation"])
+                            status.set("AI_ANALYZING")
                             candidate = ask_ollama()
                             record(audit, "AI_PROPOSAL", candidate=candidate,
                                    model="llama3.2:latest")
@@ -199,22 +279,28 @@ def main():
                                 {"op": "test", "path": "/spec/replicas", "value": 0},
                                 {"op": "replace", "path": "/spec/replicas", "value": 2},
                             ]
+                            status.set("EXECUTING")
                             run_kubectl(config, "patch", "deployment", NAME, "--type=json",
                                         "-p", json.dumps(patch))
                             record(audit, "HOTL_EXECUTED", uid=fresh["uid"],
                                    generation=fresh["generation"], action="replicas:0->2")
+                            status.set("VERIFYING")
                             recovered = verify(config, fresh["uid"], time.monotonic() + 90)
                             record(audit, "HOTL_RECOVERY_VERIFIED", uid=fresh["uid"],
                                    result="READY_VERIFIED", observed=recovered)
                             if args.once:
+                                status.stop("STOPPED")
                                 return 0
+                            status.set("MONITORING")
                     else:
                         seen = None
                 except Exception as exc:
+                    status.stop("FAILED_CLOSED")
                     record(audit, "HOTL_FAILED_CLOSED", reason=str(exc)[:140])
                     return 1  # No blind retry after errors.
                 time.sleep(args.interval)
         except KeyboardInterrupt:
+            status.stop("STOPPED")
             record(audit, "HOTL_STOPPED_BY_OPERATOR")
             return 0
 

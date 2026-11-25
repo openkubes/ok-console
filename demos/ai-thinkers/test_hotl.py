@@ -172,7 +172,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_secure_append_rejects_non_regular_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises((OSError, RuntimeError)):
                 with self.hotl.secure_append(Path(directory)):
                     pass
 

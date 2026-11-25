@@ -91,7 +91,7 @@ export const platformFixture: PlatformSnapshot = {
       recommendedCluster: 'Preview only · not deployed',
       tools: [
         { id: 'diagnostics.read', label: 'Observed Kubernetes drift', authority: 'Read only' },
-        { id: 'remediation.propose', label: 'Bounded remediation proposal', authority: 'Proposal only' },
+        { id: 'remediation.propose', label: 'Bounded remediation proposal', authority: 'Approval required' },
       ],
     },
     {

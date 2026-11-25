@@ -1,6 +1,21 @@
-<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenKubes | W-JAX Agentic Operations Lab</title>
-<style>body{background:#0b1120;color:#e5e7eb;font:16px system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 18px}h1{font-size:2.1rem}section{border:1px solid #324054;border-radius:12px;padding:20px;margin:18px 0;background:#121b2d}input{box-sizing:border-box;width:100%;background:#09101c;color:white;border:1px solid #475569;border-radius:8px;padding:13px;font:inherit}button{background:#13b8a6;border:0;border-radius:9px;padding:11px 17px;color:#031d1c;font-weight:700;cursor:pointer;margin:12px 8px 2px 0}button:disabled{opacity:.4;cursor:not-allowed}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#b6e6df;font-size:14px;background:#080e19;border-radius:8px;padding:15px;min-height:32px}.sub{color:#94a3b8}.pill{color:#67e8f9}</style>
-<h1>OpenKubes <span class="pill">Agentic Operations</span></h1><p class="sub">W-JAX 2026 · Local Lab · AI thinks. OpenKubes executes. Evidence proves.</p>
+<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenKubes AI Thinkerers HITL | Agentic Operations Lab</title>
+<style>
+:root{color-scheme:light;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--blue:#064fc8;--blue-dark:#073b92;--blue-soft:#e8f0ff;--brand-deep:#061d46;--green:#189b50;--green-soft:#e9f7ef;--orange:#f28b12;--ink:#172033;--muted:#657086;--line:#dfe3ea;--surface:#fff}
+*{box-sizing:border-box}
+body{color:var(--ink);background:#f7f8fa;font:16px system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:1060px;margin:38px auto;padding:0 22px 55px}
+h1{font-size:clamp(30px,4vw,44px);letter-spacing:-.035em;margin:0 0 9px}
+h2{font-size:20px;letter-spacing:-.02em;margin:0 0 14px}
+section{border:1px solid var(--line);border-radius:14px;padding:23px;margin:22px 0;background:var(--surface);box-shadow:0 3px 12px rgba(35,49,72,.035)}
+input{display:block;width:100%;background:#fafcff;color:var(--ink);border:1px solid #cad4e2;border-radius:10px;padding:14px;font:inherit}
+input:focus-visible,button:focus-visible{outline:3px solid #a7c8ff;outline-offset:2px}
+button{background:var(--blue);border:1px solid var(--blue);border-radius:9px;padding:11px 17px;color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer;margin:14px 8px 2px 0}
+button:hover:not(:disabled){background:var(--blue-dark);border-color:var(--blue-dark)}
+button:disabled{background:#dce3ec;border-color:#dce3ec;color:#67758a;opacity:1;cursor:not-allowed}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--brand-deep);font-size:13px;line-height:1.55;background:#f5f8fd;border:1px solid #e0e7f0;border-left:3px solid var(--blue);border-radius:9px;padding:16px;min-height:40px}
+.sub{color:var(--muted);line-height:1.6}.pill{color:var(--blue)}
+@media(max-width:600px){body{margin:24px auto;padding:0 16px 40px}section{padding:17px}button{width:100%;margin-right:0}}
+</style>
+<h1>AI Thinkerers <span class="pill">HITL</span></h1><p class="sub">AI Thinkerers Local Lab · AI thinks. OpenKubes executes. Evidence proves.</p>
 <section><h2>1 — Natural Language Intent</h2><p class="sub">One allowlisted operation, disposable kind cluster. Parser mode is explicitly shown.</p><input id="intent" value="Deploy nginx with two replicas to the demo cluster"><button onclick="propose()">Generate candidate</button><button onclick="denied()">Try forbidden production request</button><pre id="proposal">No candidate yet</pre></section>
 <section><h2>2 — Policy & Human Authorization</h2><pre id="policy">Waiting for candidate</pre><button id="approve" onclick="approve()" disabled>Approve exact proposal</button><button id="execute" onclick="execute()" disabled>Execute authorized operation</button></section>
 <section><h2>3 — Evidence from Kubernetes</h2><button onclick="refresh()">Refresh live status</button><pre id="status">Waiting for cluster</pre><pre id="events">No evidence yet</pre></section>

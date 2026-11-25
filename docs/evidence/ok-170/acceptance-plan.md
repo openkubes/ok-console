@@ -79,7 +79,7 @@ R1-R9 here are the Scope C register; the R-numbered sections of the maintenance 
 | R1 | Live rollback to the freshness-unaware C0/P0 would show stale data as Current (Drill 5); decision 3(b) allows it only while withdrawn fail-closed | Disposable-cluster proof first; any other serving pair needs freshness qualification |
 | R2 | Live trust/outage drills are not run on ok-shared; AC5/AC8 negatives shown on disposable clusters | Separate live drill window |
 | R3 | decision D8 breakglass not executed | Its own approval |
-| R4 | D10: field manager ok-172-live, no ownership handoff; #145 supplies the gates | STOP and report if the non-forced dry-run or ownership inventory is not clean |
+| R4 | D10 uses `ok-172-live` for deployment and recovery. The [maintenance procedure](maintenance-procedure.md#phase-0--read-only-pre-flight-and-ownership-handover-g0) defines the scoped Service handover before withdrawal admission. #145 supplies the gates. | STOP and report if the non-forced dry-run or ownership inventory is not clean |
 | R5 | D6: the live dry-run URL value is tracked in the ok-shared-live overlay, unchanged; no live change yet | Windowed dry-run in the G0 package |
 | R6 | OIDC on the deployed BFF is not shown (AC4) | Procedure phase 2; adverse tokens through the isolated protocol setup, no realm/key/client edits (decision 4(a)) |
 | R7 | Stale wording implying current state addressed in #143 | Listed follow-ups: deploy wizard and Capabilities catalog wording, envelope generation-time field, non-Chromium browsers and macOS |

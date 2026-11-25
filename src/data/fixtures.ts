@@ -85,7 +85,7 @@ export const platformFixture: PlatformSnapshot = {
     },
     {
       id: 'agent-ai-sre-preview', name: 'AI SRE Agent', category: 'Platform Operations',
-      description: 'OpenKubes AI Thinkers demo concept: investigates Kubernetes drift, proposes bounded remediation, and distinguishes HITL approval from experimental HOTL supervision. Preview only; not a deployed or independently verified agent.',
+      description: 'OpenKubes AI Thinkerers demo concept: investigates Kubernetes drift, proposes bounded remediation, and distinguishes HITL approval from experimental HOTL supervision. Preview only; not a deployed or independently verified agent.',
       version: 'Demo preview', publisher: 'OpenKubes', verified: false, demoOnly: true, artifactDigest: 'demo-only',
       requiredCapabilities: ['cap-observability'], resourceProfile: 'Local kind demo · no catalog runtime', deployments: 0,
       recommendedCluster: 'Preview only · not deployed',

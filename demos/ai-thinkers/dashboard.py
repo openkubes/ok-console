@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import stat
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,14 +30,15 @@ h1 em{font-style:normal;color:var(--blue)}
 p,.muted{color:var(--muted)}
 h2{font-size:19px;letter-spacing:-.02em;margin:0 0 18px}
 .eyebrow{letter-spacing:.14em;font-weight:800;font-size:11px;color:var(--blue)}
-.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:24px 0}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:24px 0}
 .card{
   background:var(--surface);border:1px solid var(--line);border-radius:14px;
   padding:22px;min-width:0;box-shadow:0 3px 12px rgba(35,49,72,.035)
 }
 .grid .card{border-left:3px solid var(--blue)}
 .grid .card:nth-child(2){border-left-color:var(--green)}
-.grid .card:nth-child(3){border-left-color:var(--orange)}
+.grid .card:nth-child(3){border-left-color:var(--green)}
+.grid .card:nth-child(4){border-left-color:var(--orange)}
 .big{font-size:28px;font-weight:800;letter-spacing:-.03em;overflow-wrap:anywhere}
 .green{color:var(--green)}.cyan{color:var(--blue)}.amber{color:#965a00}
 .flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:20px 0 0}
@@ -74,7 +76,8 @@ a{color:var(--blue)}
 <div class="banner" id="notice">Waiting for local events. Start the HOTL supervisor in a separate terminal.</div>
 <div class="grid">
 <div class="card"><div class="muted">Recorded session mode</div><div class="big cyan" id="mode">—</div></div>
-<div class="card"><div class="muted">Latest observed result</div><div class="big" id="result">—</div></div>
+<div class="card"><div class="muted">Current state</div><div class="big" id="current">UNKNOWN</div><div class="muted" id="current-detail">No live status yet</div></div>
+<div class="card"><div class="muted">Last recovery</div><div class="big" id="result">—</div></div>
 <div class="card"><div class="muted">Events recorded</div><div class="big" id="count">0</div></div>
 </div>
 <section class="card"><h2>Recovery sequence</h2>
@@ -86,7 +89,7 @@ a{color:var(--blue)}
 <div class="step" data-event="HOTL_RECOVERY_VERIFIED"><span>05</span>Verify 2/2</div>
 </div></section>
 <section class="card" style="margin-top:20px"><h2>Evidence timeline <span class="muted">(newest first)</span></h2><div class="timeline" id="timeline">No events yet</div></section>
-<footer>Read-only display on 127.0.0.1. No Kubernetes credentials in this browser. JSONL is a local, mutable demo log, not signed evidence. This display cannot enable, pause or stop the supervisor. Use Ctrl-C in its terminal to prevent future actions. Once-only completion is not an ongoing authorization.</footer>
+<footer>Read-only display on 127.0.0.1. No Kubernetes credentials in this browser. Heartbeat and JSONL are local, mutable demo data, not signed evidence. A fresh heartbeat does not attest an authorized or healthy Kubernetes workload. This display cannot enable, pause or stop the supervisor. Use Ctrl-C in its terminal to prevent future actions. Once-only completion is not an ongoing authorization.</footer>
 </main>
 <script nonce="HOTL_DEMO">
 const $=id=>document.getElementById(id);
@@ -99,15 +102,18 @@ function render(data){
  const lastDrift=es.findLastIndex(e=>e.event==='DRIFT_CONFIRMED');
  const current=lastDrift<0?es:[...es.filter(e=>e.event==='HOTL_ENABLED').slice(-1),...es.slice(lastDrift)];
  const kinds=new Set(current.map(e=>e.event));
+ const lastVerified=[...es].reverse().find(e=>e.event==='HOTL_RECOVERY_VERIFIED');
  $('count').textContent=String(data.total);
  const enabled=es.find(e=>e.event==='HOTL_ENABLED');
  $('mode').textContent=enabled?(enabled.mode==='one-shot'?'ONE SHOT':enabled.mode==='always'?'ALWAYS':'WATCH MODE'):'NOT ENABLED';
- let result='AWAITING DRIFT',klass='amber';
- if(kinds.has('HOTL_RECOVERY_VERIFIED')){result='READY VERIFIED';klass='green'}
- if(kinds.has('HOTL_FAILED_CLOSED')){result='FAIL CLOSED';klass='amber'}
- if(kinds.has('HOTL_EXECUTED')&&!kinds.has('HOTL_RECOVERY_VERIFIED')&&!kinds.has('HOTL_FAILED_CLOSED')){result='EXECUTED';klass='cyan'}
- $('result').className='big '+klass;$('result').textContent=result;
- $('notice').textContent=es.length?'Recorded events only; refreshes every 2 seconds. This page cannot determine whether the supervisor is still running.':'No HOTL events recorded in this runtime. Start the supervisor first.';
+ const state=data.status||{state:'UNKNOWN',detail:'No live status available'};
+ const labels={MONITORING:'MONITORING',DRIFT_DETECTED:'DRIFT DETECTED',AI_ANALYZING:'AI ANALYZING',EXECUTING:'EXECUTING',VERIFYING:'VERIFYING',STOPPED:'STOPPED',FAILED_CLOSED:'FAILED CLOSED',UNKNOWN:'UNKNOWN'};
+ $('current').textContent=labels[state.state]||'UNKNOWN';
+ $('current').className='big '+(state.state==='MONITORING'?'cyan':state.state==='STOPPED'?'amber':state.state==='FAILED_CLOSED'?'amber':'amber');
+ $('current-detail').textContent=state.detail||'';
+ $('result').textContent=lastVerified?'VERIFIED':'NO RECOVERY YET';
+ $('result').className='big '+(lastVerified?'green':'amber');
+ $('notice').textContent='Read-only local status (heartbeat freshness checked) and historical recovery evidence. A heartbeat is not a Kubernetes health check.';
  document.querySelectorAll('.step').forEach(s=>{s.className='step'+(kinds.has(s.dataset.event)?' done':'');});
  if(kinds.has('HOTL_FAILED_CLOSED')){for(const s of document.querySelectorAll('.step')){if(!kinds.has(s.dataset.event))s.className='step fail';}}
  const root=$('timeline');root.replaceChildren();
@@ -157,6 +163,7 @@ def read_events(audit):
                 e = {"event": obj["event"], "at": str(obj.get("at", ""))[:40]}
                 if e["event"] == "HOTL_ENABLED":
                     e["mode"] = str(obj.get("mode", ""))[:24]
+                    e["session"] = str(obj.get("session", ""))[:40]
                 elif e["event"] == "AI_PROPOSAL":
                     e["model"] = str(obj.get("model", ""))[:48]
                 elif e["event"] == "HOTL_EXECUTED":
@@ -178,6 +185,50 @@ def read_events(audit):
     return latest[-80:], len(latest)
 
 
+STATUS_STATES = {
+    "MONITORING", "DRIFT_DETECTED", "AI_ANALYZING", "EXECUTING",
+    "VERIFYING", "STOPPED", "FAILED_CLOSED",
+}
+
+
+def read_status(path, events, now=None):
+    """Display-only: heartbeat must belong to the latest recorded session."""
+    fallback = {"state": "UNKNOWN", "detail": "No fresh supervisor heartbeat"}
+    if not events:
+        return fallback
+    enabled = next((e for e in events if e["event"] == "HOTL_ENABLED"), None)
+    if enabled is None or not enabled.get("session"):
+        return fallback
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
+            return fallback
+        with path.open(encoding="utf-8") as stream:
+            obj = json.load(stream)
+        if not isinstance(obj, dict) or obj.get("session") != enabled["session"]:
+            return fallback
+        state = obj.get("state")
+        if state not in STATUS_STATES:
+            return fallback
+        stamp = datetime.fromisoformat(obj["heartbeat"])
+        if stamp.tzinfo is None:
+            return fallback
+        now = now or datetime.now(timezone.utc)
+        age = (now - stamp).total_seconds()
+        if age < -3 or age > 8:
+            return {"state": "UNKNOWN", "detail": "Heartbeat stale or invalid"}
+        if state == "MONITORING":
+            detail = "Awaiting next drift (heartbeat observed)"
+        elif state == "STOPPED":
+            detail = "Supervisor reported stop"
+        elif state == "FAILED_CLOSED":
+            detail = "Supervisor reported fail-closed"
+        else:
+            detail = "Supervisor reported " + state.lower().replace("_", " ")
+        return {"state": state, "detail": detail}
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+        return fallback
+
+
 def serve(runtime, port):
     audit = runtime / "ai-thinkers-evidence.jsonl"
 
@@ -190,7 +241,8 @@ def serve(runtime, port):
             elif self.path == "/api/events":
                 try:
                     events, total = read_events(audit)
-                    body = json.dumps({"events": events, "total": total}).encode("utf-8")
+                    status_info = read_status(runtime / "ai-thinkers-status.json", events)
+                    body = json.dumps({"events": events, "total": total, "status": status_info}).encode("utf-8")
                     status = 200
                 except (OSError, ValueError):
                     body = b'{"error":"AUDIT_UNAVAILABLE"}'

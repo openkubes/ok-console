@@ -1,4 +1,4 @@
-# OpenKubes AI Thinkers — local HOTL spike
+# OpenKubes AI Thinkerers — local HOTL spike
 
 **Status: experimental / not production safe.** Original W-JAX HITL demo remains unchanged. This is a separate opt-in HOTL supervisor, intentionally scoped to the disposable local kind cluster only. It reuses the **Executor** ServiceAccount from the W-JAX lab; the AI receives no kubeconfig.
 

@@ -37,6 +37,14 @@ python3 demos/ai-thinkers/hotl.py --enable-hotl --always \
   --runtime-dir "$WJAX_DEMO_RUNTIME_DIR"
 ```
 
+## Supervisor heartbeat and dashboard status
+
+The read-only dashboard now has four summary cards: **Supervisor mode**, **Current state**, **Last recovery**, and **Recorded events**. The supervisor atomically updates a private `ai-thinkers-status.json` file every ~2 seconds and at state transitions. The dashboard accepts only a heartbeat bound to the latest `HOTL_ENABLED` session ID. A live state older than 8 seconds becomes **UNKNOWN**, never falsely **MONITORING**. After normal `--once` completion, **STOPPED** is retained as the last reported terminal state; failures report **FAILED CLOSED**. Both are recorded states, not independent process attestations.
+
+**Last recovery** is derived from the most recent `HOTL_RECOVERY_VERIFIED` in the current session and stays **VERIFIED** after the supervisor stops or resumes monitoring. This is historical, mutable JSONL and read-back evidence, not a signed receipt, an independent verifier, or a Kubernetes health probe. A supervisor can still crash between heartbeats and a status may briefly appear current until the freshness threshold expires. Do not use the display as an authorization control.
+
+To see new UI code, restart `dashboard.py` (port 8794) from this branch and reload the browser. Do not start a second dashboard on the occupied port. To test `--once` and `--always`, start each supervisor in foreground with explicit opt-in; never run two against the same runtime.
+
 ## Makefile shortcuts (foreground only)
 
 From the repository root, set the existing private runtime and explicitly consent:

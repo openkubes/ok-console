@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI Thinkers HOTL local-kind spike. NOT production automation.
+"""AI Thinkerers HOTL local-kind spike. NOT production automation.
 
 Explicit enablement; exact workload guard; AI only proposes; atomic Kubernetes
 preconditions; separate evidence; Ctrl-C stops future attempts.
@@ -244,7 +244,7 @@ def main():
                mode=status.mode, session=status.session)
         seen = None
         completed = set()
-        print("AI Thinkers HOTL: watching. Ctrl-C stops future actions.", flush=True)
+        print("AI Thinkerers HOTL: watching. Ctrl-C stops future actions.", flush=True)
         try:
             while True:
                 try:

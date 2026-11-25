@@ -102,7 +102,8 @@ function runShell(setup: string[], shell: string, dir: string, env: Record<strin
 
 function checkGateCommands(markdown: string) {
   const gates = commands(markdown).filter(({ name }) => name === 'gate')
-  expect(gates.length, 'procedure must document gate invocations').toBeGreaterThan(0)
+  const found = gates.map(({ line, shell }) => `line ${line}: ${shell}`).join('\n')
+  expect(gates.length, `expected 7 documented gate invocations, found ${gates.length}:\n${found || '(none)'}`).toBe(7)
   const dir = mkdtempSync(join(tmpdir(), 'ok170-procedure-'))
   try {
     const log = join(dir, 'calls.jsonl')
@@ -138,12 +139,22 @@ if (JSON.stringify(args.slice(5)) === JSON.stringify(['version', '--client', '-o
   }
 }
 
-function checkGateTarget(markdown: string) {
+function checkGateTarget(markdown: string, expectedStop?: string) {
   const gate = commands(markdown).find(({ name }) => name === 'gate')
   expect(gate, 'procedure must document a gate invocation').toBeDefined()
   const dir = mkdtempSync(join(tmpdir(), 'ok170-wrapper-'))
   try {
-    const result = runShell(gate!.setup, 'node() { printf "%s\\n" "$@"; }\ngate ownership-inventory', dir)
+    const result = runShell(gate!.setup, [
+      'node() { printf "%s\\n" "$@"; }',
+      'kubectl() { echo "unexpected kubectl call"; }',
+      'gate ownership-inventory',
+    ].join('\n'), dir)
+    if (expectedStop) {
+      expect(result.stderr.trim()).toBe(expectedStop)
+      expect(result.status).toBe(1)
+      expect(result.stdout, 'node and kubectl must not run when the digest differs').toBe('')
+      return
+    }
     expect(result.status, result.stderr).toBe(0)
     const args = result.stdout.trimEnd().split('\n').slice(2)
     for (const [flag, value] of [['--context', context], ['--namespace', namespace]]) {
@@ -175,9 +186,21 @@ it.each([
   ['rejects a wrapper without a namespace', checkGateTarget, ' --namespace openkubes-console', '', /gate\(\) must pass --namespace openkubes-console/],
   ['rejects a forced inline command', checkNonForced, 'k apply --server-side', 'k apply --force-conflicts --server-side', /documented commands must omit --force-conflicts/],
   ['rejects a forced fenced command', checkNonForced, 'k apply --server-side --dry-run=server', 'k apply --force-conflicts=true --server-side --dry-run=server', /documented commands must omit --force-conflicts/],
+  ['rejects an untagged gate fence', checkGateCommands, '```bash\ngate ownership-inventory --allowlist "$PRE_H_ALLOWLIST"', '```\ngate ownership-inventory --allowlist "$PRE_H_ALLOWLIST"', /expected 7 documented gate invocations, found 6:[\s\S]*gate ownership-release/],
+  [
+    'stops before node or kubectl when the approved digest differs',
+    (markdown: string) => checkGateTarget(markdown, 'STOP: ok170-gates.mjs SHA-256 differs from the approved G0 package'),
+    'export KUBECTL_KUBERC=false\n',
+    `export KUBECTL_KUBERC=false\nexport GATE_SHA256=${'0'.repeat(64)}\n`,
+  ],
 ] as const)('%s', (_name, check, original, replacement, reason) => {
   expect(procedure).toContain(original)
-  expect(() => check(procedure.replace(original, replacement))).toThrow(reason)
+  const modified = procedure.replace(original, replacement)
+  if (reason) {
+    expect(() => check(modified)).toThrow(reason)
+  } else {
+    check(modified)
+  }
 })
 
 it('exports KUBECTL_KUBERC=false before the first gate or k invocation', () => checkKuberc(procedure))

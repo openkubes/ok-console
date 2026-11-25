@@ -140,7 +140,9 @@ def verify(config, uid, deadline):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--enable-hotl", action="store_true")
-    ap.add_argument("--once", action="store_true", help="One recovery maximum, then exit")
+    modes = ap.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--once", action="store_true", help="One successful recovery, then exit")
+    modes.add_argument("--always", action="store_true", help="Continue watching for new drift; fail closed on errors")
     ap.add_argument("--interval", type=int, default=5)
     ap.add_argument("--runtime-dir", required=True)
     args = ap.parse_args()
@@ -163,7 +165,7 @@ def main():
         except BlockingIOError:
             ap.error("another HOTL supervisor already holds this runtime lock")
         record(audit, "HOTL_ENABLED", scope="local-kind/wjax-demo/wjax-nginx",
-               mode="one-shot" if args.once else "watch")
+               mode="one-shot" if args.once else "always")
         seen = None
         completed = set()
         print("AI Thinkers HOTL: watching. Ctrl-C stops future actions.", flush=True)

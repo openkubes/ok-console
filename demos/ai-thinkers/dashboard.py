@@ -214,14 +214,15 @@ def read_status(path, events, now=None):
             return fallback
         now = now or datetime.now(timezone.utc)
         age = (now - stamp).total_seconds()
-        if age < -3 or age > 8:
+        if age < -3:
+            return fallback
+        # Terminal state remains historical but explicit. Live states expire.
+        if state in ("STOPPED", "FAILED_CLOSED"):
+            return {"state": state, "detail": "Last reported terminal state (not live)"}
+        if age > 8:
             return {"state": "UNKNOWN", "detail": "Heartbeat stale or invalid"}
         if state == "MONITORING":
             detail = "Awaiting next drift (heartbeat observed)"
-        elif state == "STOPPED":
-            detail = "Supervisor reported stop"
-        elif state == "FAILED_CLOSED":
-            detail = "Supervisor reported fail-closed"
         else:
             detail = "Supervisor reported " + state.lower().replace("_", " ")
         return {"state": state, "detail": detail}

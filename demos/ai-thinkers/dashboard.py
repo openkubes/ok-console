@@ -166,7 +166,11 @@ def read_events(audit):
                 elif e["event"] == "HOTL_FAILED_CLOSED":
                     e["reason"] = str(obj.get("reason", ""))[:100]
                 parsed.append(e)
-    return parsed[-80:], len(parsed)
+    # Presentation always follows the newest enabled HOTL session. Historical
+    # successes must not make a fresh run appear already verified.
+    starts = [i for i, item in enumerate(parsed) if item["event"] == "HOTL_ENABLED"]
+    latest = parsed[starts[-1]:] if starts else parsed
+    return latest[-80:], len(latest)
 
 
 def serve(runtime, port):

@@ -10,6 +10,7 @@ import json
 import threading
 import uuid
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -97,9 +98,35 @@ class SupervisorStatus:
 
 
 
+def secure_append(path):
+    """Append/create a private regular file without following the final symlink."""
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            raise RuntimeError("UNSAFE_DEMO_FILE")
+        return os.fdopen(fd, "a", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def checked_runtime_dir(raw):
+    """Reject symlink components before resolving the private runtime path."""
+    candidate = Path(raw).expanduser().absolute()
+    if any(component.is_symlink() for component in (candidate, *candidate.parents)):
+        raise RuntimeError("UNSAFE_RUNTIME_SYMLINK")
+    home = candidate.resolve(strict=True)
+    if not home.is_dir() or stat.S_IMODE(home.stat().st_mode) & 0o077:
+        raise RuntimeError("UNSAFE_RUNTIME_PERMISSIONS")
+    return home
+
+
 def record(path, event, **kwargs):
     item = {"at": datetime.now(timezone.utc).isoformat(), "event": event, **kwargs}
-    with path.open("a", encoding="utf-8") as f:
+    with secure_append(path) as f:
         f.write(json.dumps(item, sort_keys=True) + "\n")
         f.flush()
         os.fsync(f.fileno())
@@ -224,16 +251,17 @@ def main():
         ap.error("HOTL disabled; require --enable-hotl and explicit AI_THINKERS_HOTL consent")
     if not 2 <= args.interval <= 60:
         ap.error("--interval must be 2..60 seconds")
-    home = Path(args.runtime_dir).expanduser().resolve(strict=True)
-    if home.is_symlink() or home.stat().st_mode & 0o077:
-        ap.error("runtime directory must be private (0700)")
+    try:
+        home = checked_runtime_dir(args.runtime_dir)
+    except (OSError, RuntimeError) as exc:
+        ap.error(str(exc))
     config = home / ".demo-kubeconfig.json"
     if not config.is_file() or config.is_symlink() or config.stat().st_mode & 0o077:
         ap.error("dedicated executor kubeconfig missing or unsafe")
     check_target(config)
     audit = home / "ai-thinkers-evidence.jsonl"
     lock = home / "ai-thinkers.lock"
-    with lock.open("a+") as lockfile:
+    with secure_append(lock) as lockfile:
         try:
             fcntl.flock(lockfile, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -279,6 +307,8 @@ def main():
                                 {"op": "test", "path": "/spec/replicas", "value": 0},
                                 {"op": "replace", "path": "/spec/replicas", "value": 2},
                             ]
+                            # Revalidate the pinned local kind target immediately before a write.
+                            check_target(config)
                             status.set("EXECUTING")
                             run_kubectl(config, "patch", "deployment", NAME, "--type=json",
                                         "-p", json.dumps(patch))

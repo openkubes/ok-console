@@ -50,6 +50,22 @@ class DashboardTests(unittest.TestCase):
                 self.dashboard.read_events(link)
 
 
+    def test_latest_session_hides_old_verified_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "ai-thinkers-evidence.jsonl"
+            items = [
+                {"event": "HOTL_ENABLED", "mode": "one-shot"},
+                {"event": "HOTL_RECOVERY_VERIFIED", "result": "READY_VERIFIED"},
+                {"event": "HOTL_ENABLED", "mode": "one-shot"},
+                {"event": "DRIFT_CONFIRMED", "uid": "local"},
+            ]
+            file.write_text("".join(json.dumps(item) + "\n" for item in items))
+            events, count = self.dashboard.read_events(file)
+            self.assertEqual(count, 2)
+            self.assertEqual([e["event"] for e in events],
+                             ["HOTL_ENABLED", "DRIFT_CONFIRMED"])
+
+
 class SupervisorTests(unittest.TestCase):
     def setUp(self):
         self.hotl = load("hotl")

@@ -33,6 +33,17 @@ wjax-demo-verify:
 	  --demo-dir "$(WJAX_DEMO_RUNTIME_DIR)" \
 	  --timeout 90
 
+# Foreground-only HOTL supervisor; requires explicit opt-in.
+# Dedicated W-JAX executor credentials must exist in the private runtime.
+.PHONY: ai-thinkers-hotl-once ai-thinkers-hotl-always
+ai-thinkers-hotl-once:
+	@python3 "$(WJAX_CONSOLE_DIR)/demos/ai-thinkers/hotl.py" \
+	  --enable-hotl --once --runtime-dir "$(WJAX_DEMO_RUNTIME_DIR)"
+
+ai-thinkers-hotl-always:
+	@python3 "$(WJAX_CONSOLE_DIR)/demos/ai-thinkers/hotl.py" \
+	  --enable-hotl --always --runtime-dir "$(WJAX_DEMO_RUNTIME_DIR)"
+
 .PHONY: help
 help:
 	@printf '%s\n' \
@@ -48,6 +59,8 @@ help:
 	  '  make wjax-demo-verify         Independently verify Kubernetes recovery' \
 	  '  make wjax-demo-auth           Rotate Reader + Executor tokens (72h default)' \
 	  '  make wjax-demo-diagnose       Diagnose local demo services' \
+	  '  make ai-thinkers-hotl-once   Run one bounded HOTL recovery (explicit consent)' \
+	  '  make ai-thinkers-hotl-always Run foreground HOTL supervisor (explicit consent)' \
 	  '' \
 	  'URLs: Console http://127.0.0.1:8790/#/wjax | Agentic http://127.0.0.1:8788/'
 .PHONY: wjax-demo-reset-session

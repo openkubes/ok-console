@@ -60,8 +60,54 @@ if grep -Eq '^kind: Secret$' "${out}/rendered.yaml"; then
   stop "rendered overlay must not contain Secret values"
 fi
 
+# Prepend the same quantity path predicate to the render and drift Python stages.
+with_quantity_paths() {
+  {
+    cat <<'PYTHON'
+POD_TEMPLATE = ("spec", "template", "spec")
+POD_SPEC_PATHS = {
+    ("apps", "Deployment"): POD_TEMPLATE,
+    ("apps", "StatefulSet"): POD_TEMPLATE,
+    ("apps", "DaemonSet"): POD_TEMPLATE,
+    ("apps", "ReplicaSet"): POD_TEMPLATE,
+    ("batch", "Job"): POD_TEMPLATE,
+    ("batch", "CronJob"): ("spec", "jobTemplate", *POD_TEMPLATE),
+    ("", "Pod"): ("spec",),
+}
+CNPG_CLUSTER = ("postgresql.cnpg.io", "Cluster")
+
+def is_quantity_path(obj, path, default_kind=None, default_api=None):
+    if path[-3:-1] not in (("resources", "requests"), ("resources", "limits")) or not isinstance(path[-1], str):
+        return False
+    if not isinstance(obj, dict):
+        return False
+    kind = obj.get("kind", default_kind)
+    api = obj.get("apiVersion", default_api)
+    if not isinstance(kind, str) or not isinstance(api, str):
+        return False
+    group = api.rpartition("/")[0]
+    if not group and api != "v1":
+        return False
+    if path[:1] == ("items",) and isinstance(path[1], int):
+        if (group, kind) == ("", "List"):
+            return is_quantity_path(obj["items"][path[1]], path[2:])
+        if kind.endswith("List"):
+            item_kind = kind[:-4]
+            if (group, item_kind) in POD_SPEC_PATHS or (group, item_kind) == CNPG_CLUSTER:
+                return is_quantity_path(obj["items"][path[1]], path[2:], item_kind, api)
+    if (group, kind) == CNPG_CLUSTER:
+        return path[:-3] == ("spec",)
+    pod_spec = POD_SPEC_PATHS.get((group, kind))
+    return (path[:-5] == pod_spec
+            and path[-5] in ("containers", "initContainers", "ephemeralContainers")
+            and isinstance(path[-4], int))
+PYTHON
+    cat
+  } | python3 - "$@"
+}
+
 # Split the render into one JSON artifact per object the gates admit, and list the rest.
-python3 - "${out}" "${package}/deltas.json" "${namespace}" "${package}/expected-images.json" "${package}/allowlist.json" <<'PY' || stop "render split failed"
+with_quantity_paths "${out}" "${package}/deltas.json" "${namespace}" "${package}/expected-images.json" "${package}/allowlist.json" <<'PY' || stop "render split failed"
 import json, os, re, sys, yaml
 
 class RenderedFloat(float):
@@ -77,14 +123,14 @@ def load_rendered_float(loader, node):
 
 RenderLoader.add_constructor("tag:yaml.org,2002:float", load_rendered_float)
 
-def preserve_quantity_text(value, path=()):
+def preserve_quantity_text(value, obj, path=()):
     # Keep the original decimal through the JSON handoff to the drift check.
-    if isinstance(value, RenderedFloat) and path[-3:-1] in (("resources", "requests"), ("resources", "limits")):
+    if isinstance(value, RenderedFloat) and is_quantity_path(obj, path):
         return value.text
     if isinstance(value, dict):
-        return {k: preserve_quantity_text(v, (*path, k)) for k, v in value.items()}
+        return {k: preserve_quantity_text(v, obj, (*path, k)) for k, v in value.items()}
     if isinstance(value, list):
-        return [preserve_quantity_text(v, (*path, i)) for i, v in enumerate(value)]
+        return [preserve_quantity_text(v, obj, (*path, i)) for i, v in enumerate(value)]
     return value
 
 out, deltas_path, namespace, expected_path, allowlist_path = sys.argv[1:6]
@@ -144,7 +190,7 @@ with open(os.path.join(out, "not-admitted.txt"), "w") as f:
     for n, (ref, o) in enumerate(sorted(skipped, key=lambda x: x[0])):
         f.write(f"{ref}\n")
         with open(os.path.join(out, "unadmitted", f"{n:03d}.json"), "w") as g:
-            json.dump(preserve_quantity_text(o), g)
+            json.dump(preserve_quantity_text(o, o), g)
 PY
 
 kube=(kubectl --context "${expected_context}" --namespace "${namespace}" --request-timeout=10s)
@@ -168,7 +214,7 @@ while IFS= read -r ref; do
     || stop "cannot read live ${ref}"
   n=$((n + 1))
 done <"${out}/not-admitted.txt"
-python3 - "${out}" "${snapshots}" <<'PY' >"${out}/results/unadmitted-drift.txt" || stop "an object the gates do not admit differs from the live cluster (see results/unadmitted-drift.txt)"
+with_quantity_paths "${out}" "${snapshots}" <<'PY' >"${out}/results/unadmitted-drift.txt" || stop "an object the gates do not admit differs from the live cluster (see results/unadmitted-drift.txt)"
 import json, os, re, sys
 from decimal import Decimal, DecimalException, localcontext
 
@@ -187,8 +233,6 @@ class JsonFloat(float):
 def quantity(value):
     if isinstance(value, JsonFloat):
         value = value.text
-    if type(value) not in (str, int):
-        return None
     match = QUANTITY.fullmatch(str(value))
     if match is None:
         return None
@@ -213,9 +257,9 @@ def same_quantity(want, have):
     expected, actual = quantity(want), quantity(have)
     return expected is not None and actual is not None and expected == actual
 
-def diff(want, have, path, found):
+def diff(want, have, obj, path, found):
     field = "/" + "/".join(map(str, path))
-    if path[-3:-1] in (("resources", "requests"), ("resources", "limits")) and isinstance(path[-1], str):
+    if is_quantity_path(obj, path):
         if not same_quantity(want, have):
             found.append(field)
     elif isinstance(want, dict):
@@ -226,12 +270,12 @@ def diff(want, have, path, found):
                 continue
             if path == ("metadata",) and k == "namespace":
                 continue
-            diff(v, have.get(k, MISSING), (*path, k), found)
+            diff(v, have.get(k, MISSING), obj, (*path, k), found)
     elif isinstance(want, list):
         if not isinstance(have, list) or len(have) != len(want):
             found.append(field); return
         for i, (w, h) in enumerate(zip(want, have)):
-            diff(w, h, (*path, i), found)
+            diff(w, h, obj, (*path, i), found)
     elif want != have or type(want) is not type(have):
         found.append(field)
 failed = False
@@ -244,7 +288,7 @@ for name, ref in zip(names, refs):
     if have.get("kind") != want["kind"] or have.get("metadata", {}).get("name") != want["metadata"]["name"]:
         found.append("identity")
     else:
-        diff(want, have, (), found)
+        diff(want, have, want, (), found)
     print(f"{ref}\t{'unchanged' if not found else 'DRIFT ' + ' '.join(found)}")
     failed = failed or bool(found)
 sys.exit(1 if failed else 0)

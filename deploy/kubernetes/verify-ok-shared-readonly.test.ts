@@ -184,6 +184,17 @@ function withUnadmitted(ref: string, want: object, have: object) {
   return s
 }
 
+function mutatedScript(before: string, after: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'ok170-ro-mutant-')); dirs.push(dir)
+  const mutant = join(dir, 'verify-ok-shared-readonly.sh')
+  const original = readFileSync(script, 'utf8')
+  const changed = original.replace(before, after)
+  expect(changed).not.toBe(original)
+  writeFileSync(mutant, changed)
+  symlinkSync(fileURLToPath(new URL('./ok170-gates.mjs', import.meta.url)), join(dir, 'ok170-gates.mjs'))
+  return mutant
+}
+
 const quantityNormalisations = [
   ['Deployment container', deploymentList,
     quantityDeployment({ requests: { cpu: '0.5', memory: '1024Mi' }, limits: { cpu: '1' } }),
@@ -269,13 +280,7 @@ describe('verify-ok-shared-readonly.sh', () => {
   })
 
   it('reports drift for both normalisation fixtures when quantity comparison falls back to exact equality', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ok170-ro-exact-')); dirs.push(dir)
-    const mutant = join(dir, 'verify-ok-shared-readonly.sh')
-    const original = readFileSync(script, 'utf8')
-    const exact = original.replace('if not same_quantity(want, have):', 'if want != have or type(want) is not type(have):')
-    expect(exact).not.toBe(original)
-    writeFileSync(mutant, exact)
-    symlinkSync(fileURLToPath(new URL('./ok170-gates.mjs', import.meta.url)), join(dir, 'ok170-gates.mjs'))
+    const mutant = mutatedScript('if not same_quantity(want, have):', 'if want != have or type(want) is not type(have):')
     for (const [, ref, want, have, path] of quantityNormalisations) {
       const r = run(withUnadmitted(ref, want, have), { scriptPath: mutant })
       stopped(r, unadmittedDrift)
@@ -312,6 +317,89 @@ describe('verify-ok-shared-readonly.sh', () => {
     const r = run(s)
     stopped(r, unadmittedDrift)
     expect(driftReport(r)).toContain(`${cnpg}\tDRIFT /spec/resources/requests/cpu\n`)
+  })
+
+  it('reports binary quantity drift that disappears without extended precision', () => {
+    const s = withUnadmitted(cnpg, quantityCluster({ limits: { memory: '1.0000000000000000000000000001Ki' } }),
+      quantityCluster({ limits: { memory: '1024' } }))
+    const r = run(s)
+    stopped(r, unadmittedDrift)
+    expect(driftReport(r)).toContain(`${cnpg}\tDRIFT /spec/resources/limits/memory\n`)
+
+    const mutant = mutatedScript('ctx.prec = len(mantissa.as_tuple().digits) + 19', 'pass')
+    const rounded = run(s, { scriptPath: mutant })
+    expect(rounded.status).toBe(0)
+    expect(driftReport(rounded)).toContain(`${cnpg}\tunchanged\n`)
+  })
+
+  it.each([
+    ['reports drift for quantity-like strings', '100', '1e2', 'DRIFT /spec/values/resources/limits/connections'],
+    ['leaves identical non-quantity strings unchanged', '?*', '?*', 'unchanged'],
+    ['preserves numeric values as numbers', 0.5, 0.5, 'unchanged'],
+  ] as const)('%s in free-form resources', (_label, want, have, result) => {
+    const ref = 'Settings.v1.example.com/quantity-fixture'
+    const settings = (connections: string | number) => ({
+      apiVersion: 'example.com/v1', kind: 'Settings', metadata: { name: 'quantity-fixture', namespace: ns },
+      spec: { values: { resources: { limits: { connections } } } },
+    })
+    const r = run(withUnadmitted(ref, settings(want), settings(have)))
+    if (result === 'unchanged') expect(r.status).toBe(0)
+    else stopped(r, unadmittedDrift)
+    expect(driftReport(r)).toContain(`${ref}\t${result}\n`)
+  })
+
+  it('normalises known workload and container paths in List items', () => {
+    const list = (cpu: string | number) => {
+      const container = { name: 'fixture', image: newImage, resources: { requests: { cpu } } }
+      const spec = { containers: [container], initContainers: [container], ephemeralContainers: [container] }
+      const template = { spec }
+      const workloads = ['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet'].map((kind) =>
+        ({ apiVersion: 'apps/v1', kind, spec: { template } }))
+      return {
+        apiVersion: 'v1', kind: 'List', metadata: { name: 'quantity-fixture', namespace: ns },
+        items: [...workloads, { apiVersion: 'batch/v1', kind: 'Job', spec: { template } },
+          { apiVersion: 'batch/v1', kind: 'CronJob', spec: { jobTemplate: { spec: { template } } } },
+          { apiVersion: 'v1', kind: 'Pod', spec },
+          { apiVersion: 'batch/v1', kind: 'JobList', items: [{ spec: { template } }] }],
+      }
+    }
+    const ref = 'List/quantity-fixture'
+    const r = run(withUnadmitted(ref, list(0.5), list('500m')))
+    expect(r.status).toBe(0)
+    expect(driftReport(r)).toContain(`${ref}\tunchanged\n`)
+  })
+
+  it('compares array entries under resource requests exactly', () => {
+    const fixture = quantityCluster({ requests: ['?*'] })
+    const s = withUnadmitted(cnpg, fixture, fixture)
+    const r = run(s)
+    expect(r.status).toBe(0)
+    expect(driftReport(r)).toContain(`${cnpg}\tunchanged\n`)
+
+    const mutant = mutatedScript(' or not isinstance(path[-1], str)', '')
+    const unguarded = run(s, { scriptPath: mutant })
+    stopped(unguarded, unadmittedDrift)
+    expect(driftReport(unguarded)).toContain(`${cnpg}\tDRIFT /spec/resources/requests/0\n`)
+  })
+
+  it('compares resource-like fields at foreign API and misplaced workload paths exactly', () => {
+    const list = (cpu: string) => ({
+      apiVersion: 'v1', kind: 'List', metadata: { name: 'quantity-fixture', namespace: ns },
+      items: [
+        { ...quantityDeployment({ requests: { cpu } }).items[0], apiVersion: 'example.com/v1' },
+        { ...quantityCluster({ requests: { cpu } }), apiVersion: 'example.com/v1' },
+        { apiVersion: 'v1', kind: 'Pod', spec: { resources: { requests: { cpu } } } },
+      ],
+    })
+    const ref = 'List/quantity-fixture'
+    const r = run(withUnadmitted(ref, list('100'), list('1e2')))
+    stopped(r, unadmittedDrift)
+    const paths = [
+      '/items/0/spec/template/spec/containers/0/resources/requests/cpu',
+      '/items/1/spec/resources/requests/cpu',
+      '/items/2/spec/resources/requests/cpu',
+    ]
+    expect(driftReport(r)).toContain(`${ref}\tDRIFT ${paths.join(' ')}\n`)
   })
 
   it.each([

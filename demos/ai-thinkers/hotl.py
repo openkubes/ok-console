@@ -56,7 +56,8 @@ def check_target(config):
     ctx = contexts[0]["context"]
     cluster = clusters[0]["cluster"]
     endpoint = urlsplit(cluster.get("server", ""))
-    if (ctx.get("namespace", NS) != NS or endpoint.scheme != "https"
+    if (contexts[0].get("name") != data.get("current-context")
+            or ctx.get("namespace", NS) != NS or endpoint.scheme != "https"
             or endpoint.hostname not in ("127.0.0.1", "localhost", "::1")
             or not endpoint.port or cluster.get("insecure-skip-tls-verify")):
         raise RuntimeError("NOT_LOCAL_DEMO_ENDPOINT")
@@ -77,8 +78,12 @@ def check_target(config):
     )
     kind_data = json.loads(p.stdout)
     kind_endpoint = kind_data["clusters"][0]["cluster"].get("server")
-    if kind_endpoint != cluster.get("server"):
-        raise RuntimeError("DEMO_ENDPOINT_MISMATCH")
+    if (kind_data.get("current-context") != "kind-wjax-demo"
+            or kind_data["clusters"][0].get("name") != "kind-wjax-demo"
+            or kind_endpoint != cluster.get("server")
+            or kind_data["clusters"][0]["cluster"].get("certificate-authority-data")
+               != cluster.get("certificate-authority-data")):
+        raise RuntimeError("DEMO_ENDPOINT_OR_CA_MISMATCH")
 
 
 def observe(config):

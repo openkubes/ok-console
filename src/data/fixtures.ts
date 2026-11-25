@@ -84,15 +84,14 @@ export const platformFixture: PlatformSnapshot = {
       ],
     },
     {
-      id: 'agent-kagent-operator', name: 'Kagent Platform Operator', category: 'Platform Operations',
-      description: 'Explains cluster state, investigates incidents, and proposes evidence-backed platform actions.',
-      version: 'v0.6.2', publisher: 'OpenKubes', verified: true, artifactDigest: 'sha256:9c72…81af',
-      requiredCapabilities: ['cap-observability'], resourceProfile: '1 CPU · 1 GiB', deployments: 1,
-      recommendedCluster: 'ok-ai',
+      id: 'agent-ai-sre-preview', name: 'AI SRE Agent', category: 'Platform Operations',
+      description: 'OpenKubes AI Thinkers demo concept: investigates Kubernetes drift, proposes bounded remediation, and distinguishes HITL approval from experimental HOTL supervision. Preview only; not a deployed or independently verified agent.',
+      version: 'Demo preview', publisher: 'OpenKubes', verified: false, demoOnly: true, artifactDigest: 'demo-only',
+      requiredCapabilities: ['cap-observability'], resourceProfile: 'Local kind demo · no catalog runtime', deployments: 0,
+      recommendedCluster: 'Preview only · not deployed',
       tools: [
-        { id: 'diagnostics.read', label: 'Cluster diagnostics', authority: 'Read only' },
-        { id: 'evidence.read', label: 'Evidence lookup', authority: 'Read only' },
-        { id: 'change.propose', label: 'Change proposals', authority: 'Approval required' },
+        { id: 'diagnostics.read', label: 'Observed Kubernetes drift', authority: 'Read only' },
+        { id: 'remediation.propose', label: 'Bounded remediation proposal', authority: 'Proposal only' },
       ],
     },
     {
@@ -133,7 +132,6 @@ export const platformFixture: PlatformSnapshot = {
     },
   ],
   agentDeployments: [
-    { id: 'agentdep-kagent-ai', name: 'platform-operator', agentId: 'agent-kagent-operator', agentName: 'Kagent Platform Operator', version: 'v0.6.2', cluster: 'ok-ai', namespace: 'openkubes-agents', readiness: 'Unknown', authority: 'diagnostics.read', evidenceId: 'ev-ai-ready' },
     { id: 'agentdep-openclaw-ai', name: 'operations-assistant', agentId: 'agent-openclaw', agentName: 'OpenClaw Operations Assistant', version: 'v0.4.1', cluster: 'ok-ai', namespace: 'openkubes-agents', readiness: 'Unknown', authority: 'curated MCP tools', evidenceId: 'ev-ai-ready' },
   ],
   evidence: [

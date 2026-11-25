@@ -76,3 +76,30 @@ Any manual recovery must be disclosed as **manual**, not HOTL evidence.
 ## Limitations to address before production
 
 The implementation has no enterprise identity, tamper-evident audit, independent verifier, trusted GitOps intent, revoke protocol, scoped signed grants, escalation workflow or sophisticated retry budget. The Kubernetes RBAC from the original disposable demo can create deployments namespace-wide; that privilege must be reduced before any production use. Also add unit/integration tests and an isolated E2E test before relying on the HOTL flow in a live presentation.
+
+## Read-only presentation dashboard (optional)
+
+From the same repository and with the **same** `WJAX_DEMO_RUNTIME_DIR` as the supervisor, run in a third terminal:
+
+```bash
+python3 demos/ai-thinkers/dashboard.py --runtime-dir "$WJAX_DEMO_RUNTIME_DIR"
+```
+
+Open **http://127.0.0.1:8794/**. The dashboard polls only the local HOTL JSONL event log, shows a five-step timeline, and does not send Kubernetes API calls or change cluster resources. The displayed mode indicates the **recorded** session mode, not whether a running supervisor is currently authorized. A prior successful run remains visible in the file; this is historical evidence, not real-time liveness. The dashboard never displays the full candidate, UID, or credentials. The current UI cannot pause or stop a supervisor; use Ctrl-C in the supervisor terminal. To do another `--once` run, restart the supervisor explicitly before creating drift.
+
+### Smoke tests (no Kubernetes writes)
+
+```bash
+python3 -m py_compile demos/ai-thinkers/hotl.py demos/ai-thinkers/dashboard.py
+python3 -m unittest discover -s demos/ai-thinkers -p 'test_*.py' -v
+```
+
+### Live presentation order
+
+1. Show original W-JAX HITL UI at http://127.0.0.1:8788/ and explain manual approval.
+2. Show HOTL dashboard at http://127.0.0.1:8794/.
+3. Start the opt-in one-shot supervisor in a terminal.
+4. Scale **only** disposable `wjax-demo/wjax-nginx` to zero from a second terminal.
+5. Show timeline through `HOTL_RECOVERY_VERIFIED`, then confirm `2/2` with `kubectl --context kind-wjax-demo`.
+6. Point out: evidence from the HOTL process is not independently verified and does not imply unattended production safety.
+

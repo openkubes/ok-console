@@ -62,13 +62,16 @@ server_version="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process
 fixture() {
   node --input-type=module - "$proof_dir" "$namespace" "$@" <<'JS'
 import fs from 'node:fs';
-const [dir, ns, action] = process.argv.slice(2);
+const [dir, ns, action, proof] = process.argv.slice(2);
 const write = (name, obj) => fs.writeFileSync(`${dir}/${name}.json`, JSON.stringify(obj));
 const read = (name) => JSON.parse(fs.readFileSync(`${dir}/${name}.json`));
 const service = { apiVersion: 'v1', kind: 'Service', metadata: { name: 'observed-state-producer', namespace: ns, labels: { app: 'proof' } }, spec: { selector: { app: 'proof' }, ports: [{ port: 80, targetPort: 8080, protocol: 'TCP' }], type: 'ClusterIP' } };
 if (action === 'initial') {
   write('namespace', { apiVersion: 'v1', kind: 'Namespace', metadata: { name: ns } });
   write('service', service);
+  const { apiVersion, kind, metadata: { name, namespace } } = service;
+  write('handover', { apiVersion, kind, metadata: { name, namespace } });
+  write('exclusive-service', { ...service, metadata: { ...service.metadata, annotations: { 'openkubes.io/breakglass-only': 'present' } } });
   write('deployment', { apiVersion: 'apps/v1', kind: 'Deployment', metadata: { name: 'ok-console', namespace: ns }, spec: { replicas: 0, selector: { matchLabels: { app: 'proof' } }, template: { metadata: { labels: { app: 'proof' } }, spec: { containers: [{ name: 'console', image: 'registry.k8s.io/pause:3.10', env: [{ name: 'FIRST', value: 'one' }, { name: 'SECOND', value: 'two' }], ports: [{ containerPort: 8080 }] }] } } } });
   write('configmap', { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'observed-state-producer-cluster-observations', namespace: ns }, data: { observation: 'stand-in' } });
   const matrix = {};
@@ -97,18 +100,23 @@ if (action === 'initial') {
   }
   write('allow-exec', { 'ok-console': { allow: [['get', 'configmaps'], ['create', 'pods/exec']], deny: [['get', 'secrets']] } });
   write('deny-exec', { 'ok-console': { allow: [['get', 'configmaps']], deny: [['create', 'pods/exec']] } });
-} else if (action === 'ownership') {
-  const live = read('snapshot');
+} else if (action === 'ownership' || action === 'handover') {
+  const live = read(action === 'handover' ? `${proof}-snapshot` : 'snapshot');
   const paths = [];
   function walk(node, path) {
     if (!Object.keys(node).length || Object.hasOwn(node, '.')) {
-      if (path[0] === 'f:spec' && path[1] === 'f:selector') paths.push(path);
+      if (action === 'handover' || (path[0] === 'f:spec' && path[1] === 'f:selector')) paths.push(path);
     }
     for (const [k, v] of Object.entries(node)) if (k !== '.') walk(v, [...path, k]);
   }
-  const entry = live.metadata.managedFields.find(e => e.manager === 'ok-172-live' && e.operation === 'Apply');
+  const manager = action === 'handover' ? 'ok-173-breakglass' : 'ok-172-live';
+  const entry = live.metadata.managedFields.find(e => e.manager === manager && e.operation === 'Apply');
   walk(entry.fieldsV1, []);
-  if (!paths.length) throw Error('fixture does not own selector');
+  if (!paths.length) throw Error('fixture does not own selected fields');
+  if (action === 'handover') {
+    write(`${proof}-selected`, { 'Service/observed-state-producer': { manager: 'ok-172-live', paths } });
+    process.exit(0);
+  }
   write('unowned-selected', { 'Service/observed-state-producer': { manager: 'ok-170-acceptance', paths: [['f:spec', 'f:sessionAffinity']] } });
   write('selected', { 'Service/observed-state-producer': { manager: 'ok-170-acceptance', paths } });
   write('adopt', { apiVersion: 'v1', kind: 'Service', metadata: { name: service.metadata.name, namespace: ns }, spec: { selector: service.spec.selector } });
@@ -147,7 +155,8 @@ const reasons = { 'foreign-manager': 'foreign manager or operation', 'release-be
   'extra-delta': 'unapproved admission delta', 'extra-permission': 'permission rules grant denied pair', 'missing-namespace': 'missing --namespace',
   'unowned-adopt': 'selected path not owned by another manager', 'immutable-empty': 'unapproved admission delta',
   'exec-without-grant': 'positive permission control failed', 'named-permission': 'permission rules grant denied pair', 'wrong-conflict-path': 'expected rejection paths mismatch',
-  'wrong-invalid-path': 'expected rejection paths mismatch' };
+  'wrong-invalid-path': 'expected rejection paths mismatch', 'stale-release': 'stale snapshot',
+  'exclusive-release': 'release before adoption' };
 const intendedFailure = Boolean(reasons[name]) && stderr === `${reasons[name]}\n`;
 if (+code === 0 && stderr === '' && passes.length === 1 && lines.at(-1) === `PASS ${mode}`) console.log('PASS');
 else if (+code !== 0 && passes.length === 0 && stderr.trim().split('\n').length === 1 && stderr.trim() && intendedFailure) console.log('FAIL');
@@ -161,7 +170,7 @@ JS
   printf 'STEP %s %s expected=%s got=%s ok\n' "$number" "$name" "$expected" "$got"
 }
 gate() { step "$1" "$2" "$3" "$4" --context "$context" --namespace "$namespace" "${@:5}"; }
-snapshot_service() { k get service observed-state-producer --show-managed-fields -o json >"$proof_dir/snapshot.json"; }
+snapshot_service() { k get service observed-state-producer --show-managed-fields -o json >"$proof_dir/${1:-snapshot}.json"; }
 snapshot_deployment() { k get deployment ok-console --show-managed-fields -o json >"$proof_dir/deployment-snapshot.json"; }
 apply_fixture() { k apply --server-side --force-conflicts=false --field-manager="$1" -f "$proof_dir/$2.json" -o json >"$proof_dir/setup-$2.json"; }
 reset_service() {
@@ -197,6 +206,28 @@ reset_service
 gate 4 readopt PASS ownership-adopt --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/adopt.json" --apply
 snapshot_service
 gate 4 over-release FAIL ownership-release --snapshot "$proof_dir/snapshot.json" --selected "$proof_dir/selected.json" --artifact "$proof_dir/over-release.json" --manager ok-172-live
+reset_service
+snapshot_service stale-snapshot
+fixture handover stale
+rv_before="$(k get service observed-state-producer -o jsonpath='{.metadata.resourceVersion}')"
+k label service observed-state-producer handover-stale=present --field-manager=foreign >"$proof_dir/stale-label.log"
+rv_after="$(k get service observed-state-producer -o jsonpath='{.metadata.resourceVersion}')"
+if [[ -z "$rv_before" || -z "$rv_after" || "$rv_before" == "$rv_after" ]]; then
+  echo 'stale fixture did not advance resourceVersion' >&2; exit 1
+fi
+snapshot_service stale-before-release
+gate 4 stale-release FAIL ownership-release --snapshot "$proof_dir/stale-snapshot.json" --selected "$proof_dir/stale-selected.json" --artifact "$proof_dir/handover.json" --manager ok-173-breakglass --apply
+snapshot_service stale-after-release
+cmp "$proof_dir/stale-before-release.json" "$proof_dir/stale-after-release.json"
+
+reset_service
+apply_fixture ok-173-breakglass exclusive-service
+snapshot_service exclusive-snapshot
+fixture handover exclusive
+gate 4 exclusive-release FAIL ownership-release --snapshot "$proof_dir/exclusive-snapshot.json" --selected "$proof_dir/exclusive-selected.json" --artifact "$proof_dir/handover.json" --manager ok-173-breakglass
+snapshot_service exclusive-after-release
+cmp "$proof_dir/exclusive-snapshot.json" "$proof_dir/exclusive-after-release.json"
+reset_service
 snapshot_deployment
 fixture admission
 # Retain the real CLI diagnostics so rejection fixtures can be checked against the producer.

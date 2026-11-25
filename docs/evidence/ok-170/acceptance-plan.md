@@ -1,6 +1,6 @@
 # OK-170 acceptance plan: Scope C
 
-> **Planning record, not an execution approval.** Step 4 as a whole, including its read-only inventory, runs only in a window Arash has explicitly approved. Each live write needs Arash's explicit approval: deploy C1, deploy P1 and fail-closed abort. Steps 1, 4 and 5 remain open; completed disposable-cluster work grants no ok-shared execution authority.
+> **Planning record, not an execution approval.** Step 4 as a whole, including its read-only inventory, runs only in a window Arash has explicitly approved. Each live write needs Arash's explicit approval: Service ownership handover H and its undo, deploy C1, deploy P1 and fail-closed abort. Steps 1, 4 and 5 remain open; completed disposable-cluster work grants no ok-shared execution authority.
 
 ## Candidate and rollback pairs
 
@@ -23,7 +23,7 @@ Caps exclude review time; at a cap or failed exit, stop and report. One review r
 | 1 | Build C1, C1-R and P1 once after the prerequisite PRs merge; record digests, platform-child digests and provenance | 20 min | Digests and source revisions recorded for all three | Open: C1 PRs merged; publication needs separate approval (decision 1 of OK-170 comment 15421) |
 | 2 | Gate-tooling proof on disposable kind v1.34.1: ownership, permission, admission with real server-side apply adopt/release/conflict and one expected rejection | 60 min | Each check passes its positive and fails its invalid-input case | Done off-cluster, #145 |
 | 3 | Disposable C1/P1 drills: invalid trust, producer down, stale and partial data, rollback and forward, cleanup | 70 min | Baseline/fault/recovery per drill; stale items Unknown end to end | Done off-cluster on locally built C1/P1; results below |
-| 4 | ok-shared: read-only inventory, deploy C1/P1, image ID check, four authenticated read-only views, mutations confirmed disabled; fail-closed abort withdraws the producer route and Console serves its bounded 503 | Within the ≤2 h window | Image IDs match; views show producer data with observation times | Needs Arash's explicit approval of the hashed package and a dated window |
+| 4 | ok-shared: pre-H read-only inventory and admission, recorded live GO for Service ownership handover H and its undo, H, post-H admission, deploy C1/P1, image ID check, four authenticated read-only views, mutations confirmed disabled; fail-closed abort withdraws the producer route and Console serves its bounded 503 | Within the ≤2 h window | Image IDs match; views show producer data with observation times | Needs Arash's explicit advance approval of the hashed packages and dated window, and recorded in-window GO after pre-H G0 passes and before the H dry-run |
 | 5 | One evidence record and disposition (GO / REVISE / STOP) | 30 min | Disposition recorded | Open |
 
 Live work fits the proposed UTC window of at most 2 h ([procedure](maintenance-procedure.md)); building, the disposable rehearsal and the G0 package come first and are not part of the window. Window and owners are deferred (decision 6 of OK-170 comment 15421).
@@ -72,19 +72,20 @@ AC text remains in Jira; numbers and short topics below identify it without repr
 
 ## Deferred-risk register
 
-R1-R9 here are the Scope C register; the R-numbered sections of the maintenance procedure and of earlier review comments use their own numbering.
+R1-R10 here are the Scope C register; the R-numbered sections of the maintenance procedure and of earlier review comments use their own numbering.
 
 | Risk | Current state | Revisit |
 | --- | --- | --- |
 | R1 | Live rollback to the freshness-unaware C0/P0 would show stale data as Current (Drill 5); decision 3(b) allows it only while withdrawn fail-closed | Disposable-cluster proof first; any other serving pair needs freshness qualification |
 | R2 | Live trust/outage drills are not run on ok-shared; AC5/AC8 negatives shown on disposable clusters | Separate live drill window |
 | R3 | decision D8 breakglass not executed | Its own approval |
-| R4 | D10 uses `ok-172-live` for deployment and recovery. The [maintenance procedure](maintenance-procedure.md#phase-0--read-only-pre-flight-and-ownership-handover-g0) defines the scoped Service handover before withdrawal admission. #145 supplies the gates. | STOP and report if the non-forced dry-run or ownership inventory is not clean |
+| R4 | The DRI approved Option A, the producer Service ownership handover H, as the approach in OK-170 comment 15439. Live execution requires separate approval. D10 uses `ok-172-live` for deployment and recovery. The [maintenance procedure](maintenance-procedure.md#phase-0--read-only-pre-flight-and-ownership-handover-g0) defines the scoped Service handover before withdrawal admission. #145 supplies the gates. | STOP and report if the non-forced dry-run or ownership inventory is not clean |
 | R5 | D6: the live dry-run URL value is tracked in the ok-shared-live overlay, unchanged; no live change yet | Windowed dry-run in the G0 package |
 | R6 | OIDC on the deployed BFF is not shown (AC4) | Procedure phase 2; adverse tokens through the isolated protocol setup, no realm/key/client edits (decision 4(a)) |
 | R7 | Stale wording implying current state addressed in #143 | Listed follow-ups: deploy wizard and Capabilities catalog wording, envelope generation-time field, non-Chromium browsers and macOS |
 | R8 | Failed local login uncounted on throttle lock timeout addressed in #142 (fails closed) | Listed follow-ups: row retention, further SQLSTATE classes, multi-pod/CNPG verification |
 | R9 | Shared CA issues Console identity to any Certificate writer | OK-210 |
+| R10 | `overlays/ok-shared-breakglass` still renders the producer Service. A breakglass apply after the freeze release can restore co-ownership. | After the window, the OK-173 owner removes the Service from that overlay or accepts re-co-ownership and plans to re-run H in the next approved window. |
 
 ## Decisions for Arash
 
@@ -101,7 +102,7 @@ Recorded decisions, not new execution approvals:
 | D7 | Not required |
 | D8 | Only as a separately approved bounded exercise |
 | D9 | Yes; window after the event, needs sign-off |
-| D10 | Prefer ok-172-live (option b) only if the non-forced server-side dry-run and the managedFields ownership inventory are clean; otherwise STOP and report. Never force; never switch silently to ok-170-acceptance (OK-170 comment 15421) |
+| D10 | Prefer ok-172-live (option b) only if the non-forced server-side dry-run and the managedFields ownership inventory are clean; otherwise STOP and report. For the producer Service, Option A (H) is the approved approach for enabling withdrawal admission, with separate live approval and recorded in-window GO (OK-170 comment 15439). Never force; never switch silently to ok-170-acceptance (OK-170 comment 15421) |
 
 ## Evidence and redaction
 

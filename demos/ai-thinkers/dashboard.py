@@ -96,7 +96,7 @@ function render(data){
  const es=data.events||[];const kinds=new Set(es.map(e=>e.event));
  $('count').textContent=String(data.total);
  const enabled=es.find(e=>e.event==='HOTL_ENABLED');
- $('mode').textContent=enabled?(enabled.mode==='one-shot'?'ONE SHOT':'WATCH MODE'):'NOT ENABLED';
+ $('mode').textContent=enabled?(enabled.mode==='one-shot'?'ONE SHOT':enabled.mode==='always'?'ALWAYS':'WATCH MODE'):'NOT ENABLED';
  let result='AWAITING DRIFT',klass='amber';
  if(kinds.has('HOTL_RECOVERY_VERIFIED')){result='READY VERIFIED';klass='green'}
  if(kinds.has('HOTL_FAILED_CLOSED')){result='FAIL CLOSED';klass='amber'}

@@ -93,7 +93,12 @@ const $=id=>document.getElementById(id);
 const names=['HOTL_ENABLED','DRIFT_CONFIRMED','AI_PROPOSAL','HOTL_EXECUTED','HOTL_RECOVERY_VERIFIED'];
 const title=e=>e.replaceAll('_',' ');
 function render(data){
- const es=data.events||[];const kinds=new Set(es.map(e=>e.event));
+ const es=data.events||[];
+ // In continuous mode each new confirmed drift begins a fresh recovery attempt.
+ // An earlier READY_VERIFIED must not certify the new attempt.
+ const lastDrift=es.findLastIndex(e=>e.event==='DRIFT_CONFIRMED');
+ const current=lastDrift<0?es:[...es.filter(e=>e.event==='HOTL_ENABLED').slice(-1),...es.slice(lastDrift)];
+ const kinds=new Set(current.map(e=>e.event));
  $('count').textContent=String(data.total);
  const enabled=es.find(e=>e.event==='HOTL_ENABLED');
  $('mode').textContent=enabled?(enabled.mode==='one-shot'?'ONE SHOT':enabled.mode==='always'?'ALWAYS':'WATCH MODE'):'NOT ENABLED';

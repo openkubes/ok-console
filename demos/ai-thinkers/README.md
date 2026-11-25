@@ -10,7 +10,7 @@
 - Fails closed on unexpected output, missing service, concurrent changes or unsuccessful verification.
 - Logs HOTL-specific events into `ai-thinkers-evidence.jsonl`. This is **not cryptographically authenticated or independently verified evidence**. The read-back verification uses the same executor credentials and process.
 - No production namespaces, generic remediation, background agents, or automatic cleanup. HOTL opt-in grants permission for the whole running process; Ctrl-C prevents future actions, but cannot cancel a submitted Kubernetes API request.
-- Unlike the original HITL demo, this performs an automated one-shot action; **do not** confuse it with the W-JAX `make wjax-demo-verify` mechanism, which requires explicit HUMAN_APPROVED evidence.
+- Unlike the original HITL demo, this performs a strictly scoped automated action; **do not** confuse it with the W-JAX `make wjax-demo-verify` mechanism, which requires explicit HUMAN_APPROVED evidence.
 
 ## Before the demo
 
@@ -26,6 +26,16 @@ curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
 ```
 
 **The runtime path above is an example from the 25 November session; use your actual active runtime.** Ensure the existing Deployment is healthy at 2/2. The original browser UI at port 8788 is still the HITL demo; it is *not* the HOTL supervisor UI.
+
+## Modes: one-shot vs continuous
+
+Choose exactly one flag: `--once` for one verified recovery then exit, or `--always` to continuously watch for *new* confirmed drift events. Both require `--enable-hotl` and explicit `AI_THINKERS_HOTL=I_ACCEPT_LOCAL_KIND_ONLY` consent. `--always` holds the same runtime lock, never retries a drift generation already handled, and **exits fail closed on any error**, including an LLM or verification failure. It does not have an autonomy budget, cooldown, maintenance detection, automatic backoff, or independent verification; use only on the disposable local kind lab. Stop the foreground process using Ctrl-C to prevent future attempts (an in-flight patch cannot be revoked).
+
+```bash
+# Choose this INSTEAD of --once to remain watching for later drift:
+python3 demos/ai-thinkers/hotl.py --enable-hotl --always \
+  --runtime-dir "$WJAX_DEMO_RUNTIME_DIR"
+```
 
 ## Show HOTL in two terminals
 

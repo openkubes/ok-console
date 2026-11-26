@@ -13,9 +13,9 @@ Approved sequence (OK-170 comment 15421): (a) prerequisite PRs reviewed; (b) bui
 | Input | Required contract |
 |---|---|
 | Approval | Arash decides GO/NO-GO at every gate and approves the frozen pair, the hashed G0 package and the window. No implicit window extension. |
-| Window and owners | Deferred (decision 6). After the PRs, digests/provenance, hashed manifests and rehearsal evidence are ready, propose: a UTC window of at most 2 h; operator, recovery owner, DB owner, Keycloak owner (one mapped and one unmapped test identity) and an independent observer who reviews the AC4/AC10 evidence. Names: (set at G0). |
+| Window and owners | Deferred (decision 6). After the PRs, digests/provenance, hashed manifests and rehearsal evidence are ready, propose: a UTC window of at most 2 h; operator, recovery owner, DB owner, Keycloak owner (one mapped and one unmapped test identity) and an independent observer who reviews the AC4/AC10 evidence. Names: (set at G0). `ok-173-breakglass` writer owner: (set at G0). |
 | Announcement | Announced maintenance on shared dev Console; no private route exists. Keep the Ingress present. All Console users may lose views or need to sign in again. Operator and observer keep Kubernetes API access for recovery. |
-| Writer freeze | OK-172 owners freeze all other writers from artifact hashing through final handoff: ok-172-live promotions/verifier runs, ok-173-breakglass, ok-170-preview and kubectl-set users. Missing freeze blocks G0; any movement after hashing requires revalidation and re-hashing. |
+| Writer freeze | OK-172 owners freeze all other writers from artifact hashing through freeze release (4.4): ok-172-live promotions/verifier runs, ok-173-breakglass, ok-170-preview and kubectl-set users. The sole ok-173-breakglass exemptions are H and its approved undo on the producer Service, executed by the named operator under `ok-shared-admin@ok-shared` with advance consent from the ok-173-breakglass writer owner (set at G0). Missing freeze or consent blocks G0; any movement after hashing requires revalidation and re-hashing. |
 | Pair | C1/C1-R/P1 below. Only the immutable signed digests and attestations from the protected workflows fix the release identity. No manual push, no source substitution; any rebuild is a new candidate. |
 | Rollback | Decision 3(b): C0/P0 is used only while the Console is withdrawn fail-closed, so stale data is never served as Current. C0/P0 is not an authorized serving state. Return to verified C1/P1 on GO; otherwise remain withdrawn until an explicitly approved safe recovery. Proven on a disposable cluster first. |
 | Identifiers | Same-epoch upgrade: C1 keeps E0/A0. Every later transition takes an unused value from the [identifier ledger](#identifier-ledger). |
@@ -59,15 +59,16 @@ Namespace `openkubes-console`, overlay `overlays/ok-shared-live`. These deltas b
 | Deployment `ok-console` | Image C0 → C1 (pinned index digest). Env `OK_CONSOLE_DRY_RUN_URL` tracked in the overlay with its unchanged live value (D6). The live variable was added by `kubectl set env`, so the dry-run may show a position change: only the windowed dry-run decides, and an unapproved reorder stops. |
 | Deployment `observed-state-producer` | Image P0 → P1 (pinned index digest). |
 | ConfigMap `observed-state-producer-cluster-observations` | Field deltas from the approved G0 read only. The proposal's render expected removal of `ok-mgmt.profile` and three `revision` fields; live content is unverified, so repository content is not assumed to equal live. (set at G0) |
-| Unchanged | Migrations ConfigMap (the live init container runs only `006_*`; `005_local_identity.sql` is not in this overlay, so C1's compatibility with the live schema is shown in rehearsal), Service, Ingress, NetworkPolicies, RBAC, certificates. |
+| Service `observed-state-producer` | Step H releases only `ok-173-breakglass` field ownership; the approved undo restores it before deploy on abort. The Service values and generation are preserved by both gates. |
+| Unchanged | Migrations ConfigMap (the live init container runs only `006_*`; `005_local_identity.sql` is not in this overlay, so C1's compatibility with the live schema is shown in rehearsal), Ingress, NetworkPolicies, RBAC, certificates. |
 | Secrets | None created, modified, rotated or read by value; the render contains no Secret. Consumed as they exist: `ok-console-session`, `ok-console-local-access`, `ok-console-db-app`, `ok-console-db-ca`, `ok-console-oidc`, `ok-console-oidc-ca` and the cert-manager TLS secrets. |
 | Not touched | PKI and the ClusterIssuer, the shared Keycloak realm, keys and clients, the producer source contract, other namespaces. |
 
-Withdrawal, rollback, forward and emergency artifacts each carry their own reviewed delta in the G0 package.
+Withdrawal, rollback, forward and emergency artifacts each carry their own reviewed delta in the G0 package. Record the managedFields deltas for H and its undo separately from the verifier's value deltas.
 
 ## Baseline facts (read-only inspection, 2026-10-22)
 
-G0 compares these with the approved artifacts; drift stops execution.
+The 2026-10-22 facts are planning inputs. G0 compares current state with the approved artifacts; drift stops execution.
 
 | Fact | Verified value / source |
 |---|---|
@@ -92,15 +93,17 @@ G0 compares these with the approved artifacts; drift stops execution.
 
 ## Reviewed artifacts and change mechanism
 
-Every change is a non-forced server-side apply of a reviewed, SHA-256-bound per-object artifact rendered from the repository: `k apply --server-side --field-manager="$PROCEDURE_MANAGER" -f "$ARTIFACT"`. No imperative edits, Ingress deletion, database locks or deletes, and no full overlay apply. Apply only the objects with a non-empty approved delta; the exact file set is fixed in the G0 package.
+Every change is a non-forced server-side apply of a reviewed, SHA-256-bound per-object artifact. Render the artifacts from the repository and prepare the identity-only H artifact as specified below. The default command is `k apply --server-side --field-manager="$PROCEDURE_MANAGER" -f "$ARTIFACT"`. No imperative edits, Ingress deletion, database locks or deletes, and no full overlay apply. Apply only the objects with a non-empty approved delta, including the managedFields-only deltas for H and its undo. The exact file set is fixed in the G0 package.
 
-**Field manager (D10, decision 5):** `PROCEDURE_MANAGER=ok-172-live`, only if the non-forced server-side dry-run and the managedFields ownership inventory show it applies the exact reviewed artifacts without conflict or unapproved ownership adoption. Otherwise STOP and report. Never use `--force-conflicts`, never adopt or release ownership, and never switch silently to `ok-170-acceptance`; that path needs a new explicit decision and its own reviewed procedure. This holds for every artifact below, including withdrawal and Recovery E. The 2026-10-22 baseline shows the producer Service selector co-owned by ok-173-breakglass, so a selector change under ok-172-live may conflict; the G0 dry-run decides, and a conflict means STOP.
+**Field manager (D10, decision 5).** Use `PROCEDURE_MANAGER=ok-172-live` for deployment, withdrawal, restoration and Recovery E only when non-forced server-side dry-run and the managedFields inventory show clean admission of the exact reviewed artifacts. Otherwise STOP and report. Only `ok-173-breakglass` may release ownership, through `ownership-release` in step H. The approved undo uses `ownership-adopt` under the same manager solely to restore the reviewed pre-H co-ownership. Never use `--force-conflicts`, adopt ownership outside the approved undo, or switch managers silently. `ok-170-acceptance` requires a new explicit decision and its own reviewed procedure.
 
 | Artifact variable | Exact approved contents |
 |---|---|
 | `P1_MANIFEST`, `P0_MANIFEST` | Producer Deployment only; P1 or the recorded P0 image, unchanged configuration. Skip an apply only if already identical. |
 | `C1_UPGRADE` | Console Deployment and the cluster-observations ConfigMap per the change inventory; C1 at E0/A0. |
-| `WITHDRAW`, `WITHDRAW_RESTORE` | Fail-closed withdrawal as in the acceptance plan: the producer route is withdrawn and the Console serves its bounded 503. Producer Service only: zero-match selector `openkubes.io/ok170-fault=unavailable` / original selector, preserving Service identity and ports. The 2026-10-22 baseline shows `.spec.selector` co-owned by `ok-173-breakglass` and `ok-172-live`, so a non-forced `ok-172-live` apply of `WITHDRAW` may conflict. G0 must show `WITHDRAW` and `WITHDRAW_RESTORE` admitting cleanly; on a conflict, STOP and report (decision 5). Rollback (b) is then unavailable until a separately approved ownership change. |
+| `HANDOVER_ARTIFACT` | Identity-only Service JSON containing exactly `apiVersion: v1`, `kind: Service` and `metadata` with `name: observed-state-producer` and `namespace: openkubes-console`. Bind it by SHA-256 in the hashed G0 package. |
+| `HANDOVER_UNDO_ARTIFACT` | The reviewed per-object Service JSON extracted from the `overlays/ok-shared-breakglass` render (set at G0). Bind the exact artifact by SHA-256 in the hashed G0 package. |
+| `WITHDRAW`, `WITHDRAW_RESTORE` | Fail-closed withdrawal as in the acceptance plan: the producer route is withdrawn and the Console serves its bounded 503. Producer Service only: zero-match selector `openkubes.io/ok170-fault=unavailable` / original selector, preserving Service identity and ports. After H and its post-handover check, G0 must show both artifacts admitting cleanly under `ok-172-live` without force. On conflict, STOP and report (decision 5). Rollback (b) stays unavailable until admission passes. |
 | `C0_ROLLBACK`, `C1_FORWARD` | Console Deployment only; C0 at the ledger's rollback row, then C1 at the forward row. |
 | `EMERGENCY_P_MANIFEST`, `EMERGENCY_C_MANIFEST` | P1 / C1 at the emergency row (later emergencies use retry rows); retain keys, schema, data and audit. C0/P0 only while withdrawn. |
 | `SAME_EPOCH_CONTROL`, `SAME_EPOCH_RESTORE` | Console Deployment only; current pair, epoch, authorization revision and profile, changing only the Pod-template annotation `openkubes.io/ok170-rollout-control`. Preserve kubectl-rollout-owned `kubectl.kubernetes.io/restartedAt`. |
@@ -108,11 +111,24 @@ Every change is a non-forced server-side apply of a reviewed, SHA-256-bound per-
 
 **Read-only verification:** use `deploy/kubernetes/verify-ok-shared-readonly.sh <approved-package-dir> <new-output-dir>`. It is fixed to context `ok-shared-admin@ok-shared`, never applies and never forces. It renders and lints the overlay (`OK170_OVERLAY` selects a reviewed transition overlay), runs a non-forced server-side dry-run of each admitted object and requires its delta to equal `deltas.json`, checks the managedFields inventory against `allowlist.json` (exactly the admitted objects), checks non-admitted objects for drift, runs the `runtime-identity` mode of `ok170-gates.mjs` against `expected-images.json`, and writes `SHA256SUMS`. Each checkpoint gets its own approved package. Raw live objects stay in a private scratch directory that the verifier removes on exit; its output holds only rendered repository content and value-free gate results, so it may enter evidence after review. Do not use `deploy/kubernetes/verify-ok-shared-live.sh` for this procedure: it applies the whole overlay with `--force-conflicts`.
 
-## Phase 0 — read-only pre-flight; G0
+**Pre-window prerequisite.** Obtain separate approval for a read-only field-level capture on ok-shared, as for the 2026-11-23 producer Service read. Use the phase 0 `k` wrapper to capture `k get deployment/ok-console deployment/observed-state-producer configmap/observed-state-producer-cluster-observations ingress/ok-console --show-managed-fields -o json`. Keep raw objects private. Compare their `fieldsV1` paths, including both container images, with the proposed deltas to decide before the window whether the Service-only H is sufficient. STOP and report any ownership overlap that blocks a planned change.
 
-Obtain and verify kubectl **v1.34.1 before G0**, matching the observed server **v1.34.1**; absence blocks G0. All `k` commands assume approved cluster access and this wrapper:
+## Phase 0 — read-only pre-flight and ownership handover; G0
+
+Obtain and verify kubectl **v1.34.1 before G0**, matching the observed server **v1.34.1**. Absence blocks G0. Set `REVIEWED_CHECKOUT` to the absolute path of the reviewed checkout named by source revision in the G0 package. Record the SHA-256 of its `deploy/kubernetes/ok170-gates.mjs` in that package and set `GATE_SHA256` to the approved digest. Use the same shell for the following setup and all later blocks. The kuberc setting applies to both wrappers throughout the procedure.
 
 ```bash
+export KUBECTL_KUBERC=false
+GATE_SCRIPT="${REVIEWED_CHECKOUT:?Set the absolute path of the reviewed checkout}/deploy/kubernetes/ok170-gates.mjs"
+gate() {
+  local digest
+  digest=$(sha256sum <"$GATE_SCRIPT") || return 1
+  if [[ "${digest%% *}" != "${GATE_SHA256:?Set the approved gate SHA-256}" ]]; then
+    echo 'STOP: ok170-gates.mjs SHA-256 differs from the approved G0 package' >&2
+    return 1
+  fi
+  node "$GATE_SCRIPT" "$1" --context ok-shared-admin@ok-shared --namespace openkubes-console "${@:2}"
+}
 k() { kubectl --context ok-shared-admin@ok-shared -n openkubes-console "$@"; }
 kubectl version -o json
 kubectl config current-context
@@ -124,7 +140,7 @@ Stop on every unexpected command failure. No Secret values, value hashes, creden
 |---|---|---|
 | Q1 | `k get deployment ok-console observed-state-producer -o custom-columns='NAME:.metadata.name,GEN:.metadata.generation,OBS:.status.observedGeneration,DESIRED:.spec.replicas,UPDATED:.status.updatedReplicas,READY:.status.readyReplicas,AVAILABLE:.status.availableReplicas,IMAGE:.spec.template.spec.containers[*].image'` | Expected pair; observedGeneration equals generation; Console 2/2, producer 1/1. |
 | Q2 | `runtime-identity` through the verifier; at G0 against the C0/P0 digests recorded in the same read, after 1.2 against C1/P1 | Every running app Pod is owned by the current-revision ReplicaSet, Ready, and its imageID equals the approved platform-child digest; the Deployment is reread to catch a rollout between reads. No old, foreign or terminating app Pods. Init containers, including postgres-migrations, keep their separate pinned image. |
-| Q3 | Verifier dry-run, ownership inventory and drift check; Service and Ingress included | Delta equals the change inventory exactly; managers equal the allowlist; full env-name set below, no envFrom, mounts/security/strategy/initContainers preserved. Any other manager or path stops G0. |
+| Q3 | Verifier dry-run, ownership inventory and drift check; Service and Ingress included. Use the allowlist for the checkpoint and follow the admission order below. | Delta equals the change inventory exactly; managers match the allowlist and all required entries are present; full env-name set below, no envFrom, mounts/security/strategy/initContainers preserved. Any other manager or path stops G0. |
 | Q4 | `k get service observed-state-producer -o jsonpath='{.spec.selector}{"\n"}{.spec.clusterIP}{"\n"}'`; `k get endpointslices -l kubernetes.io/service-name=observed-state-producer -o json`; `k get pods -l openkubes.io/ok170-fault=unavailable -o name` | Approved selector/IP, one ready producer backend; the withdrawal selector matches zero Pods. Endpointslices are inspected for routing only. |
 | Q5 | `kubectl --context ok-shared-admin@ok-shared get ingress -A`; `kubectl --context ok-shared-admin@ok-shared -n ingress get service traefik -o jsonpath='{.spec.ports}{"\n"}{.status.loadBalancer}{"\n"}'` | Only the expected Console Ingress; route stays available throughout the window. |
 | Q6 | `k get certificates,cluster.postgresql.cnpg.io,pvc`; `k get resourcequota,limitrange,pdb,networkpolicy`; `kubectl --context ok-shared-admin@ok-shared get applications,applicationsets -A` | Dependencies healthy, surge capacity, reviewed policies, no unexpected reconciliation. Owner attests served leaf identities without reading TLS Secret data. |
@@ -158,9 +174,53 @@ done <<< "$RESOURCES"
 )
 ```
 
-**Admission at every gate:** non-forced `k apply --server-side --dry-run=server --field-manager=ok-172-live -f "$ARTIFACT" -o json` (through `ok170-gates.mjs admission` or the verifier) for every next artifact, its paired restoration, `WITHDRAW` and Recovery E. The full live-to-output diff must equal exactly the approved delta, including ordered env lists and omissions; exit zero alone is insufficient. Repeat after each phase against current ownership; an earlier pass does not carry over. Conflict or mismatch is NO-GO: STOP and report, never an imperative workaround.
+Before H, confirm that C1/C1-R/P1 are published and verified, the gate script and the handover, undo, rollback, withdrawal and recovery artifacts match their approved hashes, and the Keycloak route and callback are reachable. Confirm all decisions are in force, the window is announced and the independent observer is active.
 
-**G0** also requires: published, verified C1/C1-R/P1; hashed rollback, withdrawal and recovery artifacts; Keycloak route and callback reachable; all decisions in force; announcement; active independent observer.
+**G0 order.** Obtain Arash's advance approval of both hashed verifier packages and the dated UTC window. First run the pre-H package, with both producer Service Apply managers required and an empty Service value delta. Pass Q1–Q9 and every non-forced admission unaffected by H: `P1_MANIFEST`, `C1_UPGRADE`, their restorations, all Recovery E Deployment artifacts (including the two Console recovery renders), and the Ingress and ConfigMap checks. The pre-H package excludes `WITHDRAW`, `WITHDRAW_RESTORE` and the Recovery E admission sequence that depends on them. For a conflict on either Deployment, the Ingress or the ConfigMap, including a field co-owned by `ok-173-breakglass`, STOP and report before H. H is scoped to the producer Service.
+
+The live namespace sets PodSecurity `warn: restricted` in `deploy/kubernetes/overlays/ok-shared-live/namespace.yaml`. The gate fails closed on any admission warning. G0 admission of every Deployment artifact must be warning-free. On any warning, STOP and report.
+
+**Pre-H undo admission.** While both Service managers still own the approved fields, capture the Service and dry-run the approved undo artifact. Set `G0_SERVICE_SNAPSHOT` and `UNDO_DRY_RUN` to distinct files in private scratch.
+
+```bash
+k get service observed-state-producer --show-managed-fields -o json >"$G0_SERVICE_SNAPSHOT"
+k apply --server-side --dry-run=server --field-manager=ok-173-breakglass \
+  -f "$HANDOVER_UNDO_ARTIFACT" --show-managed-fields -o json >"$UNDO_DRY_RUN"
+```
+
+Require a warning-free dry-run response on the snapshot UID and resourceVersion. Compare `spec`, `data`, `binaryData`, `immutable` and metadata labels, annotations, finalizers and owner references as JSON, including presence and array order, and require zero value delta. The `fieldsV1` of the `ok-173-breakglass` v1 Apply entry with no subresource must exactly equal the snapshot's corresponding field set. A missing entry, mismatch, warning or command failure is a STOP before H. Remove both private files at closing.
+
+After pre-H G0 passes, record Arash's live GO for H and its undo in the window before the H dry-run. Run H, then run the post-H package. It requires `ok-172-live` as the sole producer Service owner and includes non-forced admission of `WITHDRAW`, `WITHDRAW_RESTORE` and Recovery E. Use the verifier for checkpoint renders and `gate admission` for additional per-object artifacts against their approved deltas. Advance only after post-H G0 passes and Arash gives GO.
+
+**H — CHANGES ok-shared (≤10 min).** Confirm the writer freeze and the recorded live GO. The hashed G0 package binds `RELEASE_SELECTED` (the release `selected.json`) and `UNDO_SELECTED`. Each is JSON keyed only by `Service/observed-state-producer`, with a `manager` and a `paths` array of token arrays (for example, `["f:spec","f:selector"]`). Both list every path in the reviewed pre-H `ok-173-breakglass` Apply field set. The release selects `ok-172-live` as the remaining owner and the undo selects `ok-173-breakglass` as the adopter. Include paths represented by leaf nodes or a `.` marker in `fieldsV1`, using Kubernetes field tokens including keyed-list tokens where present. The snapshot is one raw Service JSON object with managedFields, UID and resourceVersion. `HANDOVER_ARTIFACT` stays identity-only. The gate injects the snapshot resourceVersion into its request artifact when invoked with `--apply`.
+
+Run these commands in order, requiring each to pass before proceeding. `PRE_H_ALLOWLIST` and `POST_H_ALLOWLIST` are hashed Service-only allowlist JSON files keyed by `Service/observed-state-producer`. The pre-H list contains exactly `ok-172-live` and `ok-173-breakglass`, and the post-H list contains exactly `ok-172-live`. Each entry has `operation: "Apply"` and `required: true`, with no subresource. Write `PRE_H_SNAPSHOT` and, if needed, `UNDO_SNAPSHOT` to private scratch. Remove the raw snapshots at closing and retain only sanitized evidence.
+
+```bash
+gate ownership-inventory --allowlist "$PRE_H_ALLOWLIST"
+k get service observed-state-producer --show-managed-fields -o json >"$PRE_H_SNAPSHOT"
+```
+
+Require the fresh H snapshot to match the pre-H G0 snapshot in UID, resourceVersion, approved values and both Apply field sets. On mismatch, STOP before the release. Then run:
+
+```bash
+gate ownership-release --snapshot "$PRE_H_SNAPSHOT" --selected "$RELEASE_SELECTED" --artifact "$HANDOVER_ARTIFACT" --manager ok-173-breakglass
+gate ownership-release --snapshot "$PRE_H_SNAPSHOT" --selected "$RELEASE_SELECTED" --artifact "$HANDOVER_ARTIFACT" --manager ok-173-breakglass --apply
+gate ownership-inventory --allowlist "$POST_H_ALLOWLIST" --forbid-manager ok-173-breakglass
+```
+
+The release gate checks the exact field release, other owners, UID, values and generation. Repeat the post-H inventory command before subsequent admission while H is in effect. From H until freeze release (4.4), only the approved undo may apply this Service as `ok-173-breakglass`. Any mismatch or command failure means STOP and report.
+
+**Undo H — CHANGES ok-shared (≤10 min, before the first deploy apply at 1.2).** On an H gate failure, NO-GO at G0, or [global abort](#global-abort-and-evidence-boundary), STOP progression. If H may have applied, read the Service to determine whether ownership was released. If the pre-H state is still intact, use the pre-H closing package. If ownership was released on the same UID and the approved Service values and generation still hold, take a fresh private snapshot and run the approved undo below. The adoption gate requires the exact pre-H field set to be gained and preserves the remaining owner's field set, Service values, UID and generation. The undo restores the `WITHDRAW` conflict. If the state is uncertain, the undo cannot run within the approved window, or its result cannot be verified, keep the freeze and escalate to Arash.
+
+```bash
+k get service observed-state-producer --show-managed-fields -o json >"$UNDO_SNAPSHOT"
+gate ownership-adopt --snapshot "$UNDO_SNAPSHOT" --selected "$UNDO_SELECTED" --artifact "$HANDOVER_UNDO_ARTIFACT" --manager ok-173-breakglass
+gate ownership-adopt --snapshot "$UNDO_SNAPSHOT" --selected "$UNDO_SELECTED" --artifact "$HANDOVER_UNDO_ARTIFACT" --manager ok-173-breakglass --apply
+gate ownership-inventory --allowlist "$PRE_H_ALLOWLIST"
+```
+
+**Admission at every gate.** Through `ok170-gates.mjs admission` or the verifier, run a non-forced server-side dry-run as `ok-172-live` for every next artifact, its paired restoration, `WITHDRAW`, `WITHDRAW_RESTORE` and Recovery E, in the order above at G0. The full live-to-output diff must equal exactly the approved delta, including ordered env lists and omissions. Exit zero alone is insufficient. Repeat after each phase against current ownership. An earlier pass does not carry over. Conflict or mismatch is NO-GO. STOP and report. Imperative workarounds are prohibited.
 
 **Continuity at every step:** before and after each step, record generation and resourceVersion of the Console and producer Deployments, the producer Service, the cluster-observations ConfigMap and the Ingress. Any movement without a procedure apply stops progression. During an apply, record returned versions and attributed controller/status updates before the next checkpoint.
 
@@ -170,6 +230,7 @@ done <<< "$RESOURCES"
 |---|---|---|
 | Console rollout or epoch change | All Console users; intermittent auth during rollout; global sign-in again on an epoch change; PostgreSQL sessions, transactions and audit, with key/schema compatibility retained. | Initial ≤300 s; later ≤180 s each. |
 | Producer image or ConfigMap | Console is the only consumer; restart interrupts views. No Keycloak/DB change. | ≤180 s. |
+| H and its undo | Producer Service managedFields only. Verify the same Service UID, spec and labels. | Within the approved window. |
 | Withdrawal | Producer stays Ready but has no usable route; all views return the bounded 503. | Convergence ≤30 s; restore ≤120 s. |
 | Browser lifecycle | Test identities, Keycloak sessions and Console session/flow/audit/throttle state; no shared IdP edits. | ≤10 min; pending flow <300 s. |
 | Count-only DB inspection | Aggregate counts for retired epochs; no locks or row deletion. | DB owner approves query budget. |
@@ -245,7 +306,7 @@ Column/expiry contracts: `bff/security/postgres/001_console_sessions.sql:11-22`;
 | 4.1 | Count-only queries, fixed-header rejection and expiry timing. | Retired contexts rejected; unexpired counts reach zero after expiry. Unexpected count keeps evidence pending; no cleanup mutation. |
 | 4.2 | Repeat Q7; compare with the G0 name/UID/owner set. | Only attributed controller churn (Pod, ReplicaSet, CertificateRequest, CiliumEndpoint, Endpoints/EndpointSlice). Inventory equals G0 plus the approved changes. |
 | 4.3 | Repeat Q1–Q9, TLS/204 checks and final views; normal logout of all task sessions; wait the 300 s flow TTL. | C1/P1 stable at the final ledger value; route restored; unauthenticated reads 403/session 401. |
-| 4.4 closing | Before unfreezing, land a reviewed overlay aligned to the exit state (digests, active epoch/revision, profile, retained config); run the verifier against it with an empty delta. | Clean non-forced admission, ownership inventory and runtime identity. Never run `verify-ok-shared-live.sh`: it would force-apply the tracked overlay. Any failure keeps the freeze and escalates. On success OK-172 owners release the freeze. |
+| 4.4 closing | Before unfreezing, land a reviewed overlay aligned to the exit state (digests, active epoch/revision, profile, retained config) and run the verifier with an empty delta. On GO, use the post-H Service allowlist entry in the closing package. On abort before deploy, use the pre-H Service allowlist entry once H has been undone or confirmed unapplied. | Clean non-forced admission, ownership inventory and runtime identity. Never run `verify-ok-shared-live.sh`: it would force-apply the tracked overlay. Any failure keeps the freeze and escalates. On success OK-172 owners release the freeze. |
 
 Hash the complete sanitized record with `sha256sum docs/evidence/ok-170/*.json docs/evidence/ok-170/*.md` after closing evidence is captured.
 
@@ -255,15 +316,18 @@ Live fault controls (producer outage, stale threshold, trust hostname; acceptanc
 
 ## Global abort and evidence boundary
 
-Stop at approval/window/budget expiry, lost observer/recovery owner/API access, unexplained generation/resourceVersion movement, concurrent reconciliation, unapproved drift, unrelated degradation, readiness/quota/DB/audit/IdP failure, accepted invalid context, auth/TLS bypass, fixture fallback or unsafe output. Abort is fail-closed: apply `WITHDRAW`, then Recovery E for image/profile failure. A conflict stops the phase; never force or edit imperatively. Keep the Ingress present, announce impaired service and escalate failed recovery to Arash. Every termination routes through 4.4. Do not call service restored until pair, profile, health, auth and old-context denial are verified. Handoff state is C1/P1 on GO, or fail-closed withdrawal on NO-GO; any other pair needs freshness qualification and Arash's explicit approval.
+Stop at approval/window/budget expiry, lost observer/recovery owner/API access, unexplained generation/resourceVersion movement, concurrent reconciliation, unapproved drift, unrelated degradation, readiness/quota/DB/audit/IdP failure, accepted invalid context, auth/TLS bypass, fixture fallback or unsafe output. After deploy begins, abort is fail-closed: apply `WITHDRAW`, then Recovery E for image/profile failure. Before the first deploy apply at 1.2, follow the H undo on abort if H released ownership. A conflict stops the phase; never force or edit imperatively. Keep the Ingress present, announce impaired service and escalate failed recovery to Arash. Every termination routes through 4.4. For an abort before deploy, use the approved closing package for the observed exit state, with the pre-H ownership allowlist if H was undone or never applied. Do not call service restored until pair, profile, health, auth and old-context denial are verified. Handoff state is C1/P1 on GO, or fail-closed withdrawal on NO-GO after deploy begins; any other pair needs freshness qualification and Arash's explicit approval.
 
 Record UTC, step, approval, operator/observer, exact sanitized commands/status/error codes, manifest and package hashes, source/pair/profile, generations, owner chains, app imageIDs, the ledger, cookieSent and transactionCookieSent booleans, elapsed session/callback times, same-epoch controls, UI observations, recovery timing, aggregate retired-epoch counts and retained inventory. Preserve sanitized evidence with SHA-256 immediately. Never persist Secret values or hashes, tokens, cookies, CSRF, codes/state/nonce/PKCE, credential names, callback parameters, raw objects/logs, HAR, storage dumps or browser traces. No macOS access is available; Arash must verify macOS-only browser behavior.
 
 ## Scope of this procedure
 
-- **Applies to:** candidate C1/C1-R/P1, the same-epoch upgrade, rollback under decision 3(b), and field manager ok-172-live under decision 5.
-- **Shown in:** the recorded phase observations of a separately approved window; baseline facts are planning inputs from the 2026-10-22 read-only inspection.
-- **Follow-ups:** publication approval, digest pins, disposable rehearsal, the G0 package, window and owners, and AC4/AC10 evidence with independent review; open items stay in the [acceptance plan](acceptance-plan.md).
+- **Applies to:** candidate C1/C1-R/P1, the producer Service ownership handover, the same-epoch upgrade, rollback under decision 3(b), and field manager ok-172-live under decision 5.
+- **Shown in** the earlier disposable Talos Kubernetes v1.34.1 rehearsal, which used Service field ownership identical to the 2026-11-23 live managedFields read. The non-forced handover released `ok-173-breakglass` ownership and left the Service unchanged. `WITHDRAW` and `WITHDRAW_RESTORE` then admitted on the same UID. Re-applying the breakglass Service brought the conflict back. For the exact gate commands, retain the output of the [repository gate-proof script](../../../deploy/kubernetes/verify-gates-kind.sh), run through a kind-compatible adapter against an existing disposable Talos Kubernetes v1.34.1 cluster with the fixture namespace's PodSecurity set to `privileged`. That proof uses a fixture Service and covers the complete H and undo sequence, the stale resourceVersion and the exclusive-field rejection. Require the recorded `KIND-PROOF PASS` before citing the gate proof. Live execution evidence belongs to the recorded phase observations of a separately approved window.
+- **Follow-ups:** publication approval, digest pins, disposable rehearsal of the remaining procedure, the G0 package, window and owners, and AC4/AC10 evidence with independent review. After the window, the OK-173 owner removes the producer Service from `overlays/ok-shared-breakglass` or accepts re-co-ownership and plans to re-run H in the next approved window.
+  Make the pre-H undo check mechanical by requiring the `UNDO_SELECTED` paths to equal both the `RELEASE_SELECTED` paths and the `ok-173-breakglass` field set in the undo dry-run output.
+  The Deployment admission steps were shown with PodSecurity set to `privileged`. Verify them under the live namespace's `restricted` policy.
+  Open items stay in the [acceptance plan](acceptance-plan.md).
 
 ## C1 break-glass pin change
 
